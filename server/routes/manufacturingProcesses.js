@@ -3,6 +3,7 @@ const pool    = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
 const { nextMfgProcessNumber } = require('../services/seedLotCodeService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 const {
   findActiveBiscuitByProcess,
   applyMeasurements,
@@ -597,6 +598,7 @@ router.post('/processes', authenticate, async (req, res) => {
       `Process ${processNumber} started`);
 
     await client.query('COMMIT');
+    dispatchEvent('manufacturing.process.started', { id: process.id, process_number: processNumber, machine_id, process_type: normalised, module: 'manufacturing' });
     res.status(201).json({ process, process_number: processNumber });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -633,6 +635,7 @@ router.patch('/processes/:id/hold', authenticate, async (req, res) => {
       remarks || `Process ${proc.process_number} held`);
 
     await client.query('COMMIT');
+    dispatchEvent('manufacturing.process.held', { id: proc.id, process_number: proc.process_number, machine_id: proc.machine_id, module: 'manufacturing' });
     res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -673,6 +676,7 @@ router.patch('/processes/:id/resume', authenticate, async (req, res) => {
       remarks || `Process ${proc.process_number} resumed`);
 
     await client.query('COMMIT');
+    dispatchEvent('manufacturing.process.resumed', { id: proc.id, process_number: proc.process_number, machine_id: proc.machine_id, module: 'manufacturing' });
     res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -850,6 +854,7 @@ router.patch('/processes/:id/complete', authenticate, async (req, res) => {
       remarks || `Process ${proc.process_number} completed`);
 
     await client.query('COMMIT');
+    dispatchEvent('manufacturing.process.completed', { id: proc.id, process_number: proc.process_number, machine_id: proc.machine_id, process_type: proc.process_type, module: 'manufacturing' });
     res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -893,6 +898,7 @@ router.patch('/machines/:id/status', authenticate, async (req, res) => {
     await logMachineStatus(client, req.params.id, oldStatus, normalised, req.user.id, remarks || null);
 
     await client.query('COMMIT');
+    dispatchEvent('manufacturing.machine.status_changed', { id: parseInt(req.params.id), old_status: oldStatus, new_status: normalised, module: 'manufacturing' });
     res.json({ ok: true, old_status: oldStatus, new_status: normalised });
   } catch (err) {
     await client.query('ROLLBACK');

@@ -1,6 +1,7 @@
 const express = require('express');
 const pool    = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -138,6 +139,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
         ['active', 'inactive'].includes(status) ? status : 'active',
       ]
     );
+    dispatchEvent('asset_template.created', { id: r.rows[0].id, code: r.rows[0].code, name: r.rows[0].name, module: 'fixed_assets' });
     res.status(201).json(r.rows[0]);
   } catch (err) {
     if (err.code === '23505') {
@@ -177,6 +179,7 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
       params
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
+    dispatchEvent('asset_template.updated', { id: r.rows[0].id, code: r.rows[0].code, name: r.rows[0].name, module: 'fixed_assets' });
     res.json(r.rows[0]);
   } catch (err) {
     if (err.code === '23505') {
@@ -204,6 +207,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
       [req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
+    dispatchEvent('asset_template.deleted', { id: parseInt(req.params.id), module: 'fixed_assets' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

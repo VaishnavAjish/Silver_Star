@@ -1,6 +1,7 @@
 const express = require('express');
 const pool    = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -47,6 +48,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       [code, name, depreciation_rate_pct, depreciation_method || 'SLM', useful_life_years || null,
        gl_asset_account_id, gl_accum_depr_account_id, gl_depr_expense_account_id, status || 'active']
     );
+    dispatchEvent('fa_category.created', { id: result.rows[0].id, code, name, module: 'fixed_assets' });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Code already exists' });
@@ -68,6 +70,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
        status || 'active', req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
+    dispatchEvent('fa_category.updated', { id: result.rows[0].id, code: result.rows[0].code, name: result.rows[0].name, module: 'fixed_assets' });
     res.json(result.rows[0]);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[fixedAssetCategories.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
@@ -78,6 +81,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
       'DELETE FROM fixed_asset_categories WHERE id=$1 RETURNING id', [req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
+    dispatchEvent('fa_category.deleted', { id: parseInt(req.params.id), module: 'fixed_assets' });
     res.json({ success: true });
   } catch (err) {
     if (err.code === '23503') return res.status(409).json({ error: 'Cannot delete: referenced by assets or items' });

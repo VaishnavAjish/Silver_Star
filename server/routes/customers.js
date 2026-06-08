@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { getCustomerOpenInvoices } = require('../services/openDocumentService');
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 // Due-date days from invoice payment_term, aliased to `inv`
 const DUE_DAYS_SQL = `
@@ -282,6 +283,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     ]);
     await client.query('COMMIT');
     res.status(201).json(r.rows[0]);
+    dispatchEvent('customer.created', r.rows[0]).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Customer code already exists' });
@@ -322,6 +324,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
     ]);
     if (!r.rows.length) return res.status(404).json({ error: 'Customer not found' });
     res.json(r.rows[0]);
+    dispatchEvent('customer.updated', r.rows[0]).catch(() => {});
   } catch (err) {
     logger.error('PUT /api/customers/:id', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
@@ -343,6 +346,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     const r = await pool.query('DELETE FROM customers WHERE id = $1 RETURNING id', [customerId]);
     if (!r.rows.length) return res.status(404).json({ error: 'Customer not found' });
     res.json({ success: true });
+    dispatchEvent('customer.deleted', { id: customerId }).catch(() => {});
   } catch (err) {
     logger.error('DELETE /api/customers/:id', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });

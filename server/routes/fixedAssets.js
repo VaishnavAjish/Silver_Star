@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { calculateForAsset, projectSchedule } = require('../services/depreciationEngine');
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -307,6 +308,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 
     await client.query('COMMIT');
     res.status(201).json({ ...asset, purchase_note_id: pn.id, je_id: je.id, je_number: je.je_number });
+    dispatchEvent('asset.created', asset).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: err.message });
@@ -366,6 +368,7 @@ router.patch('/:id', authenticate, authorize('admin', 'operator'), async (req, r
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json({ ...result.rows[0], cost_locked: locked });
+    dispatchEvent('asset.updated', result.rows[0]).catch(() => {});
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[fixedAssets.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -469,6 +472,7 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
     await client.query('COMMIT');
     res.json({ success: true, je_number: je.je_number, gain_loss: gainOrLoss,
                nbv_at_disposal: nbv, proceeds });
+    dispatchEvent('asset.deleted', { id: parseInt(req.params.id) }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

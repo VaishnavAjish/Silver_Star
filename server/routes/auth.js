@@ -11,6 +11,7 @@ const { asyncWrap } = require('../middleware/errorHandler');
 const securityConfig = require('../config/security');
 const { logger } = require('../middleware/logger');
 const { encryptMFASecret, decryptMFASecret, isEncrypted } = require('../utils/mfaEncryption');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -149,6 +150,8 @@ router.post('/login', asyncWrap(async (req, res) => {
   // 6. Issue Tokens
   const token = await issueTokens(res, user);
 
+  dispatchEvent('user.login', { id: user.id, username: user.username, role: user.role, module: 'auth' });
+
   res.json({
     token,
     user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, email: user.email, mfaEnabled: user.mfa_enabled }
@@ -170,7 +173,7 @@ router.post('/mfa/setup', authenticate, asyncWrap(async (req, res) => {
   const encryptedSecret = encryptMFASecret(secret);
   
   // Store encrypted secret
-  await pool.query('UPDATE users SET mfa_secret = $1, mfa_secret_encrypted = $2 WHERE id = $3', [secret, encryptedSecret, user.id]);
+  await pool.query('UPDATE users SET mfa_secret = NULL, mfa_secret_encrypted = $1 WHERE id = $2', [encryptedSecret, user.id]);
   
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
   
@@ -256,6 +259,7 @@ router.post('/logout', asyncWrap(async (req, res) => {
   }
   const { maxAge: _maxAge, expires: _expires, ...clearOpts } = securityConfig.cookie;
   res.clearCookie('refreshToken', clearOpts);
+  dispatchEvent('user.logout', { module: 'auth' });
   res.json({ message: 'Logged out successfully' });
 }));
 
@@ -329,6 +333,7 @@ router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req,
      VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, full_name, role`,
     [username, email || null, hash, fullName || username, role || 'operator']
   );
+  dispatchEvent('user.registered', { id: result.rows[0].id, username: result.rows[0].username, role: result.rows[0].role, module: 'auth' });
   res.status(201).json(result.rows[0]);
 }));
 

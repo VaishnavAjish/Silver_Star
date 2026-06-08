@@ -50,7 +50,28 @@ if (missingEnv.length) {
   process.exit(1);
 }
 
-const { initSocket, getMetrics } = require('./services/socketService');
+const { initSocket, getIO, getMetrics } = require('./services/socketService');
+const { startPgNotifyListener, stopPgNotifyListener } = require('./services/pgNotifyListener');
+const { startPresenceTracking, stopPresenceTracking } = require('./services/presenceService');
+
+// ── Enterprise real-time bridge services (lazy-load wrappers) ──────────────────
+const BRIDGE_SERVICES = [
+  { name: 'RedisPubSub',     start: () => require('./services/redisPubSub').startRedisPubSub(),
+    stop:  () => require('./services/redisPubSub').stopRedisPubSub() },
+  { name: 'KafkaEventSink',  start: () => require('./services/kafkaEventSink').startKafkaEventSink(),
+    stop:  () => require('./services/kafkaEventSink').stopKafkaEventSink() },
+  { name: 'MqttBroker',      start: () => require('./services/mqttBroker').startMqttBroker(),
+    stop:  () => require('./services/mqttBroker').stopMqttBroker() },
+  { name: 'NatsClient',      start: () => require('./services/natsClient').startNatsClient(),
+    stop:  () => require('./services/natsClient').stopNatsClient() },
+  { name: 'FirebaseSync',    start: () => require('./services/firebaseSync').startFirebaseSync(),
+    stop:  () => require('./services/firebaseSync').stopFirebaseSync() },
+  { name: 'GraphQL',         start: () => { try { require('./graphql/schema').createSchema(); } catch {}
+                                          try { require('./graphql/subscriptions').bridgeFromDispatcher(); } catch {} },
+    stop:  () => {} },
+];
+
+let bridgeStoppers = [];
 
 // ── Create HTTP server and start listening ────────────────────────────────────
 const server = http.createServer(app);
@@ -59,6 +80,43 @@ const server = http.createServer(app);
 initSocket(server).catch(err => {
   console.error('[startup] Socket.IO init error:', err.message);
   // Non-fatal — app still works without real-time sync
+}).then(() => {
+  // Start PostgreSQL LISTEN/NOTIFY bridge (catches database-level changes)
+  startPgNotifyListener().catch(err => {
+    console.warn('[startup] PGNotify listener init error:', err.message);
+  });
+
+  // Start presence tracking (online user list broadcast)
+  startPresenceTracking();
+
+  // Start SignalR bridge for .NET clients
+  try {
+    const io = getIO();
+    if (io) require('./services/signalrBridge').startSignalrBridge(io);
+  } catch (err) {
+    console.warn('[startup] SignalR bridge init error:', err.message);
+  }
+
+  // ── Start all enterprise real-time bridge services ───────────────────────────
+  for (const svc of BRIDGE_SERVICES) {
+    svc.start().catch(err => {
+      console.warn(`[startup] ${svc.name} init error:`, err.message);
+    });
+  }
+
+  // Outbox auto-purge every hour — delete events older than 24 hours
+  setInterval(() => {
+    const pool = require('./db/pool');
+    pool.query("DELETE FROM sys_event_outbox WHERE created_at < NOW() - INTERVAL '24 hours'")
+      .then(r => {
+        if (r.rowCount > 0) {
+          require('./middleware/logger').logger.info('[Outbox] Purged old events', { count: r.rowCount });
+        }
+      })
+      .catch(err => {
+        require('./middleware/logger').logger.warn('[Outbox] Purge failed', { error: err.message });
+      });
+  }, 60 * 60 * 1000).unref();
 });
 
 // Keep-alive timeout > load-balancer timeout to prevent 502s (common AWS/nginx issue)
@@ -153,11 +211,17 @@ server.listen(PORT, () => {
 // ── Graceful shutdown — drain HTTP connections before exiting ─────────────────
 function gracefulShutdown(signal) {
   console.log(`\n[server] ${signal} received — shutting down gracefully...`);
+  // Stop all enterprise bridge services
+  for (const svc of BRIDGE_SERVICES) {
+    svc.stop().catch(() => {});
+  }
   server.close((err) => {
     if (err) {
       console.error('[server] Error during shutdown:', err.message);
       process.exit(1);
     }
+    stopPgNotifyListener();
+    stopPresenceTracking();
     dbShutdown().then(() => {
       console.log('[server] HTTP server and DB pools closed.');
       process.exit(0);

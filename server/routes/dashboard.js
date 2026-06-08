@@ -7,6 +7,7 @@ const { query, primaryPool } = require('../db/pool');
 const cache = require('../db/cache');
 const { addJob } = require('../services/queueService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 const { getInventoryValuation, round2 } = require('../services/inventoryAccounting');
 
 const CACHE_TTL = parseInt(process.env.DASHBOARD_TTL) || 30;
@@ -122,6 +123,7 @@ router.post('/', authenticate, async (req, res) => {
     }
     await client.query('COMMIT');
     cache.invalidate(`dashboard_config_${req.user.id}`);
+    dispatchEvent('dashboard.widget.updated', { user_id: req.user.id, module: 'dashboard' });
     res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');

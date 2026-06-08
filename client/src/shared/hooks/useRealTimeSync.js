@@ -169,5 +169,60 @@ export function useAdminSync(queryKey) {
   return useRealTimeSync(queryKey, 'room:admin', [
     'user.created', 'user.updated', 'user.deactivated',
     'role.created', 'role.updated', 'role.deleted',
+    'permission.changed',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to the accounts room.
+ */
+export function useAccountsSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:dashboard', [
+    'account.created', 'account.updated', 'account.deleted',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to vendor changes.
+ */
+export function useVendorsSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:purchase', [
+    'vendor.created', 'vendor.updated', 'vendor.deleted',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to customer changes.
+ */
+export function useCustomersSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:sales', [
+    'customer.created', 'customer.updated', 'customer.deleted',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to fixed asset changes.
+ */
+export function useAssetsSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:dashboard', [
+    'asset.created', 'asset.updated', 'asset.deleted',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to audit events.
+ */
+export function useAuditSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:audit', [
+    'audit.created', 'journal.created', 'journal.posted',
+  ]);
+}
+
+/**
+ * Convenience hook — subscribes to master data changes (items, locations, etc.).
+ */
+export function useMasterSync(queryKey) {
+  return useRealTimeSync(queryKey, 'room:inventory', [
+    'master.created', 'master.updated', 'master.deleted',
   ]);
 }

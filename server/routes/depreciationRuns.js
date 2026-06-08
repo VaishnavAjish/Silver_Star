@@ -2,6 +2,7 @@ const express = require('express');
 const pool    = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
+const { dispatchEvent } = require('../services/eventDispatcher');
 const { calculateForAsset } = require('../services/depreciationEngine');
 
 const router = express.Router();
@@ -161,6 +162,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     );
 
     await client.query('COMMIT');
+    dispatchEvent('depreciation.created', { id: run.id, run_number: runNumber, period_from, period_to, total_amount: totalAmt, module: 'fixed_assets' });
 
     res.status(201).json({
       ...run, je_id: je.id, je_number: je.je_number,
@@ -316,6 +318,7 @@ router.post('/:id/cancel', authenticate, authorize('admin'), async (req, res) =>
     });
 
     await client.query('COMMIT');
+    dispatchEvent('depreciation.cancelled', { id: run.id, run_number: run.run_number, module: 'fixed_assets' });
 
     res.json({ success: true, reversal_je_number: je.je_number });
   } catch (err) {

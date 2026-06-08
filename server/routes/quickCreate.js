@@ -11,6 +11,7 @@ const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -42,6 +43,7 @@ router.post('/vendors', authenticate, authorize('admin', 'operator'), async (req
     const account = acctResult.rows[0];
 
     await client.query('COMMIT');
+    dispatchEvent('vendor.created', { id: vendor.id, code: vendor.code, name: vendor.name, module: 'purchasing' });
     res.status(201).json({ ...vendor, account });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -81,6 +83,7 @@ router.post('/customers', authenticate, authorize('admin', 'operator'), async (r
     const account = acctResult.rows[0];
 
     await client.query('COMMIT');
+    dispatchEvent('customer.created', { id: customer.id, code: customer.code, name: customer.name, module: 'sales' });
     res.status(201).json({ ...customer, account });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -111,6 +114,7 @@ router.post('/accounts', authenticate, authorize('admin', 'operator'), async (re
        RETURNING id, code, name, type, sub_type`,
       [code, name, type, sub_type]
     );
+    dispatchEvent('account.created', { id: result.rows[0].id, code, name, type, sub_type, module: 'accounting' });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Account code or name already exists' });

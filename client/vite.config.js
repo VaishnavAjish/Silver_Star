@@ -28,6 +28,11 @@ export default defineConfig({
         cookieDomainRewrite: { '*': '' }, // strip cookie domain so browser keeps it for its own origin
         cookiePathRewrite: { '*': '/' },
       },
+      '/socket.io': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: false,
+        ws: true,
+      },
     },
     fs: { strict: false },
     watch: { usePolling: true },

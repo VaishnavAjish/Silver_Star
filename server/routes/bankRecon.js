@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -286,6 +287,7 @@ router.post('/save', authenticate, async (req, res) => {
 
     await client.query('COMMIT');
     res.json({ success: true, id: reconId });
+    dispatchEvent('recon.created', { id: reconId, account_id, statement_date, statement_balance }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     logger.error('[bankRecon /save]', { error: err.message, stack: err.stack });

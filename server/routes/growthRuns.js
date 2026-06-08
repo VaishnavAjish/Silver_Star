@@ -12,6 +12,7 @@ const pool    = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { applyMeasurements } = require('../services/growthRunService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -198,6 +199,7 @@ router.patch('/:id/measurements', authenticate, authorize('admin', 'operator'), 
 
     await client.query('COMMIT');
     res.json(updated);
+    dispatchEvent('batch.updated', { id, ...updated }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });

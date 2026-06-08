@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -268,6 +269,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
+    dispatchEvent('account.created', result.rows[0]).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') return res.status(409).json({ error: 'Account code already exists' });
@@ -351,6 +353,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
+    dispatchEvent('account.updated', result.rows[0]).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     res.status(400).json({ error: err.message });
@@ -377,6 +380,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     await client.query('DELETE FROM accounts WHERE id=$1', [req.params.id]);
     await client.query('COMMIT');
     res.json({ success: true });
+    dispatchEvent('account.deleted', { id: parseInt(req.params.id) }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     res.status(400).json({ error: err.message });

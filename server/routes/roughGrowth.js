@@ -4,6 +4,7 @@ const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { nextLotOpId } = require('../services/seedLotCodeService');
 const { findActiveBiscuitByProcess, applyMeasurements } = require('../services/growthRunService');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -483,6 +484,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     await client.query('COMMIT');
     res.status(201).json({ ...rg, growth_number: growthNumber, lines: insertedLines });
+    dispatchEvent('rough.created', { id: rg.id, growth_number: growthNumber, total_lots: totalLots, total_weight: totalWeight }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     require('fs').writeFileSync('rough_growth_error.log', err.stack);

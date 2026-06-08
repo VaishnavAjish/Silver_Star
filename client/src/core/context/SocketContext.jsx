@@ -19,13 +19,10 @@ const SocketContext = createContext(null);
 
 // Resolve backend URL — works for both Vite dev proxy and direct connections
 function resolveServerUrl() {
-  // In production (same origin), leave path-relative (backend serves both)
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  // Dev: backend is on :5000, frontend is on :5173
-  // Instead of hardcoding localhost, use the same hostname the user is currently visiting
-  if (import.meta.env.DEV) return `http://${window.location.hostname}:5001`;
-  // Prod: same origin
+  // In dev, route through the Vite proxy (/socket.io is proxied to 127.0.0.1:5001)
+  // so the browser never needs a direct connection to port 5001 from any IP.
   return window.location.origin;
 }
 

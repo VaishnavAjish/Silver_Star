@@ -101,7 +101,7 @@ function errorHandler(err, req, res, next) {
 
   if (status >= 500) {
     console.error(JSON.stringify(logEntry));
-    require('fs').writeFileSync('last_500_error.json', JSON.stringify(logEntry, null, 2));
+    require('fs').writeFile('last_500_error.json', JSON.stringify(logEntry, null, 2), () => {});
   } else if (status >= 400) {
     console.warn(JSON.stringify(logEntry));
   }

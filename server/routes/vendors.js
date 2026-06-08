@@ -19,6 +19,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { getVendorOpenBills } = require('../services/openDocumentService');
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -364,6 +365,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     cache.invalidatePrefix('vendor_list_');
     cache.invalidate('vendor_summary');
     res.status(201).json(r.rows[0]);
+    dispatchEvent('vendor.created', r.rows[0]).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Vendor code already exists' });
@@ -396,6 +398,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
     cache.invalidatePrefix('vendor_list_');
     cache.invalidate('vendor_summary');
     res.json(r.rows[0]);
+    dispatchEvent('vendor.updated', r.rows[0]).catch(() => {});
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Vendor code already exists' });
     logger.error('[vendors PUT /:id]', { error: err.message, stack: err.stack });
@@ -411,6 +414,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     cache.invalidatePrefix('vendor_list_');
     cache.invalidate('vendor_summary');
     res.json({ success: true, id: r.rows[0].id });
+    dispatchEvent('vendor.deleted', { id: parseInt(req.params.id) }).catch(() => {});
   } catch (err) {
     if (err.code === '23503') return res.status(409).json({ error: 'Cannot delete: vendor has existing transactions' });
     logger.error('[vendors DELETE /:id]', { error: err.message, stack: err.stack });

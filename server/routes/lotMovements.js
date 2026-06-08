@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { isSeedItem, nextMixLotCode, childSplitCode, nextSiblingCode, nextLotOpId } = require('../services/seedLotCodeService');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -360,6 +361,7 @@ router.post('/split', authenticate, authorize('admin', 'operator'), async (req, 
       parent_lot: parent.lot_number,
       children: createdLots,
     });
+    dispatchEvent('lot.split', { movement_id: mv.id, movement_number: movNum, parent_lot_id: parseInt(parent_lot_id), children: createdLots }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });
@@ -584,6 +586,7 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
         total_value: Math.round(totalVal * 100) / 100,
       },
     });
+    dispatchEvent('lot.merged', { movement_id: mv.id, movement_number: movNum, parent_lot_ids, child_lot_id: childInv.id, child_lot_number: childCode }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });

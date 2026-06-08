@@ -166,6 +166,7 @@ const searchRoutes = require('./routes/search');
 const quickCreateRoutes = require('./routes/quickCreate');
 const fixedAssetCatsRoutes = require('./routes/fixedAssetCategories');
 const jeAllocationsRoutes = require('./routes/jeAllocations');
+const sseRoutes = require('./routes/sse');
 const debugAccRoutes = require('./routes/debugAccounting');
 const jobRoutes = require('./routes/jobs');
 const stockTransferRoutes = require('./routes/stockTransfer');
@@ -269,6 +270,12 @@ app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
 
+// ── SSE (Server-Sent Events) Streaming ─────────────────────────────────────
+app.use('/api/sse', sseRoutes);
+
+// ── Metrics (admin only) ──────────────────────────────────────────────────
+app.use('/api/metrics', require('./routes/metrics'));
+
 // ── WebSocket Stats (authenticated) ──────────────────────────────────────────
 app.get('/api/ws/stats', authenticate, async (req, res) => {
   try {
@@ -292,6 +299,11 @@ app.post('/api/cache/flush', authenticate, async (req, res) => {
     res.status(500).json({ error: err.message, ok: false });
   }
 });
+
+// ── SignalR Bridge (authenticated) ──────────────────────────────────────────
+const { negotiateSignalR, handleSignalRMessage } = require('./services/signalrBridge');
+app.get('/api/signalr/negotiate', authenticate, negotiateSignalR);
+app.post('/api/signalr', authenticate, handleSignalRMessage);
 
 // ── Error Handler ────────────────────────────────────────────────────────
 const { errorHandler, notFound } = require('./middleware/errorHandler');

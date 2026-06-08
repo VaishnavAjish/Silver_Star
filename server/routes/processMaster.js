@@ -1,6 +1,7 @@
 const express  = require('express');
 const pool     = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -118,6 +119,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
         eligible_machine_type ? String(eligible_machine_type).trim() : null,
       ]
     );
+    dispatchEvent('process_master.created', { id: rows[0].id, process_code: rows[0].process_code, process_name: rows[0].process_name, module: 'manufacturing' });
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err.code === '23505')
@@ -206,6 +208,7 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
         parseInt(req.params.id),
       ]
     );
+    dispatchEvent('process_master.updated', { id: rows[0].id, process_code: rows[0].process_code, process_name: rows[0].process_name, module: 'manufacturing' });
     res.json(rows[0]);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[processMaster.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });

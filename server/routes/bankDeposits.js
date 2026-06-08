@@ -4,6 +4,7 @@ const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
@@ -203,6 +204,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     await client.query('UPDATE journal_entries SET source_id = $1 WHERE id = $2', [deposit.id, je.id]);
     await client.query('COMMIT');
+    dispatchEvent('bank_deposit.created', { id: deposit.id, doc_number: docNumber, total_amount: totalAmount, module: 'banking' });
 
     res.status(201).json({
       success: true, id: deposit.id, doc_number: docNumber, je_number: je.je_number,
@@ -291,6 +293,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
     }
 
     await client.query('COMMIT');
+    dispatchEvent('bank_deposit.updated', { id, module: 'banking' });
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -357,6 +360,7 @@ router.post('/:id/reverse', authenticate, authorize('admin', 'operator'), async 
     );
 
     await client.query('COMMIT');
+    dispatchEvent('bank_deposit.reversed', { id, reverse_je_id: reverseJE.id, module: 'banking' });
     res.json({ success: true, reverse_je_id: reverseJE.id, reverse_je_number: reverseJE.je_number });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -395,6 +399,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     // Cascade deletes lines via FK ON DELETE CASCADE
     await client.query('DELETE FROM bank_deposits WHERE id = $1', [id]);
     await client.query('COMMIT');
+    dispatchEvent('bank_deposit.deleted', { id, module: 'banking' });
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');

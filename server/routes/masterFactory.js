@@ -20,6 +20,7 @@ const pool     = require('../db/pool');
 const cache    = require('../db/cache');
 const { authenticate, authorize } = require('../middleware/auth');
 const { asyncWrap } = require('../middleware/errorHandler');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 const MASTER_TTL  = parseInt(process.env.MASTER_TTL || '60', 10);
 const MAX_LIMIT   = 2000;    // safety cap — never let a client fetch millions of rows
@@ -162,6 +163,7 @@ function createMasterRouter(tableName, config = {}) {
     );
 
     cache.invalidatePrefix(`master_${tableName}_`);
+    dispatchEvent('master.created', { id: result.rows[0].id, tableName, module: 'masters' });
     res.status(201).json(result.rows[0]);
   }));
 
@@ -186,6 +188,7 @@ function createMasterRouter(tableName, config = {}) {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Record not found.' });
 
     cache.invalidatePrefix(`master_${tableName}_`);
+    dispatchEvent('master.updated', { id, tableName, module: 'masters' });
     res.json(result.rows[0]);
   }));
 
@@ -201,6 +204,7 @@ function createMasterRouter(tableName, config = {}) {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Record not found.' });
 
     cache.invalidatePrefix(`master_${tableName}_`);
+    dispatchEvent('master.deleted', { id, tableName, module: 'masters' });
     res.json({ success: true, id: result.rows[0].id });
   }));
 
@@ -276,6 +280,7 @@ function createMasterRouter(tableName, config = {}) {
       }
 
       cache.invalidatePrefix(`master_${tableName}_`);
+      dispatchEvent('master.bulk_created', { tableName, total_rows: rows.length, inserted, skipped, module: 'masters' });
       res.json({ total_rows: rows.length, inserted, skipped, errors });
     })
   );

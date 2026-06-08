@@ -7,6 +7,7 @@ const {
   syncInvoiceStatus,
 } = require('../services/openDocumentService');
 const { logger } = require('../middleware/logger');
+const { dispatchEvent } = require('../services/eventDispatcher');
 
 // ─── GET / ── fetch allocations for a JE or entity ───────────────────────────
 // ?je_id=X                               — allocations for one JE
@@ -143,6 +144,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     }
 
     await client.query('COMMIT');
+    dispatchEvent('je_allocation.created', { je_id, allocation_count: created.length, module: 'accounting' });
     res.status(201).json({ allocations: created });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -178,6 +180,7 @@ router.delete('/by-je/:je_id', authenticate, authorize('admin'), async (req, res
     }
 
     await client.query('COMMIT');
+    dispatchEvent('je_allocation.deleted', { je_id: jeId, affected: affected.rows.length, module: 'accounting' });
     res.json({ success: true, affected: affected.rows.length });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -210,6 +213,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     if (alloc.target_type === 'invoice') await syncInvoiceStatus(alloc.target_id, client);
 
     await client.query('COMMIT');
+    dispatchEvent('je_allocation.deleted', { id: allocId, target_type: alloc.target_type, target_id: alloc.target_id, module: 'accounting' });
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
