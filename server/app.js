@@ -16,6 +16,7 @@ const { metricsMiddleware, metricsEndpoint } = require('./middleware/metrics');
 const { healthCheck } = require('./db/pool');
 const { authenticate } = require('./middleware/auth');
 const { initTelemetry, shutdownTelemetry } = require('./middleware/tracing');
+const { setRLSContext } = require('./middleware/rls');
 
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy to allow express-rate-limit to work behind Vite proxy
@@ -119,6 +120,19 @@ app.use((req, res, next) => {
 
 // ── Route Registrations ───────────────────────────────────────────────────
 const authRoutes = require('./routes/auth');
+
+// Auth routes FIRST (no auth required for login/register)
+app.use('/api/auth', authRoutes);
+
+// ── RLS Context Middleware (applies to authenticated routes needing row-level security) ────────────────
+// Apply to all other /api routes (skip auth routes which handle their own auth)
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth')) return next();
+  authenticate(req, res, (err) => {
+    if (err) return next(err);
+    setRLSContext(req, res, next);
+  });
+});
 const accountsRoutes = require('./routes/accounts');
 const journalRoutes = require('./routes/journalEntries');
 const dashboardRoutes = require('./routes/dashboard');
