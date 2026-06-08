@@ -99,9 +99,16 @@ initSocket(server).catch(err => {
 
   // ── Start all enterprise real-time bridge services ───────────────────────────
   for (const svc of BRIDGE_SERVICES) {
-    svc.start().catch(err => {
+    try {
+      const p = svc.start();
+      if (p && p.catch) {
+        p.catch(err => {
+          console.warn(`[startup] ${svc.name} init error:`, err.message);
+        });
+      }
+    } catch (err) {
       console.warn(`[startup] ${svc.name} init error:`, err.message);
-    });
+    }
   }
 
   // Outbox auto-purge every hour — delete events older than 24 hours
