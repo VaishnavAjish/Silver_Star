@@ -127,9 +127,11 @@ app.use('/api/auth', authRoutes);
 // ── RLS Context Middleware (applies to authenticated routes needing row-level security) ────────────────
 // Apply to all other /api routes (skip auth routes which handle their own auth)
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth')) return next();
+  if (req.path.startsWith('/auth')) { console.log('[MW] auth path, skipping'); return next(); }
+  console.log('[MW] authenticating path=' + req.path + ' hasAuth=' + !!req.headers.authorization);
   authenticate(req, res, (err) => {
-    if (err) return next(err);
+    if (err) { console.log('[MW] auth error=' + err); return next(err); }
+    console.log('[MW] auth success, calling setRLSContext for path=' + req.path);
     setRLSContext(req, res, next);
   });
 });

@@ -7,22 +7,19 @@ const pool = require('../db/pool');
  */
 
 async function setRLSContext(req, res, next) {
-  if (!req.user) return next();
+  if (!req.user) { return next(); }
 
   const client = await pool.primaryPool.connect();
   try {
-    // Set session variables for RLS policies
-    await client.query('SET LOCAL app.current_user_id = $1', [req.user.id]);
-    await client.query('SET LOCAL app.current_user_role = $1', [req.user.role]);
+    await client.query('SET LOCAL app.current_user_id = ' + parseInt(req.user.id));
+    await client.query("SET LOCAL app.current_user_role = '" + String(req.user.role).replace(/'/g, "''") + "'");
     
-    // Also set department_id if available
     if (req.user.departmentId) {
-      await client.query('SET LOCAL app.current_user_department_id = $1', [req.user.departmentId]);
+      await client.query('SET LOCAL app.current_user_department_id = ' + parseInt(req.user.departmentId));
     }
     
     next();
   } catch (err) {
-    // Don't block the request if RLS context fails - log and continue
     console.warn('[RLS] Failed to set session variables:', err.message);
     next();
   } finally {
