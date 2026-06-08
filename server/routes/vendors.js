@@ -1,0 +1,481 @@
+/**
+ * ─── Vendors Route ───────────────────────────────────────────────────────────
+ * Performance optimised for 100 Cr-scale data.
+ * • GET /summary   — cached 30 s (heaviest query in app)
+ * • GET /          — list cached 30 s per unique filter combo
+ * • POST / PUT / DELETE — bust vendor caches automatically
+ *
+ * ⚠ SQL logic is UNCHANGED from original. Only cache wrapping was added.
+ */
+
+'use strict';
+
+const express = require('express');
+const multer  = require('multer');
+const XLSX    = require('xlsx');
+const pool    = require('../db/pool');
+const cache   = require('../db/cache');
+const { authenticate, authorize } = require('../middleware/auth');
+const { getVendorOpenBills } = require('../services/openDocumentService');
+const { reserveCode } = require('../services/codeGeneratorService');
+const { logger } = require('../middleware/logger');
+
+const router = express.Router();
+
+// ─── Bulk-upload helpers ──────────────────────────────────────────────────────
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+function normalizeRow(row) {
+  const out = {};
+  Object.entries(row).forEach(([k, v]) => { out[String(k).trim().toLowerCase()] = String(v ?? '').trim(); });
+  return out;
+}
+function parseRows(file) {
+  const wb   = XLSX.read(file.buffer, { type: 'buffer', raw: false });
+  const name = wb.SheetNames[0];
+  if (!name) return [];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '', raw: false });
+}
+
+// Computes due-date offset in days from payment_term string e.g. '30 Days' → 30
+const DUE_DAYS_SQL = `
+  CASE WHEN pn.payment_term ~ '[0-9]'
+       THEN regexp_replace(pn.payment_term, '[^0-9]', '', 'g')::int
+       ELSE 0
+  END`;
+
+// ─── IMPORTANT: static/compound routes BEFORE /:id ───────────────────────────
+
+// GET /api/vendors/summary — cached 30 s
+router.get('/summary', authenticate, async (req, res) => {
+  try {
+    const data = await cache.get('vendor_summary', 30, async () => {
+      const r = await pool.query(`
+        SELECT
+          COALESCE(SUM(GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0)), 0) AS total_payables,
+          COALESCE(SUM(
+            CASE WHEN (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
+                 THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END
+          ), 0) AS overdue,
+          (SELECT COALESCE(SUM(amount), 0)
+             FROM payments
+            WHERE date >= CURRENT_DATE - INTERVAL '30 days') AS paid_last_30
+        FROM purchase_notes pn
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS total_paid
+          FROM payment_allocations
+          GROUP BY purchase_note_id
+        ) pa_agg ON pa_agg.purchase_note_id = pn.id
+        WHERE pn.payment_status != 'PAID' AND pn.status != 'cancelled'
+      `);
+      const row = r.rows[0] || {};
+      return {
+        total_payables: parseFloat(row.total_payables) || 0,
+        overdue:        parseFloat(row.overdue)        || 0,
+        paid_last_30:   parseFloat(row.paid_last_30)   || 0,
+      };
+    });
+    res.json(data);
+  } catch (err) {
+    logger.error('[vendors GET /summary]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/vendors/:id/transactions
+router.get('/:id/transactions', authenticate, async (req, res) => {
+  try {
+    const vendorId = parseInt(req.params.id);
+    if (!vendorId) return res.status(400).json({ error: 'Invalid vendor id' });
+
+    const [billsR, paysR, jeR] = await Promise.all([
+      pool.query(`
+        SELECT
+          pn.id,
+          pn.doc_date                                                                                     AS date,
+          'Bill'                                                                                          AS type,
+          pn.doc_number                                                                                   AS ref_no,
+          pn.item_type                                                                                    AS category,
+          pn.grand_total                                                                                  AS amount,
+          GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.je_allocated, 0), 0) AS balance,
+          COALESCE(pn.payment_status, 'UNPAID')                                                          AS status,
+          pn.je_id,
+          NULL::numeric AS net_effect
+        FROM purchase_notes pn
+        LEFT JOIN LATERAL (
+          SELECT SUM(amount) AS total_paid
+          FROM payment_allocations
+          WHERE purchase_note_id = pn.id
+        ) pa_agg ON true
+        LEFT JOIN LATERAL (
+          SELECT SUM(allocated_amount) AS je_allocated
+          FROM je_allocations
+          WHERE target_type = 'bill' AND target_id = pn.id
+        ) ja_agg ON true
+        WHERE pn.vendor_id = $1 AND pn.status != 'cancelled'
+        ORDER BY pn.doc_date DESC, pn.id DESC
+      `, [vendorId]),
+
+      pool.query(`
+        SELECT
+          p.id,
+          p.date,
+          'Payment'      AS type,
+          p.doc_number   AS ref_no,
+          p.payment_mode AS category,
+          p.amount,
+          0::numeric     AS balance,
+          p.status,
+          p.je_id,
+          NULL::numeric  AS net_effect
+        FROM payments p
+        WHERE p.vendor_id = $1
+        ORDER BY p.date DESC, p.id DESC
+      `, [vendorId]),
+
+      // JE adjustments tagged to this vendor via je_lines.entity_type/entity_id
+      pool.query(`
+        SELECT
+          jl.id,
+          je.date,
+          'JE Adjustment'                                    AS type,
+          je.je_number                                       AS ref_no,
+          COALESCE(jl.narration, je.description, '')         AS category,
+          ABS(jl.credit - jl.debit)                         AS amount,
+          0::numeric                                         AS balance,
+          je.status,
+          je.id                                              AS je_id,
+          (jl.credit - jl.debit)                            AS net_effect,
+          je.source_type                                     AS je_source_type,
+          EXISTS (
+            SELECT 1 FROM journal_entries rev
+            WHERE rev.source_type IN ('reversal','edit_reversal')
+              AND rev.source_id = je.id
+          )                                                  AS je_is_reversed
+        FROM je_lines jl
+        JOIN journal_entries je ON je.id = jl.je_id
+        WHERE jl.entity_type = 'vendor'
+          AND jl.entity_id = $1
+          AND je.status    = 'posted'
+        ORDER BY je.date DESC, je.id DESC
+      `, [vendorId]),
+    ]);
+
+    const all = [...billsR.rows, ...paysR.rows, ...jeR.rows].sort((a, b) => {
+      const d = new Date(b.date) - new Date(a.date);
+      return d !== 0 ? d : b.id - a.id;
+    });
+
+    const { limit = 100, offset = 0 } = req.query;
+    const paginated = all.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    res.json({ data: paginated, total: all.length });
+  } catch (err) {
+    logger.error('[vendors GET /:id/transactions]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/vendors (list with open balance) — cached 30 s ─────────────────
+router.get('/', authenticate, async (req, res) => {
+  try {
+    const { status, category, search, limit = 100, offset = 0 } = req.query;
+    const cacheKey = `vendor_list_${status || 'all'}_${category || 'all'}_${search || ''}_${limit}_${offset}`;
+
+    const data = await cache.get(cacheKey, 30, async () => {
+      const params = [];
+      const conds  = ['1=1'];
+
+      if (status)   { params.push(status);            conds.push(`v.status = $${params.length}`); }
+      if (category) { params.push(category);          conds.push(`v.category = $${params.length}`); }
+      if (search) {
+        params.push(`%${search}%`);
+        conds.push(`(v.name ILIKE $${params.length} OR v.code ILIKE $${params.length})`);
+      }
+      const where = conds.join(' AND ');
+
+      const countR = await pool.query(
+        `SELECT COUNT(v.id) FROM vendors v WHERE ${where}`, params
+      );
+      const total = parseInt(countR.rows[0].count);
+
+      params.push(parseInt(limit));  const lp = params.length;
+      params.push(parseInt(offset)); const op = params.length;
+
+      const result = await pool.query(`
+        WITH paginated_vendors AS (
+          SELECT * FROM vendors v
+          WHERE ${where}
+          ORDER BY v.name
+          LIMIT $${lp} OFFSET $${op}
+        ),
+        vendor_pns AS (
+          SELECT id, vendor_id, grand_total, doc_date, payment_term
+          FROM purchase_notes
+          WHERE status != 'cancelled' AND payment_status != 'PAID'
+            AND vendor_id IN (SELECT id FROM paginated_vendors)
+        ),
+        vendor_allocations AS (
+          SELECT pa.purchase_note_id, SUM(pa.amount) AS total_paid
+          FROM payment_allocations pa
+          JOIN vendor_pns pn ON pn.id = pa.purchase_note_id
+          GROUP BY pa.purchase_note_id
+        ),
+        vendor_balances AS (
+          SELECT
+            pn.vendor_id,
+            SUM(GREATEST(pn.grand_total - COALESCE(va.total_paid, 0), 0)) AS open_balance,
+            SUM(CASE WHEN (pn.doc_date + (
+              CASE pn.payment_term 
+                WHEN '7 Days' THEN 7 WHEN '15 Days' THEN 15 WHEN '30 Days' THEN 30
+                WHEN '45 Days' THEN 45 WHEN '60 Days' THEN 60 WHEN '90 Days' THEN 90 ELSE 0 END
+            )) < CURRENT_DATE
+                     THEN GREATEST(pn.grand_total - COALESCE(va.total_paid, 0), 0) ELSE 0 END) AS overdue_balance
+          FROM vendor_pns pn
+          LEFT JOIN vendor_allocations va ON va.purchase_note_id = pn.id
+          GROUP BY pn.vendor_id
+        )
+        SELECT
+          v.*,
+          COALESCE(b.open_balance,    0) AS open_balance,
+          COALESCE(b.overdue_balance, 0) AS overdue_balance
+        FROM paginated_vendors v
+        LEFT JOIN vendor_balances b ON b.vendor_id = v.id
+      `, params);
+
+      return { data: result.rows, total };
+    });
+
+    res.json(data);
+  } catch (err) {
+    logger.error('[vendors GET /]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/vendors/:id/open-bills ─────────────────────────────────────────
+router.get('/:id/open-bills', authenticate, async (req, res) => {
+  const vendorId    = parseInt(req.params.id, 10);
+  const excludeJeId = req.query.exclude_je_id ? parseInt(req.query.exclude_je_id, 10) : null;
+  if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor id' });
+  try {
+    const bills = await getVendorOpenBills(vendorId, undefined, excludeJeId || null);
+    res.json({ data: bills, total: bills.length });
+  } catch (err) {
+    logger.error('[vendors GET /:id/open-bills]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/vendors/:id ─────────────────────────────────────────────────────
+router.get('/:id', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        v.*,
+        COALESCE(b.open_balance,    0)                                      AS open_balance,
+        COALESCE(b.overdue_balance, 0)                                      AS overdue_balance,
+        b.last_payment_date,
+        COALESCE(je_adj.adjustment, 0)                                      AS je_adjustment,
+        COALESCE(b.open_balance, 0) + COALESCE(je_adj.adjustment, 0)       AS total_balance
+      FROM vendors v
+      LEFT JOIN (
+        SELECT
+          pn.vendor_id,
+          SUM(CASE WHEN pn.payment_status != 'PAID'
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END)    AS open_balance,
+          SUM(CASE WHEN pn.payment_status != 'PAID'
+                        AND (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END)    AS overdue_balance,
+          (SELECT MAX(p.date) FROM payments p WHERE p.vendor_id = pn.vendor_id) AS last_payment_date
+        FROM purchase_notes pn
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS total_paid
+          FROM payment_allocations
+          GROUP BY purchase_note_id
+        ) pa_agg ON pa_agg.purchase_note_id = pn.id
+        WHERE pn.status != 'cancelled' AND pn.vendor_id = $1 AND pn.payment_status != 'PAID'
+        GROUP BY pn.vendor_id
+      ) b ON b.vendor_id = v.id
+      LEFT JOIN (
+        SELECT
+          COALESCE(SUM(jl.credit - jl.debit), 0) +
+          COALESCE(
+            (SELECT SUM(ja.allocated_amount)
+             FROM   je_allocations ja
+             WHERE  ja.entity_type = 'vendor' AND ja.entity_id = $1),
+            0
+          ) AS adjustment
+        FROM   je_lines jl
+        JOIN   journal_entries je ON je.id = jl.je_id
+        WHERE  jl.entity_type = 'vendor'
+          AND  jl.entity_id   = $1
+          AND  je.status      = 'posted'
+      ) je_adj ON TRUE
+      WHERE v.id = $1
+    `, [req.params.id]);
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Vendor not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('[vendors GET /:id]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/vendors (create) ───────────────────────────────────────────────
+router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) => {
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let {
+      code, name, category, contact_person, phone, email,
+      address, city, state, gstin, pan, payment_term, bank_details, status, account_id,
+    } = req.body;
+
+    if (!name?.trim()) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'name is required' }); }
+
+    code = code?.trim() ? code.trim() : await reserveCode('vendor', client);
+
+    const r = await client.query(
+      `INSERT INTO vendors
+         (code, name, category, contact_person, phone, email,
+          address, city, state, gstin, pan, payment_term, bank_details, status, account_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING *`,
+      [
+        code, name.trim(),
+        category       || 'general',
+        contact_person || null,
+        phone          || null,
+        email          || null,
+        address        || null,
+        city           || null,
+        state          || null,
+        gstin          || null,
+        pan            || null,
+        payment_term   || 'Immediate',
+        bank_details   || null,
+        status         || 'active',
+        account_id     || null,
+      ]
+    );
+    await client.query('COMMIT');
+    cache.invalidatePrefix('vendor_list_');
+    cache.invalidate('vendor_summary');
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') return res.status(409).json({ error: 'Vendor code already exists' });
+    logger.error('[vendors POST /]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ─── PUT /api/vendors/:id (update) ───────────────────────────────────────────
+router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res) => {
+  try {
+    const allowed = [
+      'code','name','category','contact_person','phone','email',
+      'address','city','state','gstin','pan','payment_term','bank_details','status','account_id',
+    ];
+    const cols = allowed.filter(c => req.body[c] !== undefined);
+    if (!cols.length) return res.status(400).json({ error: 'Nothing to update' });
+
+    const vals      = cols.map(c => req.body[c]);
+    const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+    vals.push(req.params.id);
+
+    const r = await pool.query(
+      `UPDATE vendors SET ${setClause}, updated_at = NOW() WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Vendor not found' });
+    cache.invalidatePrefix('vendor_list_');
+    cache.invalidate('vendor_summary');
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Vendor code already exists' });
+    logger.error('[vendors PUT /:id]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── DELETE /api/vendors/:id ─────────────────────────────────────────────────
+router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM vendors WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Vendor not found' });
+    cache.invalidatePrefix('vendor_list_');
+    cache.invalidate('vendor_summary');
+    res.json({ success: true, id: r.rows[0].id });
+  } catch (err) {
+    if (err.code === '23503') return res.status(409).json({ error: 'Cannot delete: vendor has existing transactions' });
+    logger.error('[vendors DELETE /:id]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/vendors/bulk-upload ───────────────────────────────────────────
+router.post(
+  '/bulk-upload',
+  authenticate,
+  authorize('admin', 'operator'),
+  upload.single('file'),
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'File is required' });
+    if (!/\.(csv|xlsx)$/i.test(req.file.originalname || ''))
+      return res.status(400).json({ error: 'Only CSV and XLSX files are supported' });
+
+    let rows;
+    try {
+      rows = parseRows(req.file).map(normalizeRow).filter(row =>
+        Object.values(row).some(v => String(v).trim() !== '')
+      );
+    } catch (err) {
+      console.error('[vendors bulk-upload] parse failed:', err);
+      return res.status(400).json({ error: 'Could not parse uploaded file' });
+    }
+
+    const summary = { total_rows: rows.length, inserted: 0, skipped: 0, errors: [] };
+    const client  = await pool.primaryPool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [idx, row] of rows.entries()) {
+        const rowNum = idx + 2;
+        const code   = (row.code || '').trim();
+        const name   = (row.name || '').trim();
+        if (!code) { summary.skipped++; summary.errors.push({ row: rowNum, code, error: 'code is required' }); continue; }
+        if (!name) { summary.skipped++; summary.errors.push({ row: rowNum, code, error: 'name is required' }); continue; }
+        try {
+          await client.query('SAVEPOINT r');
+          const ins = await client.query(
+            `INSERT INTO vendors (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING RETURNING id`,
+            [code, name]
+          );
+          ins.rowCount === 1 ? summary.inserted++ : summary.skipped++;
+          await client.query('RELEASE SAVEPOINT r');
+        } catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT r');
+          await client.query('RELEASE SAVEPOINT r');
+          summary.skipped++;
+          summary.errors.push({ row: rowNum, code, error: err.message });
+        }
+      }
+      await client.query('COMMIT');
+      cache.invalidatePrefix('vendor_list_');
+      cache.invalidate('vendor_summary');
+      res.json(summary);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('[vendors bulk-upload] failed:', err);
+      res.status(500).json({ error: 'Bulk upload failed' });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+module.exports = router;

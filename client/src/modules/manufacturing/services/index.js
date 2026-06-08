@@ -1,0 +1,1 @@
+export { manufacturingService } from './manufacturingService';

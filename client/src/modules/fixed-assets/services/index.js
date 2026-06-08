@@ -1,0 +1,1 @@
+export { assetService } from './assetService';

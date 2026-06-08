@@ -1,0 +1,1230 @@
+const express = require('express');
+const pool = require('../db/pool');
+const { authenticate } = require('../middleware/auth');
+const { getInventoryValuation, getInventoryValuationLines, round2 } = require('../services/inventoryAccounting');
+const { logger } = require('../middleware/logger');
+
+const router = express.Router();
+
+// GET /api/reports/pnl?from=2025-04-01&to=2025-04-30
+router.get('/pnl', authenticate, async (req, res) => {
+  try {
+    let { from_date, to_date } = req.query;
+    if (!from_date) from_date = '1970-01-01';
+    if (!to_date) to_date = new Date().toISOString().split('T')[0];
+
+    // Run all independent queries concurrently to speed up load time
+    // Use materialized view if available, fallback to direct query
+    const [ledgerR, purchasesR, closingInventory] = await Promise.all([
+      pool.query(`
+        SELECT a.id, a.code, a.name, a.type,
+               COALESCE(mv.total_credit, 0) as total_credit,
+               COALESCE(mv.total_debit, 0) as total_debit
+        FROM accounts a
+        LEFT JOIN mv_dashboard_financial mv ON mv.account_id = a.id
+          AND mv.month BETWEEN DATE_TRUNC('month', $1::date) AND DATE_TRUNC('month', $2::date)
+        WHERE a.type IN ('revenue', 'expense') AND a.is_group = false
+        GROUP BY a.id, a.code, a.name, a.type, mv.total_credit, mv.total_debit
+        ORDER BY a.code
+      `, [from_date, to_date]).catch(async () => {
+        // Fallback: materialized view not available
+        const result = await pool.query(`
+          WITH ledger AS (
+            SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
+            FROM je_lines jl
+            JOIN journal_entries je ON je.id = jl.je_id
+            WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
+            GROUP BY jl.account_id
+          )
+          SELECT a.id, a.code, a.name, a.type,
+                 COALESCE(l.total_credit, 0) as total_credit,
+                 COALESCE(l.total_debit, 0) as total_debit
+          FROM accounts a LEFT JOIN ledger l ON l.account_id = a.id
+          WHERE a.type IN ('revenue', 'expense') AND a.is_group = false
+          ORDER BY a.code
+        `, [from_date, to_date]);
+        return result;
+      }),
+      pool.query(
+        `SELECT COALESCE(SUM(pnl.amount), 0) AS value
+         FROM purchase_note_lines pnl
+         JOIN purchase_notes pn ON pn.id = pnl.purchase_note_id
+         WHERE pn.status != 'cancelled'
+           AND pn.doc_date BETWEEN $1 AND $2
+           AND COALESCE(pnl.is_capital, false) = false`,
+        [from_date, to_date]
+      ),
+      getInventoryValuation(to_date)
+    ]);
+
+    // inventory_opening table may not exist on older deployments — fall back to 0
+    let openingStock = 0;
+    try {
+      const openingR = await pool.query(
+        `SELECT COALESCE(SUM(value), 0) AS value FROM inventory_opening WHERE as_of_date < $1`,
+        [from_date]
+      );
+      openingStock = round2(openingR.rows[0].value);
+    } catch { /* table missing — treat opening stock as 0 */ }
+
+    const revenue = ledgerR.rows
+      .filter(r => r.type === 'revenue')
+      .map(r => ({ ...r, amount: parseFloat(r.total_credit) - parseFloat(r.total_debit) }));
+
+    const expenses = ledgerR.rows
+      .filter(r => r.type === 'expense')
+      .map(r => ({ ...r, amount: parseFloat(r.total_debit) - parseFloat(r.total_credit) }));
+    const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
+    const totalExpenses = expenses.reduce((s, r) => s + r.amount, 0);
+
+    // openingStock already set above
+    const purchases = round2(purchasesR.rows[0].value);
+    const closingStock = round2(closingInventory.value);
+    const formulaCogs = round2(openingStock + purchases - closingStock);
+
+    // Split accounting COGS vs OpEx. P&L uses periodic COGS formula to avoid double-counting posted COGS JEs.
+    const cogsAccounts = ['5001', '5002', '5003'];
+    const cogs = [
+      { code: 'OPEN', name: 'Opening Stock', amount: openingStock },
+      { code: 'PURCHASES', name: 'Purchases', amount: purchases },
+      { code: 'CLOSE', name: 'Less: Closing Stock', amount: -closingStock },
+    ];
+    const opex = expenses.filter(e => !cogsAccounts.includes(e.code));
+    const totalCogs = formulaCogs;
+    const totalOpex = opex.reduce((s, r) => s + r.amount, 0);
+    const grossProfit = totalRevenue - totalCogs;
+    const netProfit = grossProfit - totalOpex;
+    const netMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 10000) / 100 : 0;
+
+    logger.info(`[P&L Report] period=${from_date}..${to_date} revenue=${totalRevenue} cogs=${totalCogs} opex=${totalOpex} gross=${grossProfit} net=${netProfit}`);
+
+    res.json({
+      period: { from: from_date, to: to_date },
+      revenue, totalRevenue,
+      cogs, totalCogs,
+      inventory: {
+        openingStock,
+        purchases,
+        closingStock,
+        closingMode: closingInventory.mode,
+        closingAsOfDate: closingInventory.as_of_date,
+      },
+      grossProfit,
+      opex, totalOpex,
+      netProfit, netMargin,
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/reports/inventory-valuation?as_of_date=YYYY-MM-DD
+router.get('/inventory-valuation', authenticate, async (req, res) => {
+  try {
+    const { as_of_date = new Date().toISOString().split('T')[0] } = req.query;
+    res.json(await getInventoryValuationLines(as_of_date));
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/reports/ledger/:accountId
+router.get('/ledger/:accountId', authenticate, async (req, res) => {
+  try {
+    const { from_date = '2025-01-01', to_date = new Date().toISOString().split('T')[0] } = req.query;
+
+    const accR = await pool.query('SELECT * FROM accounts WHERE id = $1', [req.params.accountId]);
+    if (accR.rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    const account = accR.rows[0];
+
+    // Opening balance: sum of all posted JEs before from_date
+    const openR = await pool.query(
+      `SELECT COALESCE(SUM(jl.debit), 0) as total_dr, COALESCE(SUM(jl.credit), 0) as total_cr
+       FROM je_lines jl JOIN journal_entries je ON je.id = jl.je_id
+       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date < $2`,
+      [req.params.accountId, from_date]
+    );
+    let openingBalance = 0;
+    if (['asset', 'expense'].includes(account.type)) {
+      openingBalance = parseFloat(openR.rows[0].total_dr) - parseFloat(openR.rows[0].total_cr);
+    } else {
+      openingBalance = parseFloat(openR.rows[0].total_cr) - parseFloat(openR.rows[0].total_dr);
+    }
+
+    // Period entries
+    const entriesR = await pool.query(
+      `SELECT je.id as je_id, je.je_number, je.date, je.description, je.source_type, je.source_id, jl.debit, jl.credit, jl.narration,
+              CASE
+                WHEN je.source_type = 'purchase' THEN (SELECT doc_number::text FROM purchase_notes WHERE id::text = je.source_id::text)
+                WHEN je.source_type = 'sales' THEN (SELECT doc_number::text FROM invoices WHERE id::text = je.source_id::text)
+                WHEN je.source_type = 'payment' THEN (SELECT doc_number::text FROM payments WHERE id::text = je.source_id::text)
+                WHEN je.source_type = 'receipt' THEN (SELECT doc_number::text FROM receipts WHERE id::text = je.source_id::text)
+                ELSE je.source_id::text
+              END as doc_id
+       FROM je_lines jl JOIN journal_entries je ON je.id = jl.je_id
+       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date BETWEEN $2 AND $3
+       ORDER BY je.date, je.id`,
+      [req.params.accountId, from_date, to_date]
+    );
+
+    let runningBalance = openingBalance;
+    const entries = entriesR.rows.map(e => {
+      const dr = parseFloat(e.debit) || 0;
+      const cr = parseFloat(e.credit) || 0;
+      if (['asset', 'expense'].includes(account.type)) {
+        runningBalance += dr - cr;
+      } else {
+        runningBalance += cr - dr;
+      }
+      return { ...e, debit: dr, credit: cr, balance: Math.round(runningBalance * 100) / 100 };
+    });
+
+    const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
+    const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+
+    res.json({ account, openingBalance, entries, closingBalance: runningBalance, totalDebit, totalCredit });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/reports/trial-balance
+router.get('/trial-balance', authenticate, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = req.query.fromDate || req.query.from_date || '1900-01-01';
+    const toDate = req.query.toDate || req.query.to_date || today;
+
+    const result = await pool.query(
+      `WITH ledger AS (
+         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
+         GROUP BY jl.account_id
+       ),
+       balances AS (
+         SELECT a.code, a.name, a.type, a.is_group,
+                CASE WHEN a.type IN ('asset','expense')
+                     THEN COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0)
+                     ELSE COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0)
+                END AS balance
+         FROM accounts a
+         LEFT JOIN ledger l ON l.account_id = a.id
+         WHERE a.is_group = false AND a.status = 'active'
+       )
+       SELECT code, name, type, is_group, balance,
+              CASE WHEN balance > 0 AND type IN ('asset','expense') THEN balance
+                   WHEN balance < 0 AND type IN ('liability','equity','revenue') THEN ABS(balance) ELSE 0 END as debit_balance,
+              CASE WHEN balance > 0 AND type IN ('liability','equity','revenue') THEN balance
+                   WHEN balance < 0 AND type IN ('asset','expense') THEN ABS(balance) ELSE 0 END as credit_balance
+       FROM balances
+       ORDER BY code`,
+      [fromDate, toDate]
+    );
+    const totalDr = result.rows.reduce((s, r) => s + parseFloat(r.debit_balance || 0), 0);
+    const totalCr = result.rows.reduce((s, r) => s + parseFloat(r.credit_balance || 0), 0);
+    res.json({ accounts: result.rows, totalDebit: totalDr, totalCredit: totalCr, balanced: Math.abs(totalDr - totalCr) < 0.01 });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/reports/trial-balance-detailed
+router.get('/trial-balance-detailed', authenticate, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = req.query.fromDate || req.query.from_date || '1900-01-01';
+    const toDate = req.query.toDate || req.query.to_date || today;
+    const result = await pool.query(
+      `WITH opening AS (
+         SELECT jl.account_id, SUM(jl.debit) AS debit, SUM(jl.credit) AS credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date < $1
+         GROUP BY jl.account_id
+       ),
+       movement AS (
+         SELECT jl.account_id, SUM(jl.debit) AS debit, SUM(jl.credit) AS credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
+         GROUP BY jl.account_id
+       )
+       SELECT a.id, a.code, a.name, a.type,
+              CASE WHEN a.type IN ('asset','expense')
+                   THEN COALESCE(o.debit,0) - COALESCE(o.credit,0)
+                   ELSE COALESCE(o.credit,0) - COALESCE(o.debit,0)
+              END AS opening,
+              COALESCE(m.debit,0) AS debit,
+              COALESCE(m.credit,0) AS credit,
+              CASE WHEN a.type IN ('asset','expense')
+                   THEN COALESCE(o.debit,0) - COALESCE(o.credit,0) + COALESCE(m.debit,0) - COALESCE(m.credit,0)
+                   ELSE COALESCE(o.credit,0) - COALESCE(o.debit,0) + COALESCE(m.credit,0) - COALESCE(m.debit,0)
+              END AS closing
+       FROM accounts a
+       LEFT JOIN opening o ON o.account_id = a.id
+       LEFT JOIN movement m ON m.account_id = a.id
+       WHERE a.is_group = false AND a.status = 'active'
+       ORDER BY a.code`,
+      [fromDate, toDate]
+    );
+    const accounts = result.rows.map(r => {
+      const closing = parseFloat(r.closing || 0);
+      return {
+        ...r,
+        opening: parseFloat(r.opening || 0),
+        debit: parseFloat(r.debit || 0),
+        credit: parseFloat(r.credit || 0),
+        closing,
+        dr_cr: closing >= 0 ? (['asset', 'expense'].includes(r.type) ? 'Dr' : 'Cr') : (['asset', 'expense'].includes(r.type) ? 'Cr' : 'Dr'),
+      };
+    });
+    const totals = accounts.reduce((s, r) => ({
+      opening: s.opening + r.opening,
+      debit: s.debit + r.debit,
+      credit: s.credit + r.credit,
+      closing: s.closing + r.closing,
+    }), { opening: 0, debit: 0, credit: 0, closing: 0 });
+    res.json({ period: { from: fromDate, to: toDate }, accounts, totals, balanced: Math.abs(totals.debit - totals.credit) < 0.01 });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── Balance sheet hierarchy helper ────────────────────────────────────────────
+
+async function buildAccountHierarchy(type, asOfDate) {
+  const result = await pool.query(
+    `WITH ledger AS (
+       SELECT jl.account_id,
+              SUM(jl.debit)  AS total_debit,
+              SUM(jl.credit) AS total_credit
+       FROM   je_lines jl
+       JOIN   journal_entries je ON je.id = jl.je_id
+       WHERE  je.status = 'posted' AND je.date <= $1
+       GROUP  BY jl.account_id
+     )
+     SELECT a.id, a.code, a.name, a.parent_id, a.is_group, a.level, a.path,
+            CASE WHEN a.type IN ('asset','expense')
+                 THEN COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0)
+                 ELSE COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0)
+            END AS balance
+     FROM   accounts a
+     LEFT JOIN ledger l ON l.account_id = a.id
+     WHERE  a.type = $2 AND a.status = 'active'
+     ORDER  BY COALESCE(a.path, a.code), a.code`,
+    [asOfDate, type]
+  );
+
+  const byId = {};
+  for (const row of result.rows) {
+    byId[row.id] = { ...row, balance: parseFloat(row.balance) || 0, children: [] };
+  }
+  const roots = [];
+  for (const row of result.rows) {
+    const node = byId[row.id];
+    if (row.parent_id && byId[row.parent_id]) {
+      byId[row.parent_id].children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  const calcTotal = (node) => {
+    if (!node.children.length) return node.balance;
+    const childSum = node.children.reduce((s, c) => s + calcTotal(c), 0);
+    node.group_total = Math.round((node.balance + childSum) * 100) / 100;
+    return node.group_total;
+  };
+  roots.forEach(calcTotal);
+  return roots;
+}
+
+// ── Trial balance hierarchy helper ───────────────────────────────────────────
+
+async function buildTrialBalanceHierarchy(fromDate, toDate) {
+  const result = await pool.query(
+    `WITH period AS (
+       SELECT jl.account_id,
+              SUM(jl.debit)             AS total_debit,
+              SUM(jl.credit)            AS total_credit,
+              SUM(jl.debit - jl.credit) AS net_balance
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
+       GROUP BY jl.account_id
+     )
+     SELECT a.id, a.code, a.name, a.parent_id, a.is_group, a.level, a.path,
+            COALESCE(p.total_debit,  0) AS total_debit,
+            COALESCE(p.total_credit, 0) AS total_credit,
+            COALESCE(p.net_balance,  0) AS net_balance
+     FROM   accounts a
+     LEFT JOIN period p ON p.account_id = a.id
+     WHERE  a.status = 'active'
+     ORDER  BY COALESCE(a.path, a.code), a.code`,
+    [fromDate, toDate]
+  );
+
+  const byId = {};
+  for (const r of result.rows) {
+    byId[r.id] = {
+      ...r,
+      total_debit:  parseFloat(r.total_debit)  || 0,
+      total_credit: parseFloat(r.total_credit) || 0,
+      net_balance:  parseFloat(r.net_balance)  || 0,
+      children: [],
+    };
+  }
+
+  const roots = [];
+  for (const r of result.rows) {
+    const node = byId[r.id];
+    if (r.parent_id && byId[r.parent_id]) {
+      byId[r.parent_id].children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  // Aggregate group totals bottom-up (own direct entries + all children)
+  const aggregate = (node) => {
+    if (!node.children.length) {
+      return { debit: node.total_debit, credit: node.total_credit, net: node.net_balance };
+    }
+    let sumD = node.total_debit, sumC = node.total_credit, sumN = node.net_balance;
+    for (const child of node.children) {
+      const c = aggregate(child);
+      sumD += c.debit; sumC += c.credit; sumN += c.net;
+    }
+    node.group_debit  = Math.round(sumD * 100) / 100;
+    node.group_credit = Math.round(sumC * 100) / 100;
+    node.group_net    = Math.round(sumN * 100) / 100;
+    return { debit: sumD, credit: sumC, net: sumN };
+  };
+  roots.forEach(aggregate);
+  return roots;
+}
+
+// GET /api/reports/trial-balance-hierarchy?from_date=&to_date=
+router.get('/trial-balance-hierarchy', authenticate, async (req, res) => {
+  try {
+    const today    = new Date().toISOString().split('T')[0];
+    const fromDate = req.query.from_date || '2025-04-01';
+    const toDate   = req.query.to_date   || today;
+
+    const roots = await buildTrialBalanceHierarchy(fromDate, toDate);
+
+    // Grand totals: raw sum of all posted JE lines (debits always equal credits)
+    const totR = await pool.query(
+      `SELECT COALESCE(SUM(jl.debit),  0) AS grand_debit,
+              COALESCE(SUM(jl.credit), 0) AS grand_credit
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2`,
+      [fromDate, toDate]
+    );
+    const grandDebit  = Math.round(parseFloat(totR.rows[0].grand_debit)  * 100) / 100;
+    const grandCredit = Math.round(parseFloat(totR.rows[0].grand_credit) * 100) / 100;
+
+    res.json({
+      period: { from: fromDate, to: toDate },
+      roots,
+      grandDebit,
+      grandCredit,
+      balanced: Math.abs(grandDebit - grandCredit) < 0.01,
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/reports/balance-sheet?asOfDate=YYYY-MM-DD
+router.get('/balance-sheet', authenticate, async (req, res) => {
+  try {
+    let asOfDate = req.query.asOfDate;
+    if (!asOfDate) asOfDate = new Date().toISOString().split('T')[0];
+
+    const assetR = await pool.query(
+      `WITH ledger AS (
+         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date <= $1
+         GROUP BY jl.account_id
+       )
+       SELECT a.code, a.name,
+              COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0) as balance
+       FROM accounts a
+       LEFT JOIN ledger l ON l.account_id = a.id
+       WHERE a.type = 'asset' AND a.is_group = false AND a.status = 'active'
+       AND COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0) <> 0
+       ORDER BY a.code`,
+      [asOfDate]
+    );
+
+    const liabR = await pool.query(
+      `WITH ledger AS (
+         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date <= $1
+         GROUP BY jl.account_id
+       )
+       SELECT a.code, a.name,
+              COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) as balance
+       FROM accounts a
+       LEFT JOIN ledger l ON l.account_id = a.id
+       WHERE a.type = 'liability' AND a.is_group = false AND a.status = 'active'
+       AND COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) <> 0
+       ORDER BY a.code`,
+      [asOfDate]
+    );
+
+    const equityR = await pool.query(
+      `WITH ledger AS (
+         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE je.status = 'posted' AND je.date <= $1
+         GROUP BY jl.account_id
+       )
+       SELECT a.code, a.name,
+              COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) as balance
+       FROM accounts a
+       LEFT JOIN ledger l ON l.account_id = a.id
+       WHERE a.type = 'equity' AND a.is_group = false AND a.status = 'active'
+       AND COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) <> 0
+       ORDER BY a.code`,
+      [asOfDate]
+    );
+
+    // Net income = SUM(credit - debit) across all revenue and expense lines.
+    // Revenue net = credit - debit (positive = earned). Expense net = debit - credit (positive = spent).
+    // Combined: credit_rev - debit_rev + credit_exp - debit_exp = (credit - debit) for both types.
+    const reR = await pool.query(
+      `SELECT COALESCE(SUM(jl.credit - jl.debit), 0) as retained_earnings
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       JOIN accounts a ON a.id = jl.account_id
+       WHERE je.status = 'posted' AND je.date <= $1 AND a.type IN ('revenue', 'expense')`,
+      [asOfDate]
+    );
+
+    const assets = assetR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
+    const liabilities = liabR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
+    const equity = equityR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
+    const retainedEarnings = parseFloat(reR.rows[0].retained_earnings);
+
+    const totalAssets = assets.reduce((s, r) => s + r.balance, 0);
+    const totalLiabilities = liabilities.reduce((s, r) => s + r.balance, 0);
+    const totalEquity = equity.reduce((s, r) => s + r.balance, 0);
+    const isBalanced = Math.abs(totalAssets - (totalLiabilities + totalEquity + retainedEarnings)) < 0.01;
+    const groupRows = (rows, defs) => {
+      const used = new Set();
+      const groups = defs.map(def => {
+        const matched = rows.filter((r, idx) => {
+          const ok = !used.has(idx) && def.tests.some(t => t.test(`${r.code} ${r.name}`));
+          if (ok) used.add(idx);
+          return ok;
+        });
+        return { title: def.title, rows: matched };
+      });
+      const others = rows.filter((_, idx) => !used.has(idx));
+      if (others.length) groups.push({ title: 'Others', rows: others });
+      return groups;
+    };
+    const vertical = {
+      liabilities: groupRows(liabilities, [
+        { title: 'Loans', tests: [/loan|borrow/i] },
+        { title: 'Creditors', tests: [/payable|creditor|vendor/i] },
+        { title: 'Taxes Payable', tests: [/tax|gst|tds/i] },
+      ]),
+      capital: groupRows(equity, [{ title: 'Capital', tests: [/capital|equity/i] }]),
+      equity: [{ title: 'Current Year Profit', rows: [{ code: '', name: 'Current Year Profit', balance: retainedEarnings }] }],
+      assets: groupRows(assets, [
+        { title: 'Cash', tests: [/cash/i] },
+        { title: 'Bank', tests: [/bank/i] },
+        { title: 'Debtors', tests: [/receivable|debtor|customer/i] },
+        { title: 'Inventory', tests: [/inventory|stock|wip|seed|rough|gas|consumable/i] },
+        { title: 'Fixed Assets', tests: [/fixed|plant|machine|equipment|accum/i] },
+      ]),
+    };
+
+    // Build hierarchy in parallel — additive field, doesn't affect existing frontend
+    const [hAssets, hLiabs, hEquity] = await Promise.all([
+      buildAccountHierarchy('asset',     asOfDate),
+      buildAccountHierarchy('liability', asOfDate),
+      buildAccountHierarchy('equity',    asOfDate),
+    ]);
+
+    res.json({
+      asOfDate, assets, liabilities, equity,
+      totalAssets, totalLiabilities, totalEquity, retainedEarnings,
+      isBalanced, vertical,
+      hierarchy: { assets: hAssets, liabilities: hLiabs, equity: hEquity },
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── FIXED ASSET REGISTER ─────────────────────────────────────────────────────
+// GET /api/reports/fixed-asset-register?asOfDate=YYYY-MM-DD
+router.get('/fixed-asset-register', authenticate, async (req, res) => {
+  try {
+    const asOfDate = req.query.asOfDate || new Date().toISOString().split('T')[0];
+
+    // For each asset, WDV as of date = purchase_cost - (accumulated_depr - future_runs_after_date)
+    const result = await pool.query(
+      `SELECT
+         fa.id, fa.asset_code, fa.asset_name,
+         fa.purchase_date, fa.in_service_date, fa.purchase_cost, fa.salvage_value,
+         fa.status, fa.disposal_date,
+         fac.id as category_id, fac.name as category_name, fac.depreciation_rate_pct,
+         fa.accumulated_depreciation,
+         COALESCE((
+           SELECT SUM(drl.depreciation_amount)
+           FROM depreciation_run_lines drl
+           JOIN depreciation_runs dr ON drl.run_id = dr.id
+           WHERE drl.fixed_asset_id = fa.id AND dr.status = 'posted' AND dr.period_to > $1
+         ), 0) as future_depr
+       FROM fixed_assets fa
+       JOIN fixed_asset_categories fac ON fa.category_id = fac.id
+       WHERE fa.purchase_date <= $1
+       ORDER BY fac.name, fa.asset_code`,
+      [asOfDate]
+    );
+
+    // Group by category
+    const categoryMap = {};
+    for (const row of result.rows) {
+      const accDeprAsOf = parseFloat(row.accumulated_depreciation) - parseFloat(row.future_depr);
+      const wdvAsOf     = parseFloat(row.purchase_cost) - accDeprAsOf;
+      const asset = {
+        id:                        row.id,
+        asset_code:                row.asset_code,
+        asset_name:                row.asset_name,
+        purchase_date:             row.purchase_date,
+        in_service_date:           row.in_service_date,
+        purchase_cost:             parseFloat(row.purchase_cost),
+        accumulated_depreciation:  Math.round(accDeprAsOf * 100) / 100,
+        wdv_as_of:                 Math.round(wdvAsOf * 100) / 100,
+        status:                    row.status,
+      };
+      if (!categoryMap[row.category_name]) {
+        categoryMap[row.category_name] = { category_name: row.category_name, assets: [],
+          total_cost: 0, total_accum_depr: 0, total_wdv: 0 };
+      }
+      const cat = categoryMap[row.category_name];
+      cat.assets.push(asset);
+      cat.total_cost         += asset.purchase_cost;
+      cat.total_accum_depr   += asset.accumulated_depreciation;
+      cat.total_wdv          += asset.wdv_as_of;
+    }
+
+    const categories = Object.values(categoryMap).map(c => ({
+      ...c,
+      total_cost:       Math.round(c.total_cost * 100) / 100,
+      total_accum_depr: Math.round(c.total_accum_depr * 100) / 100,
+      total_wdv:        Math.round(c.total_wdv * 100) / 100,
+    }));
+
+    const grand = categories.reduce((a, c) => ({
+      total_cost:       a.total_cost + c.total_cost,
+      total_accum_depr: a.total_accum_depr + c.total_accum_depr,
+      total_wdv:        a.total_wdv + c.total_wdv,
+    }), { total_cost: 0, total_accum_depr: 0, total_wdv: 0 });
+
+    res.json({ as_of_date: asOfDate, categories,
+               grand_total_cost:       Math.round(grand.total_cost * 100) / 100,
+               grand_total_accum_depr: Math.round(grand.total_accum_depr * 100) / 100,
+               grand_total_wdv:        Math.round(grand.total_wdv * 100) / 100 });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── DEPRECIATION SCHEDULE ─────────────────────────────────────────────────────
+// GET /api/reports/depreciation-schedule?fromDate=&toDate=
+router.get('/depreciation-schedule', authenticate, async (req, res) => {
+  try {
+    const todayDate = new Date();
+    let fromDate = req.query.fromDate;
+    let toDate = req.query.toDate;
+
+    const { calculateForAsset } = require('../services/depreciationEngine');
+
+    const assetsR = await pool.query(
+      `SELECT fa.*, fac.depreciation_rate_pct, fac.depreciation_method, fac.name as category_name
+       FROM fixed_assets fa
+       JOIN fixed_asset_categories fac ON fa.category_id = fac.id
+       WHERE fa.status = 'active'
+       ORDER BY fa.asset_code`
+    );
+
+    if (!fromDate) {
+      let minDate = todayDate;
+      for (const a of assetsR.rows) {
+        if (a.in_service_date && new Date(a.in_service_date) < minDate) {
+          minDate = new Date(a.in_service_date);
+        }
+      }
+      fromDate = minDate.toISOString().split('T')[0];
+    }
+    if (!toDate) {
+      toDate = todayDate.toISOString().split('T')[0];
+    }
+
+    // Build monthly periods between fromDate and toDate (max 36 months)
+    const maxPeriods = 36;
+    const periods = [];
+    let cur = new Date(fromDate.slice(0, 7) + '-01T00:00:00Z');
+    let end = new Date(toDate.slice(0, 7) + '-01T00:00:00Z');
+    const maxEnd = new Date(cur.getUTCFullYear(), cur.getUTCMonth() + maxPeriods, 1);
+    if (end > maxEnd) end = maxEnd;
+    while (cur <= end && periods.length < maxPeriods) {
+      const next   = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+      const pFrom  = cur.toISOString().split('T')[0];
+      const pTo    = new Date(next.getTime() - 86400000).toISOString().split('T')[0];
+      periods.push({ from: pFrom, to: pTo });
+      cur = next;
+    }
+
+    const schedule = [];
+    for (const period of periods) {
+      let periodTotal = 0;
+      const periodLines = [];
+      for (const asset of assetsR.rows) {
+        const r = calculateForAsset(asset,
+          { depreciation_rate_pct: asset.depreciation_rate_pct, depreciation_method: asset.depreciation_method },
+          period.from, period.to
+        );
+        if (!r.skip && r.depreciation_amount > 0) {
+          periodLines.push({
+            asset_code:          asset.asset_code,
+            asset_name:          asset.asset_name,
+            category_name:       asset.category_name,
+            depreciation_amount: r.depreciation_amount,
+          });
+          periodTotal += r.depreciation_amount;
+        }
+      }
+      if (periodLines.length > 0) {
+        schedule.push({
+          period_from:   period.from,
+          period_to:     period.to,
+          total_depr:    Math.round(periodTotal * 100) / 100,
+          asset_count:   periodLines.length,
+          lines:         periodLines,
+        });
+      }
+    }
+
+    res.json({ from_date: fromDate, to_date: toDate, schedule,
+               grand_total: Math.round(schedule.reduce((s, p) => s + p.total_depr, 0) * 100) / 100 });
+  } catch (err) {
+    logger.error('DEPR_SCHED_ERROR:', { error: err.message, stack: err.stack?.split('\n').slice(0,2).join(' ') });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ACCOUNTS RECEIVABLE ──────────────────────────────────────────────────────
+// GET /api/reports/accounts-receivable
+router.get('/accounts-receivable', authenticate, async (req, res) => {
+  try {
+    const { customer_id, from_date, to_date, status, overdue_only, search, limit = 500, offset = 0 } = req.query;
+
+    const params = [];
+    const innerConds = [`inv.status != 'cancelled'`];
+    const outerConds = [];
+
+    if (customer_id) { params.push(parseInt(customer_id)); innerConds.push(`inv.customer_id = $${params.length}`); }
+    if (from_date)   { params.push(from_date);             innerConds.push(`inv.doc_date >= $${params.length}`); }
+    if (to_date)     { params.push(to_date);               innerConds.push(`inv.doc_date <= $${params.length}`); }
+    if (search)      { params.push(`%${search}%`);         innerConds.push(`inv.doc_number ILIKE $${params.length}`); }
+
+    if      (status === 'Paid')    outerConds.push(`balance_amount <= 0`);
+    else if (status === 'Unpaid')  outerConds.push(`received_amount = 0 AND balance_amount > 0`);
+    else if (status === 'Partial') outerConds.push(`received_amount > 0 AND balance_amount > 0 AND due_date >= CURRENT_DATE`);
+    else if (status === 'Overdue') outerConds.push(`balance_amount > 0 AND due_date < CURRENT_DATE`);
+    if (overdue_only === 'true')   outerConds.push(`balance_amount > 0 AND due_date < CURRENT_DATE`);
+
+    const whereInner = innerConds.join(' AND ');
+    const whereOuter = outerConds.length ? outerConds.join(' AND ') : '1=1';
+    
+    params.push(limit, offset);
+    const limitIdx = params.length - 1;
+    const offsetIdx = params.length;
+
+    const dueDaysExpr = `CASE WHEN NULLIF(inv.payment_term, '') ~ '[0-9]' THEN regexp_replace(inv.payment_term, '[^0-9]', '', 'g')::int ELSE 30 END`;
+
+    // AGGREGATE QUERY
+    const aggResult = await pool.query(`
+      WITH base_data AS (
+        SELECT
+          inv.grand_total AS invoice_amount,
+          COALESCE(inv.amount_paid, 0) AS received_amount,
+          COALESCE(inv.balance_due, inv.grand_total) AS balance_amount,
+          (inv.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date
+        FROM invoices inv
+        WHERE ${whereInner}
+      )
+      SELECT 
+        COUNT(*)::int AS total_count,
+        COALESCE(SUM(invoice_amount), 0) AS total_invoice,
+        COALESCE(SUM(received_amount), 0) AS total_received,
+        COALESCE(SUM(balance_amount), 0) AS total_balance
+      FROM base_data
+      WHERE ${whereOuter}
+    `, params.slice(0, -2));
+
+    const totalCount = aggResult.rows[0]?.total_count || 0;
+    const totals = {
+      invoice_amount: parseFloat(aggResult.rows[0]?.total_invoice || 0),
+      received_amount: parseFloat(aggResult.rows[0]?.total_received || 0),
+      balance_amount: parseFloat(aggResult.rows[0]?.total_balance || 0)
+    };
+
+    // ROW QUERY WITH PAGINATION
+    const result = await pool.query(`
+      SELECT * FROM (
+        SELECT
+          inv.id, inv.doc_number, inv.doc_date,
+          c.name AS customer_name,
+          inv.payment_term,
+          (inv.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date,
+          inv.grand_total AS invoice_amount,
+          COALESCE(inv.amount_paid, 0) AS received_amount,
+          COALESCE(inv.balance_due, inv.grand_total) AS balance_amount,
+          CASE
+            WHEN COALESCE(inv.balance_due, inv.grand_total) <= 0 THEN 'Paid'
+            WHEN (inv.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date < CURRENT_DATE
+              AND COALESCE(inv.balance_due, inv.grand_total) > 0 THEN 'Overdue'
+            WHEN COALESCE(inv.amount_paid, 0) > 0 THEN 'Partial'
+            ELSE 'Unpaid'
+          END AS pay_status,
+          (CURRENT_DATE - inv.doc_date::date) AS ageing_days
+        FROM invoices inv
+        LEFT JOIN customers c ON inv.customer_id = c.id
+        WHERE ${whereInner}
+      ) sub
+      WHERE ${whereOuter}
+      ORDER BY doc_date DESC, id DESC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
+    `, params);
+
+    const rows = result.rows.map(r => ({
+      ...r,
+      invoice_amount:  parseFloat(r.invoice_amount)  || 0,
+      received_amount: parseFloat(r.received_amount) || 0,
+      balance_amount:  parseFloat(r.balance_amount)  || 0,
+      ageing_days:     parseInt(r.ageing_days)        || 0,
+    }));
+
+    res.json({ data: rows, total: totalCount, totals });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── ACCOUNTS PAYABLE ─────────────────────────────────────────────────────────
+// GET /api/reports/accounts-payable
+router.get('/accounts-payable', authenticate, async (req, res) => {
+  try {
+    const { vendor_id, from_date, to_date, status, overdue_only, search, limit = 500, offset = 0 } = req.query;
+
+    const params = [];
+    const innerConds = [`pn.status != 'cancelled'`];
+    const outerConds = [];
+
+    if (vendor_id) { params.push(parseInt(vendor_id)); innerConds.push(`pn.vendor_id = $${params.length}`); }
+    if (from_date) { params.push(from_date);           innerConds.push(`pn.doc_date >= $${params.length}`); }
+    if (to_date)   { params.push(to_date);             innerConds.push(`pn.doc_date <= $${params.length}`); }
+    if (search)    { params.push(`%${search}%`);       innerConds.push(`pn.doc_number ILIKE $${params.length}`); }
+
+    if      (status === 'Paid')    outerConds.push(`balance_amount <= 0`);
+    else if (status === 'Unpaid')  outerConds.push(`paid_amount = 0 AND balance_amount > 0`);
+    else if (status === 'Partial') outerConds.push(`paid_amount > 0 AND balance_amount > 0 AND due_date >= CURRENT_DATE`);
+    else if (status === 'Overdue') outerConds.push(`balance_amount > 0 AND due_date < CURRENT_DATE`);
+    if (overdue_only === 'true')   outerConds.push(`balance_amount > 0 AND due_date < CURRENT_DATE`);
+
+    const whereInner = innerConds.join(' AND ');
+    const whereOuter = outerConds.length ? outerConds.join(' AND ') : '1=1';
+    
+    params.push(limit, offset);
+    const limitIdx = params.length - 1;
+    const offsetIdx = params.length;
+
+    const dueDaysExpr = `CASE WHEN NULLIF(pn.payment_term, '') ~ '[0-9]' THEN regexp_replace(pn.payment_term, '[^0-9]', '', 'g')::int ELSE 0 END`;
+
+    // AGGREGATE QUERY (To get exact total row count + grand totals for summary cards)
+    const aggResult = await pool.query(`
+      WITH pn_paid AS (
+        SELECT purchase_note_id, SUM(amount) AS total_paid
+        FROM payment_allocations
+        WHERE purchase_note_id IS NOT NULL
+        GROUP BY purchase_note_id
+      ),
+      base_data AS (
+        SELECT
+          pn.grand_total AS bill_amount,
+          COALESCE(pp.total_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date
+        FROM purchase_notes pn
+        LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
+        WHERE ${whereInner}
+      )
+      SELECT 
+        COUNT(*)::int AS total_count,
+        COALESCE(SUM(bill_amount), 0) AS total_bill,
+        COALESCE(SUM(paid_amount), 0) AS total_paid,
+        COALESCE(SUM(balance_amount), 0) AS total_balance
+      FROM base_data
+      WHERE ${whereOuter}
+    `, params.slice(0, -2));
+
+    const totalCount = aggResult.rows[0]?.total_count || 0;
+    const totals = {
+      bill_amount: parseFloat(aggResult.rows[0]?.total_bill || 0),
+      paid_amount: parseFloat(aggResult.rows[0]?.total_paid || 0),
+      balance_amount: parseFloat(aggResult.rows[0]?.total_balance || 0)
+    };
+
+    // ROW QUERY WITH PAGINATION
+    const result = await pool.query(`
+      WITH pn_paid AS (
+        SELECT purchase_note_id, SUM(amount) AS total_paid
+        FROM payment_allocations
+        WHERE purchase_note_id IS NOT NULL
+        GROUP BY purchase_note_id
+      )
+      SELECT * FROM (
+        SELECT
+          pn.id, pn.doc_number, pn.doc_date,
+          v.name AS vendor_name,
+          COALESCE(pn.payment_term, '') AS payment_term,
+          (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date,
+          pn.grand_total AS bill_amount,
+          COALESCE(pp.total_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          CASE
+            WHEN pn.grand_total - COALESCE(pp.total_paid, 0) <= 0 THEN 'Paid'
+            WHEN (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date < CURRENT_DATE
+              AND pn.grand_total - COALESCE(pp.total_paid, 0) > 0 THEN 'Overdue'
+            WHEN COALESCE(pp.total_paid, 0) > 0 THEN 'Partial'
+            ELSE 'Unpaid'
+          END AS pay_status,
+          (CURRENT_DATE - pn.doc_date::date) AS ageing_days
+        FROM purchase_notes pn
+        LEFT JOIN vendors v ON pn.vendor_id = v.id
+        LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
+        WHERE ${whereInner}
+      ) sub
+      WHERE ${whereOuter}
+      ORDER BY doc_date DESC, id DESC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
+    `, params);
+
+    const rows = result.rows.map(r => ({
+      ...r,
+      bill_amount:    parseFloat(r.bill_amount)    || 0,
+      paid_amount:    parseFloat(r.paid_amount)    || 0,
+      balance_amount: parseFloat(r.balance_amount) || 0,
+      ageing_days:    parseInt(r.ageing_days)       || 0,
+    }));
+
+    res.json({ data: rows, total: totalCount, totals });
+  } catch (err) {
+    logger.error('[reports /accounts-payable]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── TRANSACTION DRILL-DOWN ────────────────────────────────────────────────────
+// GET /api/reports/transactions?account_id=&from_date=&to_date=
+router.get('/transactions', authenticate, async (req, res) => {
+  try {
+    const { account_id, from_date = '1900-01-01', to_date = new Date().toISOString().split('T')[0], limit = 500, offset = 0 } = req.query;
+    if (!account_id) return res.status(400).json({ error: 'account_id is required' });
+
+    const accR = await pool.query(
+      'SELECT id, code, name, type FROM accounts WHERE id = $1',
+      [account_id]
+    );
+    if (accR.rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    const account = accR.rows[0];
+
+    // Opening balance: all posted JEs strictly before from_date
+    const openR = await pool.query(
+      `SELECT COALESCE(SUM(jl.debit), 0) AS total_dr, COALESCE(SUM(jl.credit), 0) AS total_cr
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date < $2`,
+      [account_id, from_date]
+    );
+    const openDr = parseFloat(openR.rows[0].total_dr);
+    const openCr = parseFloat(openR.rows[0].total_cr);
+    const openingBalance = ['asset', 'expense'].includes(account.type)
+      ? openDr - openCr
+      : openCr - openDr;
+
+    // Aggregate totals for the period
+    const aggR = await pool.query(
+      `SELECT 
+         COUNT(*)::int AS total_count,
+         COALESCE(SUM(jl.debit), 0) AS total_dr, 
+         COALESCE(SUM(jl.credit), 0) AS total_cr
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date BETWEEN $2 AND $3`,
+      [account_id, from_date, to_date]
+    );
+    const totalCount = aggR.rows[0].total_count || 0;
+    const totalDebit = parseFloat(aggR.rows[0].total_dr);
+    const totalCredit = parseFloat(aggR.rows[0].total_cr);
+    
+    let closingBalance = openingBalance;
+    if (['asset', 'expense'].includes(account.type)) {
+      closingBalance += totalDebit - totalCredit;
+    } else {
+      closingBalance += totalCredit - totalDebit;
+    }
+
+    // Period transactions with window function for running balance
+    const txnR = await pool.query(
+      `WITH period_txns AS (
+         SELECT
+           je.id          AS je_id,
+           je.je_number,
+           je.date,
+           je.source_type,
+           je.source_id,
+           jl.debit,
+           jl.credit,
+           je.description,
+           jl.narration,
+           COALESCE(SUM(jl.debit) OVER (ORDER BY je.date ASC, je.id ASC), 0) AS running_dr,
+           COALESCE(SUM(jl.credit) OVER (ORDER BY je.date ASC, je.id ASC), 0) AS running_cr
+         FROM je_lines jl
+         JOIN journal_entries je ON je.id = jl.je_id
+         WHERE jl.account_id = $1
+           AND je.status = 'posted'
+           AND je.date BETWEEN $2 AND $3
+       )
+       SELECT * FROM period_txns
+       ORDER BY date ASC, je_id ASC
+       LIMIT $4 OFFSET $5`,
+      [account_id, from_date, to_date, limit, offset]
+    );
+
+    const transactions = txnR.rows.map(r => {
+      const dr = parseFloat(r.debit) || 0;
+      const cr = parseFloat(r.credit) || 0;
+      const runDr = parseFloat(r.running_dr) || 0;
+      const runCr = parseFloat(r.running_cr) || 0;
+      
+      let balance = openingBalance;
+      if (['asset', 'expense'].includes(account.type)) {
+        balance += runDr - runCr;
+      } else {
+        balance += runCr - runDr;
+      }
+      
+      return {
+        je_id:       r.je_id,
+        je_number:   r.je_number,
+        date:        r.date,
+        source_type: r.source_type,
+        source_id:   r.source_id,
+        description: r.description || r.narration || '',
+        debit:  dr,
+        credit: cr,
+        balance: Math.round(balance * 100) / 100,
+      };
+    });
+
+    res.json({
+      account,
+      period: { from: from_date, to: to_date },
+      openingBalance,
+      transactions,
+      closingBalance: Math.round(closingBalance * 100) / 100,
+      totalDebit,
+      totalCredit,
+      total: totalCount
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/pl-by-cost-center ───────────────────────────────────────
+router.get('/pl-by-cost-center', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let whereDate = "je.status = 'posted'";
+    const params = [];
+    if (from) { params.push(from); whereDate += ` AND je.date >= $${params.length}`; }
+    if (to)   { params.push(to);   whereDate += ` AND je.date <= $${params.length}`; }
+
+    const result = await pool.query(
+      `SELECT
+         cc.id,
+         cc.name,
+         cc.code,
+         SUM(jl.debit)              AS expense,
+         SUM(jl.credit)             AS income,
+         SUM(jl.credit - jl.debit)  AS profit
+       FROM je_lines jl
+       JOIN cost_centers cc ON cc.id = jl.cost_center_id
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE ${whereDate}
+       GROUP BY cc.id, cc.name, cc.code
+       ORDER BY cc.code NULLS LAST, cc.name`,
+      params
+    );
+
+    res.json({
+      data: result.rows.map(r => ({
+        ...r,
+        expense: parseFloat(r.expense) || 0,
+        income:  parseFloat(r.income)  || 0,
+        profit:  parseFloat(r.profit)  || 0,
+      })),
+      period: { from: from || null, to: to || null },
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/reports/cost-center-transactions ─────────────────────────────────
+// Drill-down: all JE lines for a specific cost center in a date range
+router.get('/cost-center-transactions', authenticate, async (req, res) => {
+  try {
+    const { cost_center_id, from_date, to_date, limit = 500, offset = 0 } = req.query;
+    if (!cost_center_id) return res.status(400).json({ error: 'cost_center_id is required' });
+
+    const ccR = await pool.query('SELECT id, name, code FROM cost_centers WHERE id = $1', [cost_center_id]);
+    if (!ccR.rows[0]) return res.status(404).json({ error: 'Cost center not found' });
+
+    const from = from_date || '1900-01-01';
+    const to   = to_date   || new Date().toISOString().split('T')[0];
+
+    // Aggregate totals for the period
+    const aggR = await pool.query(
+      `SELECT 
+         COUNT(*)::int AS total_count,
+         COALESCE(SUM(jl.debit), 0) AS total_dr, 
+         COALESCE(SUM(jl.credit), 0) AS total_cr
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       WHERE jl.cost_center_id = $1 AND je.status = 'posted' AND je.date BETWEEN $2 AND $3`,
+      [cost_center_id, from, to]
+    );
+    const totalCount = aggR.rows[0].total_count || 0;
+    const totalDebit = parseFloat(aggR.rows[0].total_dr);
+    const totalCredit = parseFloat(aggR.rows[0].total_cr);
+
+    const txnR = await pool.query(
+      `SELECT
+         je.id          AS je_id,
+         je.je_number,
+         je.date,
+         je.source_type,
+         je.source_id,
+         je.description,
+         jl.debit,
+         jl.credit,
+         a.code         AS account_code,
+         a.name         AS account_name
+       FROM je_lines jl
+       JOIN journal_entries je ON je.id = jl.je_id
+       JOIN accounts a ON a.id = jl.account_id
+       WHERE jl.cost_center_id = $1
+         AND je.status = 'posted'
+         AND je.date BETWEEN $2 AND $3
+       ORDER BY je.date ASC, je.id ASC
+       LIMIT $4 OFFSET $5`,
+      [cost_center_id, from, to, limit, offset]
+    );
+
+    const transactions = txnR.rows.map(r => ({
+      ...r,
+      debit:  parseFloat(r.debit)  || 0,
+      credit: parseFloat(r.credit) || 0,
+    }));
+
+    res.json({
+      costCenter: ccR.rows[0],
+      period:     { from, to },
+      transactions,
+      totalDebit,
+      totalCredit,
+      total: totalCount
+    });
+  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GET /api/reports/costing?from_date=2025-01-01&to_date=2026-05-25
+// Cost per Carat Analysis — aggregates rough_growth + sales data
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/costing', authenticate, async (req, res) => {
+  try {
+    let { from_date, to_date } = req.query;
+    if (!from_date) from_date = '1970-01-01';
+    if (!to_date) to_date = new Date().toISOString().split('T')[0];
+
+    const [growthR, salesR] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int                              AS total_growths,
+          COALESCE(SUM(total_lots), 0)::int          AS total_lots,
+          COALESCE(SUM(total_weight), 0)::numeric    AS total_weight,
+          COALESCE(SUM(cost_seed), 0)::numeric       AS cost_seed,
+          COALESCE(SUM(cost_gas), 0)::numeric        AS cost_gas,
+          COALESCE(SUM(cost_power), 0)::numeric      AS cost_power,
+          COALESCE(SUM(cost_labour), 0)::numeric     AS cost_labour,
+          COALESCE(SUM(cost_consumable), 0)::numeric AS cost_consumable,
+          COALESCE(SUM(cost_maintenance), 0)::numeric AS cost_maintenance,
+          COALESCE(SUM(total_cost), 0)::numeric      AS grand_total
+        FROM rough_growth
+        WHERE growth_date BETWEEN $1 AND $2
+          AND status != 'cancelled'
+      `, [from_date, to_date]),
+
+      pool.query(`
+        SELECT
+          COALESCE(SUM(total_weight), 0)::numeric  AS sale_weight,
+          COALESCE(SUM(grand_total), 0)::numeric   AS sale_amount
+        FROM invoices
+        WHERE doc_date BETWEEN $1 AND $2
+          AND status NOT IN ('cancelled', 'draft')
+          AND invoice_type = 'sale'
+      `, [from_date, to_date]),
+    ]);
+
+    const g = growthR.rows[0];
+    const s = salesR.rows[0];
+
+    const totalWeight  = parseFloat(g.total_weight) || 0;
+    const grandTotal   = parseFloat(g.grand_total)  || 0;
+    const costPerCarat = totalWeight > 0 ? Math.round((grandTotal / totalWeight) * 100) / 100 : 0;
+    const saleWeight   = parseFloat(s.sale_weight)  || 0;
+    const saleAmount   = parseFloat(s.sale_amount)  || 0;
+    const avgSaleRate  = saleWeight > 0 ? Math.round((saleAmount / saleWeight) * 100) / 100 : 0;
+    const marginPerCarat = costPerCarat > 0 ? Math.round((avgSaleRate - costPerCarat) * 100) / 100 : 0;
+
+    const components = [
+      { name: 'Seed',         amount: parseFloat(g.cost_seed)         || 0 },
+      { name: 'Gas',          amount: parseFloat(g.cost_gas)          || 0 },
+      { name: 'Power',        amount: parseFloat(g.cost_power)        || 0 },
+      { name: 'Labour',       amount: parseFloat(g.cost_labour)       || 0 },
+      { name: 'Consumable',   amount: parseFloat(g.cost_consumable)   || 0 },
+      { name: 'Maintenance',  amount: parseFloat(g.cost_maintenance)  || 0 },
+    ];
+
+    const compWithPct = components.map(c => ({
+      ...c,
+      per_carat: totalWeight > 0 ? Math.round((c.amount / totalWeight) * 100) / 100 : 0,
+      pct:       grandTotal  > 0 ? Math.round((c.amount / grandTotal)  * 10000) / 100 : 0,
+    }));
+
+    res.json({
+      summary: {
+        total_growths:   parseInt(g.total_growths) || 0,
+        total_lots:      parseInt(g.total_lots)    || 0,
+        total_weight:    totalWeight,
+        cost_per_carat:  costPerCarat,
+        avg_sale_rate:   avgSaleRate,
+        margin_per_carat: marginPerCarat,
+        grand_total:     grandTotal,
+      },
+      components: compWithPct,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

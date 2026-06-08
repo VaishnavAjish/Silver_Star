@@ -1,0 +1,518 @@
+/* ============================================================
+   LOGIN PAGE  –  Silverstar Grow ERP
+   Split-panel enterprise design (reference: Brickshare style)
+   ============================================================ */
+
+/* ── Root layout ── */
+.lp-root {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  font-family: var(--font);
+  gap: 0;
+  isolation: isolate;
+}
+
+/* ===================================================
+   LEFT  –  Visual / Branding Panel
+   =================================================== */
+.lp-left {
+  position: relative;
+  flex: 1 1 50%;
+  background:
+    url('/login-bg.png') center center / cover no-repeat;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Dark-green gradient overlay that sits on top of the photo */
+.lp-left-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg,
+      rgba(9, 60, 38, 0.82) 0%,
+      rgba(13, 92, 65, 0.68) 50%,
+      rgba(6, 40, 28, 0.78) 100%);
+  z-index: 0;
+}
+
+.lp-left-content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 56px 52px;
+  max-width: 580px;
+}
+
+/* Brand chip (logo + name) */
+.lp-brand-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 100px;
+  padding: 8px 16px 8px 8px;
+  margin-bottom: 36px;
+  width: fit-content;
+}
+
+.lp-brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.lp-brand-chip-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.2px;
+}
+
+/* Headline */
+.lp-headline {
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.22;
+  margin-bottom: 16px;
+  letter-spacing: -0.5px;
+}
+
+.lp-headline-accent {
+  color: #4ade80;
+}
+
+/* Tagline */
+.lp-tagline {
+  font-size: 14.5px;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.65;
+  margin-bottom: 32px;
+  max-width: 380px;
+}
+
+/* Feature list */
+.lp-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lp-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 500;
+}
+
+.lp-feature-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+/* Footer line */
+.lp-left-footer {
+  position: relative;
+  z-index: 1;
+  padding: 20px 52px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+/* ===================================================
+   RIGHT  –  Login Form Panel
+   =================================================== */
+.lp-right {
+  flex: 1 1 50%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 40px 0;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.lp-form-wrapper {
+  width: 100%;
+  max-width: 340px;
+  padding: 0 28px;
+  animation: lp-slide-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Logo row */
+.lp-logo-row {
+  margin-top: 0;
+  margin-bottom: 7px;
+  display: flex;
+  justify-content: center;
+}
+
+/* Light variant of the brand chip — for white panel background */
+.lp-chip-light {
+  background: var(--brand-50);
+  border-color: rgba(13, 124, 95, 0.2);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  margin-bottom: 0;
+  padding: 8px 16px 8px 8px;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
+}
+
+.lp-chip-light:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 16px rgba(13, 124, 95, 0.12), 0 4px 0px rgba(13, 124, 95, 0.15);
+}
+
+.lp-chip-light:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 4px rgba(13, 124, 95, 0.1), 0 0px 0px rgba(13, 124, 95, 0.15);
+}
+
+.lp-chip-light .lp-brand-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.lp-chip-light-text {
+  color: var(--brand-dark);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+/* Welcome heading */
+.lp-welcome {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--g900);
+  line-height: 1.3;
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+  text-align: center;
+}
+
+.lp-welcome-accent {
+  color: var(--brand);
+}
+
+.lp-welcome-sub {
+  font-size: 13px;
+  color: var(--g500);
+  margin-bottom: 32px;
+  font-weight: 400;
+  text-align: center;
+}
+
+/* Decorative divider (matches reference) */
+.lp-divider-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 28px;
+}
+
+.lp-divider-bar {
+  height: 3px;
+  border-radius: 3px;
+}
+
+.lp-divider-solid {
+  width: 36px;
+  background: var(--brand);
+}
+
+.lp-divider-faint {
+  width: 24px;
+  background: var(--g300);
+}
+
+/* ── Error alert ── */
+.lp-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff0f0;
+  border: 1px solid #fecaca;
+  border-left: 3px solid var(--red);
+  color: var(--red);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  animation: lp-shake 0.3s ease;
+}
+
+/* ── Form ── */
+.lp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Input wrapper (icon + field + eye toggle) */
+.lp-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lp-input-icon {
+  position: absolute;
+  left: 14px;
+  color: var(--g400);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  transition: color 0.18s;
+}
+
+.lp-input {
+  width: 100%;
+  padding: 13px 14px 13px 42px !important;
+  border: 1.5px solid var(--g300) !important;
+  border-radius: 10px !important;
+  font-size: 13.5px !important;
+  color: var(--g800);
+  background: var(--g50) !important;
+  transition: border-color 0.18s, box-shadow 0.18s, background 0.18s !important;
+  outline: none !important;
+  font-family: var(--font);
+  text-align: left !important;
+}
+
+.lp-input::placeholder {
+  color: var(--g400);
+  font-size: 13px;
+}
+
+.lp-input:focus {
+  border-color: var(--brand) !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 3px rgba(13, 124, 95, 0.12) !important;
+}
+
+/* When field is focused, icon turns brand-colored */
+.lp-input-wrap:focus-within .lp-input-icon {
+  color: var(--brand);
+}
+
+/* Password eye toggle */
+.lp-eye-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--g400);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+  outline: none;
+}
+
+.lp-eye-btn:hover {
+  color: var(--g600);
+}
+
+.lp-eye-btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+/* ── Submit Button ── */
+.lp-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  letter-spacing: 0.2px;
+  margin-top: 4px;
+  box-shadow: 0 4px 14px rgba(13, 124, 95, 0.3), 0 3px 0px rgba(9, 90, 68, 0.8);
+}
+
+.lp-btn:hover:not(:disabled) {
+  background: var(--brand-light);
+  box-shadow: 0 6px 20px rgba(13, 124, 95, 0.35), 0 4px 0px rgba(9, 90, 68, 0.8);
+  transform: translateY(-1px);
+}
+
+.lp-btn:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 2px 8px rgba(13, 124, 95, 0.2), 0 0px 0px rgba(9, 90, 68, 0.8);
+}
+
+.lp-btn:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.lp-btn--loading {
+  background: var(--brand-dark);
+}
+
+/* ── Spinner ── */
+.lp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: lp-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ===================================================
+   ANIMATIONS
+   =================================================== */
+@keyframes lp-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lp-shake {
+  0% {
+    transform: translateX(0);
+  }
+
+  20% {
+    transform: translateX(-5px);
+  }
+
+  40% {
+    transform: translateX(5px);
+  }
+
+  60% {
+    transform: translateX(-4px);
+  }
+
+  80% {
+    transform: translateX(4px);
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* ===================================================
+   RESPONSIVE
+   =================================================== */
+
+/* Tablet: keep 50/50, reduce padding */
+@media (max-width: 1024px) {
+  .lp-left {
+    flex: 1 1 50%;
+  }
+
+  .lp-right {
+    flex: 1 1 50%;
+  }
+
+  .lp-left-content {
+    padding: 48px 40px;
+  }
+
+  .lp-left-footer {
+    padding: 16px 40px;
+  }
+}
+
+/* Mobile / Small tablet: hide left panel, full-width form */
+@media (max-width: 768px) {
+  .lp-root {
+    flex-direction: column;
+    background: #fff;
+  }
+
+  .lp-left {
+    display: none;
+  }
+
+  .lp-right {
+    flex: 1;
+    flex-basis: auto;
+    box-shadow: none;
+    padding: 48px 24px;
+  }
+
+  .lp-form-wrapper {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  /* Show a compact brand bar at top on mobile */
+  .lp-root::before {
+    content: '';
+    display: block;
+    height: 4px;
+    background: linear-gradient(90deg, var(--brand), var(--brand-light));
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 400px) {
+  .lp-right {
+    padding: 32px 20px;
+  }
+
+  .lp-welcome {
+    font-size: 19px;
+  }
+}

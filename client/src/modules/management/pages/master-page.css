@@ -1,0 +1,100 @@
+/* Master Page Premium Redesign */
+
+.master-page-wrapper {
+  background: linear-gradient(135deg, var(--g50, #f8fafc) 0%, #eef2f6 100%);
+  height: 100%;
+  overflow: hidden;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Glassmorphic Filter Bar */
+.master-filter-container {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+  padding: 4px 8px;
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 50;
+}
+.master-filter-container:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+}
+
+/* DataGrid Elevation */
+.master-grid-container {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--g200, #e2e8f0);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* Inner tweaks to ensure grid aligns with border-radius */
+.master-grid-container .dgrid {
+  border: none;
+}
+
+/* Modern Primary Button */
+.master-page-wrapper .btn-primary {
+  background: linear-gradient(135deg, var(--brand, #2563eb) 0%, var(--brand-dark, #1d4ed8) 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.master-page-wrapper .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+  filter: brightness(1.05);
+}
+.master-page-wrapper .btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Icon Button Hover */
+.master-page-wrapper .icon-btn {
+  transition: all 0.2s ease;
+  border-radius: 6px;
+}
+.master-page-wrapper .icon-btn:hover {
+  background: var(--g100, #f1f5f9);
+  transform: scale(1.1);
+}
+
+/* Modal Form Premium Inputs */
+.master-modal-form input,
+.master-modal-form select,
+.master-modal-form textarea {
+  border-radius: 6px;
+  border: 1px solid var(--g300, #cbd5e1);
+  background: var(--g50, #f8fafc);
+  transition: all 0.2s ease;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.master-modal-form input:focus,
+.master-modal-form select:focus,
+.master-modal-form textarea:focus {
+  background: #ffffff;
+  border-color: var(--brand, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  outline: none;
+}
+.master-modal-form label {
+  color: var(--g600, #475569);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}

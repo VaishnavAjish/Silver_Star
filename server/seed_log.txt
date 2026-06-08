@@ -1,0 +1,2 @@
+Connected to DB
+Successfully seeded default accounts

@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: silverstar-db
+    environment:
+      POSTGRES_DB: silverstar_grow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # SQL files run in alphabetical order ONLY on fresh volume
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/seed-data.sql:/docker-entrypoint-initdb.d/02-seed-data.sql:ro
+      - ./sql/phase2-schema.sql:/docker-entrypoint-initdb.d/03-phase2.sql:ro
+      - ./sql/phase3-schema.sql:/docker-entrypoint-initdb.d/04-phase3.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d silverstar_grow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - silverstar-net
+
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  silverstar-net:
+    driver: bridge

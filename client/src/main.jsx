@@ -1,0 +1,42 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import App from './App';
+import { AuthProvider } from './core/context/AuthContext';
+import { ClipboardProvider } from './core/context/ClipboardContext';
+import { SocketProvider } from './core/context/SocketContext';
+import { SilverstarQueryProvider } from './shared/query/QueryProvider';
+import { useMultiTabSync } from './shared/hooks/useMultiTabSync';
+import './core/styles/app.css';
+
+/**
+ * Bootstraps the BroadcastChannel multi-tab sync listener once at app root.
+ * Must be inside SilverstarQueryProvider to access the query client.
+ */
+function AppSyncBootstrap() {
+  useMultiTabSync(); // Sets up the cross-tab cache listener
+  return null;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <AuthProvider>
+      <SilverstarQueryProvider>
+        <SocketProvider>
+          <AppSyncBootstrap />
+          <ClipboardProvider>
+              <App />
+              <Toaster
+                position="bottom-right"
+                toastOptions={{
+                  duration: 3000,
+                  style: { background: '#1a1a2e', color: '#e0e0e0', borderRadius: '8px' },
+                }}
+              />
+          </ClipboardProvider>
+        </SocketProvider>
+      </SilverstarQueryProvider>
+    </AuthProvider>
+  </BrowserRouter>
+);
