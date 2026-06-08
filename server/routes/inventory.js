@@ -591,7 +591,6 @@ router.get('/:id/history', authenticate, async (req, res) => {
 
 // GET /api/inventory/:id
 router.get('/:id', authenticate, async (req, res) => {
-  console.log('[INV] GET /:id handler reached, id=' + req.params.id + ' user=' + req.user?.id);
   try {
     const result = await pool.query(
       `SELECT inv.*, i.name as item_name, i.code as item_code, i.category,
