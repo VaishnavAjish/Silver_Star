@@ -30,9 +30,16 @@ process.on('uncaughtException', (err) => {
   setTimeout(() => process.exit(1), 5_000).unref();
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
+process.on('unhandledRejection', (reason) => {
+  console.error(JSON.stringify({
+    level:     'error',
+    type:      'unhandledRejection',
+    message:   reason instanceof Error ? reason.message : String(reason),
+    stack:     reason instanceof Error ? reason.stack : undefined,
+    timestamp: new Date().toISOString(),
+  }));
+  // Do NOT exit for unhandled rejections — log and continue.
+  // Express asyncWrap already catches route-level rejections.
 });
 
 // ── Required environment variable validation — fail fast on missing config ────
