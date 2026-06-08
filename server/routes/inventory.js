@@ -589,6 +589,21 @@ router.get('/:id/history', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/inventory/summary
+router.get('/summary', authenticate, async (req, res) => {
+  try {
+    const summaryR = await pool.query(`
+      SELECT
+        COUNT(DISTINCT item_id) AS total_items,
+        SUM(qty) AS total_qty,
+        SUM(amount) AS total_value
+      FROM inventory
+      WHERE qty > 0
+    `);
+    res.json(summaryR.rows[0]);
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/inventory/:id
 router.get('/:id', authenticate, async (req, res) => {
   try {

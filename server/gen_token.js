@@ -1,6 +1,1 @@
-const jwt = require('jsonwebtoken');
-require('dotenv').config();
-console.log("Secret is", process.env.JWT_SECRET);
-const token = jwt.sign({id: 1, role: 'admin', organizationId: 1, sessionId: 'foo'}, process.env.JWT_SECRET, {expiresIn: '1h'});
-require('fs').writeFileSync('temp_token.txt', token);
-console.log("WROTE TOKEN");
+const jwt=require('jsonwebtoken'); console.log(jwt.sign({id:1,role:'admin'},'change-this-to-a-random-64-char-secret-string',{expiresIn:'7d'}));
