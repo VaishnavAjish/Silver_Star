@@ -211,7 +211,7 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
       },
     });
   } catch (err) { 
-    require('fs').writeFileSync('inventory_err_1.txt', err.message + '\\n' + err.stack);
+    logger.error('[inventory] GET / error:', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message }); 
   }
 });

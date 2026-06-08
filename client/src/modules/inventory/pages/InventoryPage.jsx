@@ -173,6 +173,7 @@ export default function InventoryPage() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        if (window.getSelection().toString().trim()) return;
         const active = document.activeElement;
         if (['INPUT', 'TEXTAREA'].includes(active.tagName) && active.type !== 'checkbox') return;
         const selectedLots = data.filter(r => mixSelected.has(r.id));
@@ -686,22 +687,25 @@ export default function InventoryPage() {
   };
 
   const menuItems = row => {
-    const isActive = row.status === 'IN STOCK';
     const isIP = row.status === 'IN PROCESS';
     const mixCked = mixSelected.has(row.id);
+    const perms = getAllowedActions(row);
+    
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
-      { label: 'Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
-      ...(isActive ? [
-        { label: 'Split Lot', icon: <GitBranch size={11} />, fn: () => setActiveModal({ type: 'split', lotId: row.id }), color: '#E65100' },
-        { label: mixCked ? 'Remove from Mix' : 'Add to Mix', icon: <GitMerge size={11} />, fn: () => toggleMix(row.id) },
-        { label: 'Issue to Process', icon: <Package size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
-        { label: 'Stock Transfer', icon: <Send size={11} />, fn: () => openStockTransferModal([row], () => { setSelectedTransferRows([]); load(); }), color: 'var(--brand-dark)' },
-      ] : []),
+      perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
+      perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
+      perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
+      perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={11} />, fn: () => navigate('/manufacturing/control-tower'), color: 'var(--brand)' },
+      perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={11} />, fn: () => navigate('/manufacturing/growth-output'), color: 'var(--brand)' },
+      perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={11} />, fn: () => openStockTransferModal([row], () => { setSelectedTransferRows([]); load(); }), color: 'var(--brand-dark)' },
+      perms.canSplit && { label: 'Split Lot', icon: <GitBranch size={11} />, fn: () => setActiveModal({ type: 'split', lotId: row.id }), color: '#E65100' },
+      perms.canMix && { label: mixCked ? 'Remove from Mix' : 'Mix Into…', icon: <GitMerge size={11} />, fn: () => toggleMix(row.id), color: 'var(--brand)' },
+      perms.canCompleteGrowthRun && { label: 'Complete Growth Run', icon: <CheckCircle size={11} />, fn: () => toast('Please open lot workspace to complete Growth Run'), color: 'var(--brand)' },
       ...(isIP ? [
         { label: 'Process Issues', icon: <Package size={11} />, fn: () => navigate(`/inventory/process-issues?lot_id=${row.id}`), color: '#E65100' },
       ] : []),
-    ];
+    ].filter(Boolean);
   };
 
   return (
