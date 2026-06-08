@@ -253,18 +253,20 @@ async function dispatchEvent(topic, payload, opts = {}) {
     // ── Cross-bridge publishing (Redis, Kafka, MQTT, NATS, Firebase, GraphQL) ─
     const bridgePayload = { topic, payload, timestamp: new Date().toISOString() };
     // Fire-and-forget to avoid blocking the calling route
+    // Each bridge call is optional and may return undefined (not a promise);
+    // optional-chained .catch() prevents "Cannot read properties of undefined".
     const redis = getRedisPubSub();
-    if (redis) redis.publish(topic, bridgePayload).catch(() => {});
+    if (redis) redis.publish(topic, bridgePayload)?.catch(() => {});
     const kafka = getKafkaSink();
-    if (kafka) kafka.produce(topic, bridgePayload).catch(() => {});
+    if (kafka) kafka.produce(topic, bridgePayload)?.catch(() => {});
     const mqtt = getMqttBroker();
-    if (mqtt) mqtt.publish(topic, bridgePayload).catch(() => {});
+    if (mqtt) mqtt.publish(topic, bridgePayload)?.catch(() => {});
     const nats = getNatsClient();
-    if (nats) nats.publish(topic, bridgePayload).catch(() => {});
+    if (nats) nats.publish(topic, bridgePayload)?.catch(() => {});
     const fb = getFirebaseSync();
-    if (fb) fb.syncEvent(topic, bridgePayload).catch(() => {});
+    if (fb) fb.syncEvent(topic, bridgePayload)?.catch(() => {});
     const gql = getGraphQLSubs();
-    if (gql) gql.publish(topic, payload).catch(() => {});
+    if (gql) gql.publish(topic, payload)?.catch(() => {});
 
     // ── Invalidate affected cache prefixes ────────────────────────────────────
     const cachePrefix = topic.split('.')[0];

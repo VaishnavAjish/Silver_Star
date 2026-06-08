@@ -52,8 +52,12 @@ export function SocketProvider({ children }) {
 
     const socket = io(serverUrl, {
       auth: { token },
-      // Try WebSocket first, fall back to long-polling if WS is blocked by proxy
-      transports: ['websocket', 'polling'],
+      // Start with HTTP polling to reliably establish the session through any proxy,
+      // then automatically upgrade to WebSocket once the connection is confirmed.
+      // This avoids the noisy WebSocket upgrade failure that occurs when going
+      // through Vite's dev proxy or nginx before the session is established.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10000,

@@ -1,11 +1,6 @@
-require('dotenv').config();
 const jwt = require('jsonwebtoken');
-const fs = require('fs');
-
-const token = jwt.sign(
-  { id: 1, email: 'admin@silverstargrow.com', role_id: 1, department_id: null },
-  process.env.JWT_SECRET,
-  { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
-);
-fs.writeFileSync('token.txt', token);
-console.log('Token generated');
+require('dotenv').config();
+console.log("Secret is", process.env.JWT_SECRET);
+const token = jwt.sign({id: 1, role: 'admin', organizationId: 1, sessionId: 'foo'}, process.env.JWT_SECRET, {expiresIn: '1h'});
+require('fs').writeFileSync('temp_token.txt', token);
+console.log("WROTE TOKEN");

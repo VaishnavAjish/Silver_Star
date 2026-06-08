@@ -316,6 +316,18 @@ const { negotiateSignalR, handleSignalRMessage } = require('./services/signalrBr
 app.get('/api/signalr/negotiate', authenticate, negotiateSignalR);
 app.post('/api/signalr', authenticate, handleSignalRMessage);
 
+// ── Static React Build (production single-server mode) ───────────────────────
+if (process.env.SERVE_STATIC === 'true') {
+  const path = require('path');
+  const staticDir = path.join(__dirname, 'public');
+  app.use(express.static(staticDir, { maxAge: '1y', immutable: true }));
+  // SPA fallback — all non-API routes serve index.html
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
+    res.sendFile(path.join(staticDir, 'index.html'));
+  });
+}
+
 // ── Error Handler ────────────────────────────────────────────────────────
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 app.use(notFound);

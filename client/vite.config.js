@@ -30,8 +30,11 @@ export default defineConfig({
       },
       '/socket.io': {
         target: 'http://127.0.0.1:5001',
-        changeOrigin: false,
+        changeOrigin: true,
         ws: true,
+        // Rewrite origin to localhost so the server CORS check always passes
+        // regardless of which LAN IP the browser uses to reach this machine.
+        headers: { origin: 'http://localhost:5173' },
       },
     },
     fs: { strict: false },

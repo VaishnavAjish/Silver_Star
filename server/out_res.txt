@@ -1,0 +1,7 @@
+Connected to DB
+Began transaction
+ERROR: Code sequence not configured for entity type: "vendor"
+Error: Code sequence not configured for entity type: "vendor"
+    at reserveCode (E:\silverstar-grow\silverstar-grow\server\services\codeGeneratorService.js:54:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async test (E:\silverstar-grow\silverstar-grow\server\test_reserve.js:14:18)
