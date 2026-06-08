@@ -28,10 +28,22 @@ async function applyPurchase(client, itemId, qty, rate, amount) {
   );
 }
 
-async function applyStockOut(client, itemId, qty, value) {
+async function applyStockOut(client, itemId, qty, value, options = {}) {
   const quantity = Number(qty) || 0;
   const stockValue = round2(value);
   if (quantity <= 0) throw new Error('Stock-out quantity must be greater than zero');
+
+  const { referenceType = 'manual', referenceId = null, reserveOnly = false } = options;
+
+  // Reserve stock first to prevent race conditions
+  if (referenceType && referenceId) {
+    await client.query(
+      `INSERT INTO stock_reservations (item_id, reference_type, reference_id, quantity, status)
+       VALUES ($1, $2, $3, $4, 'pending')
+       ON CONFLICT DO NOTHING`,
+      [itemId, referenceType, referenceId, quantity]
+    );
+  }
 
   const itemR = await client.query(
     'SELECT quantity_on_hand, inventory_value FROM items WHERE id = $1 FOR UPDATE',
@@ -40,7 +52,16 @@ async function applyStockOut(client, itemId, qty, value) {
   if (!itemR.rows.length) throw new Error('Item not found');
 
   const currentQty = Number(itemR.rows[0].quantity_on_hand) || 0;
-  if (currentQty + 0.0001 < quantity) throw new Error('Insufficient stock. Negative stock is not allowed.');
+  if (currentQty + 0.0001 < quantity) {
+    // Release reservation on failure
+    if (referenceType && referenceId) {
+      await client.query(
+        'UPDATE stock_reservations SET status = \'cancelled\' WHERE item_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = \'pending\'',
+        [itemId, referenceType, referenceId]
+      );
+    }
+    throw new Error('Insufficient stock. Negative stock is not allowed.');
+  }
 
   const currentValue = Number(itemR.rows[0].inventory_value) || 0;
   const nextQty = round4(currentQty - quantity);
@@ -54,6 +75,14 @@ async function applyStockOut(client, itemId, qty, value) {
      WHERE id = $3`,
     [nextQty, nextValue, itemId]
   );
+
+  // Mark reservation as confirmed
+  if (referenceType && referenceId) {
+    await client.query(
+      'UPDATE stock_reservations SET status = \'confirmed\', confirmed_at = NOW() WHERE item_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = \'pending\'',
+      [itemId, referenceType, referenceId]
+    );
+  }
 }
 
 async function getInventoryValuation(asOfDate, db = pool) {

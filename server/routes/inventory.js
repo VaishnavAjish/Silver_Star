@@ -257,7 +257,7 @@ router.get('/filters/active', authenticate, async (req, res) => {
       vendors: vendorsResult.rows,
       processes: processesResult.rows,
     });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/opening/list
@@ -278,7 +278,7 @@ router.get('/opening/list', authenticate, async (req, res) => {
       })),
       total: result.rows.length,
     });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/inventory/opening
@@ -360,7 +360,7 @@ router.get('/opening', authenticate, async (req, res) => {
     const totalPages = Math.ceil(totalCount / pageSize);
 
     res.json({ data: result.rows, totalCount, page, pageSize, totalPages });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/closing
@@ -370,7 +370,7 @@ router.get('/closing', authenticate, async (req, res) => {
     const page = parseInt(req.query.page || '1', 10);
     const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
     res.json(await getInventoryValuationLines(as_of_date, page, pageSize));
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/inventory/closing
@@ -420,7 +420,7 @@ router.get('/by-category/:category', authenticate, async (req, res) => {
       [req.params.category]
     );
     res.json(result.rows);
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/:id/movement-ledger
@@ -489,7 +489,7 @@ router.get('/:id/movement-ledger', authenticate, async (req, res) => {
     `, [lotId]);
 
     res.json({ lot: lot[0], events });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/:id/history
@@ -607,7 +607,7 @@ router.get('/:id', authenticate, async (req, res) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[inventory.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;

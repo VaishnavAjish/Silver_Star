@@ -1,0 +1,22 @@
+# Netlify deployment config for Silverstar Grow (repo root).
+# Netlify auto-discovers this file at the repository root — no UI base-directory
+# setting needed. It builds the React/Vite client, publishes client/dist, proxies
+# /api/* to the Render backend (same-origin, no CORS), and adds the SPA fallback.
+
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
+
+# Forward all API calls to the Express backend on Render.
+[[redirects]]
+  from = "/api/*"
+  to = "https://silverstar-grow.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback — every other path serves index.html (React Router takes over).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

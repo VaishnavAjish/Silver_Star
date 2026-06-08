@@ -45,33 +45,32 @@ export default function ContentArea({ tabs, activeTabId, componentMap, resolveCo
     return null;
   };
 
+  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  const Component = activeTab ? getComponent(activeTab.id) : null;
+
   return (
     <div className="tab-content-area">
-      {tabs.map(tab => {
-        const isActive = tab.id === activeTabId;
-        const Component = getComponent(tab.id);
-        return (
-          <div
-            key={tab.id}
-            className={`tab-panel${isActive ? ' tab-panel-active' : ''}`}
-            role="tabpanel"
-            aria-hidden={!isActive}
-            aria-labelledby={`tab-${tab.id}`}
-          >
-            {Component ? (
-              <TabErrorBoundary key={`${tab.id}-${tab.refreshKey || 0}`}>
-                <Suspense fallback={<PanelFallback />}>
-                  <Component />
-                </Suspense>
-              </TabErrorBoundary>
-            ) : (
-              <div className="tab-panel-placeholder">
-                <p>{tab.name}</p>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {activeTab && (
+        <div
+          key={activeTab.id}
+          className="tab-panel tab-panel-active"
+          role="tabpanel"
+          aria-hidden="false"
+          aria-labelledby={`tab-${activeTab.id}`}
+        >
+          {Component ? (
+            <TabErrorBoundary key={`${activeTab.id}-${activeTab.refreshKey || 0}`}>
+              <Suspense fallback={<PanelFallback />}>
+                <Component />
+              </Suspense>
+            </TabErrorBoundary>
+          ) : (
+            <div className="tab-panel-placeholder">
+              <p>{activeTab.name}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { asyncWrap } = require('../middleware/errorHandler');
 const securityConfig = require('../config/security');
 const { logger } = require('../middleware/logger');
+const { encryptMFASecret, decryptMFASecret, isEncrypted } = require('../utils/mfaEncryption');
 
 const router = express.Router();
 
@@ -48,9 +49,30 @@ const issueTokens = async (res, user) => {
 // POST /api/auth/login
 router.post('/login', asyncWrap(async (req, res) => {
   const { username, password, mfaToken } = req.body;
+  const ip = req.ip || req.connection.remoteAddress;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
+  }
+
+  // Check for account lockout due to failed attempts
+  const lockoutCheck = await pool.query(
+    `SELECT COUNT(*) as failed_count, MAX(created_at) as last_attempt
+     FROM login_attempts
+     WHERE username = $1 AND ip_address = $2 AND success = false
+       AND created_at > NOW() - INTERVAL '15 minutes'`,
+    [username.toLowerCase(), ip]
+  );
+
+  const failedCount = parseInt(lockoutCheck.rows[0]?.failed_count || '0');
+  if (failedCount >= 5) {
+    const lastAttempt = lockoutCheck.rows[0]?.last_attempt;
+    const lockoutUntil = new Date(new Date(lastAttempt).getTime() + 15 * 60 * 1000);
+    logger.warn('[Auth] Account locked due to failed attempts', { username, ip, failedCount });
+    return res.status(429).json({ 
+      error: 'Too many failed attempts. Account locked for 15 minutes.',
+      lockoutUntil: lockoutUntil.toISOString()
+    });
   }
 
   const result = await pool.query(
@@ -58,6 +80,11 @@ router.post('/login', asyncWrap(async (req, res) => {
   );
 
   if (result.rows.length === 0) {
+    // Record failed attempt for non-existent user (but don't reveal user existence)
+    await pool.query(
+      'INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, false)',
+      [username.toLowerCase(), ip]
+    );
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
@@ -76,6 +103,11 @@ router.post('/login', asyncWrap(async (req, res) => {
   // NOTE: No hardcoded fallback credentials. All accounts must have a proper hash.
 
   if (!valid) {
+    // Record failed attempt
+    await pool.query(
+      'INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, false)',
+      [username.toLowerCase(), ip]
+    );
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
@@ -90,8 +122,17 @@ router.post('/login', asyncWrap(async (req, res) => {
     if (!mfaToken) {
       return res.status(403).json({ error: 'MFA token required', mfaRequired: true });
     }
-    const isValidMFA = otplib.authenticator.check(mfaToken, user.mfa_secret);
+    // Decrypt MFA secret if stored encrypted
+    const mfaSecret = user.mfa_secret_encrypted && isEncrypted(user.mfa_secret_encrypted)
+      ? decryptMFASecret(user.mfa_secret_encrypted)
+      : user.mfa_secret;
+    const isValidMFA = otplib.authenticator.check(mfaToken, mfaSecret);
     if (!isValidMFA) {
+      // Record failed MFA attempt
+      await pool.query(
+        'INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, false)',
+        [username.toLowerCase(), ip]
+      );
       return res.status(401).json({ error: 'Invalid MFA token' });
     }
   }
@@ -99,8 +140,14 @@ router.post('/login', asyncWrap(async (req, res) => {
   // 4. Update last login
   await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
 
-  // 5. Issue Tokens
-  const token = issueTokens(res, user);
+  // 5. Record successful login (clears failed attempts)
+  await pool.query(
+    'INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, true)',
+    [username.toLowerCase(), ip]
+  );
+
+  // 6. Issue Tokens
+  const token = await issueTokens(res, user);
 
   res.json({
     token,
@@ -120,9 +167,10 @@ router.post('/mfa/setup', authenticate, asyncWrap(async (req, res) => {
 
   const secret = otplib.authenticator.generateSecret();
   const otpauth = otplib.authenticator.keyuri(user.username, securityConfig.mfa.issuer, secret);
+  const encryptedSecret = encryptMFASecret(secret);
   
-  // Store secret temporarily or permanently (needs verification to activate)
-  await pool.query('UPDATE users SET mfa_secret = $1 WHERE id = $2', [secret, user.id]);
+  // Store encrypted secret
+  await pool.query('UPDATE users SET mfa_secret = $1, mfa_secret_encrypted = $2 WHERE id = $3', [secret, encryptedSecret, user.id]);
   
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
   
@@ -134,8 +182,12 @@ router.post('/mfa/verify', authenticate, asyncWrap(async (req, res) => {
   const { token } = req.body;
   const user = req.user;
   
-  const result = await pool.query('SELECT mfa_secret FROM users WHERE id = $1', [user.id]);
-  const secret = result.rows[0].mfa_secret;
+  const result = await pool.query('SELECT mfa_secret, mfa_secret_encrypted FROM users WHERE id = $1', [user.id]);
+  const row = result.rows[0];
+  // Use encrypted secret if available, otherwise fall back to plaintext
+  const secret = row.mfa_secret_encrypted && isEncrypted(row.mfa_secret_encrypted)
+    ? decryptMFASecret(row.mfa_secret_encrypted)
+    : row.mfa_secret;
 
   if (!secret) return res.status(400).json({ error: 'MFA setup not initiated' });
 
