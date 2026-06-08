@@ -73,8 +73,11 @@ module.exports = {
     // Allow same-origin WebSocket + any origins declared in CORS_ORIGIN env var
     connectSrc: [
       "'self'",
-      "ws://localhost:5000",
-      "wss://localhost:5000",
+      // Dev fallbacks
+      ...(process.env.NODE_ENV !== 'production'
+        ? ['ws://localhost:5000', 'ws://localhost:5001', 'ws://localhost:5173']
+        : []),
+      // Production origins from CORS_ORIGIN env (http→ws, https→wss)
       ...(process.env.CORS_ORIGIN
         ? process.env.CORS_ORIGIN.split(',').map(o => o.trim().replace(/^http/, 'ws'))
         : []),

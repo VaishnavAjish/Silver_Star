@@ -19,7 +19,9 @@ const DB_CONFIG = {
   // instead of silently hanging for minutes on a dropped DB connection.
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.DB_SSL === 'true'
+    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
+    : false,
 };
 
 const primaryPool = new Pool(DB_CONFIG);

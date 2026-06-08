@@ -43,6 +43,11 @@ app.use(compression({ level: 6, threshold: 1024 }));
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
   : ['http://localhost:5173', 'http://localhost:3000'];
+
+if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
+  console.error('[FATAL] CORS_ORIGIN must be set in production. Set it to your domain, e.g. https://app.yourdomain.com');
+  process.exit(1);
+}
 app.use(cors({ origin: corsOrigins, credentials: true }));
 
 // ── Body Parsers ──────────────────────────────────────────────────────────
@@ -89,8 +94,14 @@ app.use(requestTimeout(parseInt(process.env.REQUEST_TIMEOUT_MS) || 30000));
 // patterns. Restrict to authenticated users only.
 app.get('/metrics', authenticate, metricsEndpoint);
 
-// ── Health Check (authenticated) ───────────────────────────────────────────────
-app.get('/api/health', authenticate, async (req, res) => {
+// ── Health Check — unauthenticated (for ALB / ECS / k8s probes) ───────────────
+app.get('/api/health', async (req, res) => {
+  const health = await healthCheck();
+  res.status(health.status === 'ok' ? 200 : 503).json({ status: health.status, db: health.status });
+});
+
+// ── Health Check — detailed (authenticated, for internal monitoring) ───────────
+app.get('/api/health/detailed', authenticate, async (req, res) => {
   const health = await healthCheck();
   health.uptime = process.uptime();
   health.memory = process.memoryUsage();

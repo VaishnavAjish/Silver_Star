@@ -12,61 +12,6 @@ const { getInventoryValuation, round2 } = require('../services/inventoryAccounti
 
 const CACHE_TTL = parseInt(process.env.DASHBOARD_TTL) || 30;
 
-// ── Dashboard config table init (idempotent) ──────────────────────────
-primaryPool.query(`
-  CREATE TABLE IF NOT EXISTS user_dashboard_widgets (
-    id         SERIAL PRIMARY KEY,
-    user_id    INTEGER NOT NULL,
-    widget_key TEXT    NOT NULL,
-    position   INTEGER DEFAULT 0,
-    is_visible BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (user_id, widget_key)
-  )
-`).then(async () => {
-  try {
-    await primaryPool.query(`
-      DELETE FROM user_dashboard_widgets a
-      USING user_dashboard_widgets b
-      WHERE a.id < b.id
-        AND a.user_id = b.user_id
-        AND a.widget_key = b.widget_key
-    `);
-  } catch (e) { /* ignore */ }
-  try {
-    await primaryPool.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint
-          WHERE conname = 'user_dashboard_widgets_user_id_widget_key_key'
-            AND conrelid = 'user_dashboard_widgets'::regclass
-        ) THEN
-          ALTER TABLE user_dashboard_widgets
-            ADD CONSTRAINT user_dashboard_widgets_user_id_widget_key_key
-            UNIQUE (user_id, widget_key);
-        END IF;
-      END$$;
-    `);
-  } catch (e) { /* ignore */ }
-  try {
-    await primaryPool.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint
-          WHERE conname = 'fk_udw_user_id'
-            AND conrelid = 'user_dashboard_widgets'::regclass
-        ) THEN
-          ALTER TABLE user_dashboard_widgets
-            ADD CONSTRAINT fk_udw_user_id
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-        END IF;
-      END$$;
-    `);
-  } catch (e) { /* ignore */ }
-}).catch(err => logger.error('[dashboard] Table init error:', err.message));
-
 const DEFAULT_WIDGETS = [
   { widget_key: 'profit_loss_summary', position: 0, is_visible: true },
   { widget_key: 'bank_balance',        position: 1, is_visible: true },
@@ -154,7 +99,7 @@ function sixMonthsStart() {
 
 // ─── Widget data resolvers (ported from v1.4) ──────────────────────────
 async function resolveWidget(key) {
-  const cacheKey = `dashboard_widget_${key}_${new Date().toISOString().split('T')[0]}`;
+  const cacheKey = `dashboard_widget_${key}`;
   switch (key) {
     case 'profit_loss_summary': {
       return cache.get(cacheKey, CACHE_TTL, async () => {
