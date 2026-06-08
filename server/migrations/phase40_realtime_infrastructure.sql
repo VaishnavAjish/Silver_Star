@@ -25,21 +25,9 @@ CREATE INDEX IF NOT EXISTS idx_event_outbox_created
 CREATE INDEX IF NOT EXISTS idx_event_outbox_topic
   ON sys_event_outbox (topic, created_at DESC);
 
--- Auto-purge function: delete events older than 24 hours
--- Schedule this via pg_cron or call it from a background job
-CREATE OR REPLACE FUNCTION purge_old_events() RETURNS INTEGER AS $$
-DECLARE
-  deleted INTEGER;
-BEGIN
-  WITH del AS (
-    DELETE FROM sys_event_outbox
-    WHERE created_at < NOW() - INTERVAL '24 hours'
-    RETURNING id
-  )
-  SELECT COUNT(*) INTO deleted FROM del;
-  RETURN deleted;
-END;
-$$ LANGUAGE plpgsql;
+-- Auto-purge: delete events older than 24 hours
+-- Run via pg_cron or background job: DELETE FROM sys_event_outbox WHERE created_at < NOW() - INTERVAL '24 hours';
+-- (Function removed from migration due to semicolon splitting issue in migration runner)
 
 -- ── Add version columns for Optimistic Concurrency Control ────────────────────
 -- These prevent concurrent edits from silently overwriting each other.
@@ -47,49 +35,10 @@ $$ LANGUAGE plpgsql;
 -- rowcount = 1 to detect conflicts.
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Inventory
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'inventory' AND column_name = 'version'
-  ) THEN
-    ALTER TABLE inventory ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-  END IF;
-END$$;
-
--- Process transactions
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'process_transactions' AND column_name = 'version'
-  ) THEN
-    ALTER TABLE process_transactions ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-  END IF;
-END$$;
-
--- Purchase notes
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'purchase_notes' AND column_name = 'version'
-  ) THEN
-    ALTER TABLE purchase_notes ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-  END IF;
-END$$;
-
--- Invoices (sales)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'invoices' AND column_name = 'version'
-  ) THEN
-    ALTER TABLE invoices ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-  END IF;
-END$$;
+ALTER TABLE inventory ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE process_transactions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE purchase_notes ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
 
 -- ── Verify ────────────────────────────────────────────────────────────────────
 SELECT

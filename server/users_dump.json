@@ -1,0 +1,10 @@
+[
+  {
+    "username": "Superadmin",
+    "password_hash": "$argon2id$v=19$m=65536,t=3,p=4$FxuBiGF9PwjmhPRKXLDyww$xN3kcTU11TWc36Rjjm3DrBKfUnmVWCt00cxT5ZB3Fm4"
+  },
+  {
+    "username": "admin",
+    "password_hash": "$argon2id$v=19$m=65536,t=3,p=4$QoHV0IHqCyOtDK/CfJInCQ$v7pgl9xWBkdR7UC5AhYDWTvb6n85s2ecwo+ZygjD3E4"
+  }
+]

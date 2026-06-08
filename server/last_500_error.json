@@ -7,5 +7,5 @@
   "message": "Database table not found. Schema may need migration.",
   "pgCode": "42P01",
   "stack": "error: relation \"login_attempts\" does not exist\n    at E:\\silverstar-grow\\silverstar-grow\\server\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Object.query (E:\\silverstar-grow\\silverstar-grow\\server\\db\\pool.js:65:20)\n    at async E:\\silverstar-grow\\silverstar-grow\\server\\routes\\auth.js:59:24",
-  "timestamp": "2026-06-08T08:31:24.825Z"
+  "timestamp": "2026-06-08T08:38:35.592Z"
 }
