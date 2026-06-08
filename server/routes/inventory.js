@@ -22,6 +22,7 @@ router.get('/', authenticate, async (req, res) => {
       qty_min, qty_max,
       weight_min, weight_max,
       ids,
+      fields,
     } = req.query;
 
     const params = [];
@@ -105,7 +106,73 @@ router.get('/', authenticate, async (req, res) => {
       dim_depth:  `inv.dim_depth ${d} NULLS LAST`,
       dim_height: `inv.dim_height ${d} NULLS LAST`,
     };
-    const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
+const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
+
+    // Build SELECT clause based on fields parameter
+    const allFields = {
+      // Core inventory fields
+      id: 'inv.id',
+      lot_number: 'inv.lot_number',
+      lot_name: 'inv.lot_name',
+      lot_code: 'inv.lot_code',
+      lot_op_id: 'inv.lot_op_id',
+      qty: 'inv.qty',
+      unit: 'inv.unit',
+      weight: 'inv.weight',
+      rate: 'inv.rate',
+      total_value: 'inv.total_value',
+      status: 'inv.status',
+      operation_type: 'inv.operation_type',
+      split_level: 'inv.split_level',
+      source_type: 'inv.source_type',
+      source_module: 'inv.source_module',
+      machine_process_id: 'inv.machine_process_id',
+      parent_lot_id: 'inv.parent_lot_id',
+      root_lot_id: 'inv.root_lot_id',
+      genealogy_path: 'inv.genealogy_path',
+      purchase_date: 'inv.purchase_date',
+      created_at: 'inv.created_at',
+      updated_at: 'inv.updated_at',
+      dim_length: 'inv.dim_length',
+      dim_depth: 'inv.dim_depth',
+      dim_height: 'inv.dim_height',
+      dim_unit: 'inv.dim_unit',
+      seed_height_at_in: 'inv.seed_height_at_in',
+      weight_at_in: 'inv.weight_at_in',
+      actual_growth_mm: 'inv.actual_growth_mm',
+      weight_gain: 'inv.weight_gain',
+      growth_pct: 'inv.growth_pct',
+      batch_no: 'inv.batch_no',
+      remarks: 'inv.remarks',
+      // Item fields
+      item_id: 'inv.item_id',
+      item_name: 'i.name',
+      item_code: 'i.code',
+      item_category: 'i.category',
+      item_type: 'i.type',
+      item_reorder_level: 'i.reorder_level',
+      // Location fields
+      location_id: 'inv.location_id',
+      location_name: 'l.name',
+      // Vendor fields
+      vendor_id: 'inv.vendor_id',
+      vendor_name: 'v.name',
+      // Department fields
+      department_id: 'inv.department_id',
+      dept_name: 'd.name',
+      dept_location_name: 'dl.name',
+      // Parent/Root lot fields
+      parent_lot_name: 'COALESCE(pl.lot_code, pl.lot_number)',
+      root_lot_name: 'COALESCE(rl.lot_code, rl.lot_number)',
+      // Process fields
+      current_process_name: 'COALESCE(pm.process_name, pm2.process_name)',
+      process_type: 'COALESCE(mp.process_type, lpi.process_type)',
+    };
+
+    const requestedFields = fields ? fields.split(',').map(f => f.trim()) : null;
+    const selectFields = requestedFields
+      ? requestedFields.map(f => allFields[f] ? `${allFields[f]} AS ${f}` : null).filter(Boolean).join(', ')
+      : Object.entries(allFields).map(([alias, col]) => `${col} AS ${alias}`).join(', ');
 
     const baseFrom = `FROM inventory inv JOIN items i ON inv.item_id = i.id
              LEFT JOIN locations l ON inv.location_id = l.id
@@ -122,15 +189,8 @@ router.get('/', authenticate, async (req, res) => {
 
     const dataParams = [...params, parseInt(limit), parseInt(offset)];
 
-    const q = `SELECT inv.*, i.name as item_name, i.code as item_code, i.category,
-                      i.type as item_type, i.reorder_level,
-                      l.name as location_name, v.name as vendor_name,
-                      d.name as dept_name, dl.name as dept_location_name,
-                      COALESCE(pl.lot_code, pl.lot_number) AS parent_lot_name,
-                      COALESCE(rl.lot_code, rl.lot_number) AS root_lot_name,
-                       COALESCE(pm.process_name, pm2.process_name) AS current_process_name
-               ${baseFrom} ORDER BY ${orderBy}
-               LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
+    const q = `SELECT ${selectFields} ${baseFrom} ORDER BY ${orderBy}
+            LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
 
     const [result, countR, totalsR] = await Promise.all([
       pool.query(q, dataParams),
