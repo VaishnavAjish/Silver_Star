@@ -28,12 +28,10 @@ export default defineConfig({
         cookieDomainRewrite: { '*': '' }, // strip cookie domain so browser keeps it for its own origin
         cookiePathRewrite: { '*': '/' },
       },
-      '/socket.io': {
+      '/ws': {
         target: 'http://127.0.0.1:5001',
         changeOrigin: true,
         ws: true,
-        // Rewrite origin to localhost so the server CORS check always passes
-        // regardless of which LAN IP the browser uses to reach this machine.
         headers: { origin: 'http://localhost:5173' },
       },
     },

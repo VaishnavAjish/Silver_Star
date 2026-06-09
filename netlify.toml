@@ -15,11 +15,11 @@
   status = 200
   force = true
 
-# Proxy Socket.IO (real-time/WebSocket) to the Render backend.
+# Proxy WebSocket (native ws) to the Render backend.
 # Must come before the SPA catch-all so it isn't swallowed by /*.
 [[redirects]]
-  from = "/socket.io/*"
-  to = "https://silverstar-grow.onrender.com/socket.io/:splat"
+  from = "/ws"
+  to = "https://silverstar-grow.onrender.com/ws"
   status = 200
   force = true
 

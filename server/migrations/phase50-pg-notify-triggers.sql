@@ -16,12 +16,14 @@ DECLARE
 BEGIN
   channel := TG_TABLE_NAME || '_' || TG_OP;
   payload := jsonb_build_object(
-    'table',    TG_TABLE_NAME,
-    'schema',   TG_TABLE_SCHEMA,
+    'table',     TG_TABLE_NAME,
+    'schema',    TG_TABLE_SCHEMA,
     'operation', TG_OP,
     'timestamp', NOW(),
-    'old',      CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN row_to_json(OLD)::jsonb ELSE NULL END,
-    'new',      CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN row_to_json(NEW)::jsonb ELSE NULL END
+    'eventId',   gen_random_uuid()::text,
+    'source',    'pg_notify',
+    'old',       CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN row_to_json(OLD)::jsonb ELSE NULL END,
+    'new',       CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN row_to_json(NEW)::jsonb ELSE NULL END
   );
   PERFORM pg_notify(channel, payload::text);
   RETURN COALESCE(NEW, OLD);

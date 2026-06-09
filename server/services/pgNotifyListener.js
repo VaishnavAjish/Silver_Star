@@ -5,6 +5,8 @@ const { dispatchEvent } = require('./eventDispatcher');
 const { logger } = require('../middleware/logger');
 
 const CHANNEL_PREFIX = 'pg_';
+const DEDUP_TTL = 5 * 60 * 1000;
+const processedEvents = new Map();
 
 const TABLE_EVENT_MAP = {
   inventory:               { created: 'inventory.created',     updated: 'inventory.updated',     deleted: 'inventory.deleted' },
@@ -48,6 +50,13 @@ const TABLE_EVENT_MAP = {
 
 let listening = false;
 let pgClient = null;
+
+setInterval(() => {
+  const cutoff = Date.now() - DEDUP_TTL;
+  for (const [id, ts] of processedEvents) {
+    if (ts < cutoff) processedEvents.delete(id);
+  }
+}, 60_000).unref();
 
 async function startPgNotifyListener() {
   if (listening) return;
@@ -98,9 +107,15 @@ function handleNotification(channel, payloadStr) {
     if (!eventName) return;
 
     const payload = payloadStr ? JSON.parse(payloadStr) : {};
+    const eventId = payload.eventId || `${channel}_${payload.timestamp || Date.now()}_${payload.primary_id || ''}`;
+
+    if (processedEvents.has(eventId)) return;
+
+    processedEvents.set(eventId, Date.now());
 
     const eventPayload = {
       _source: 'pg_notify',
+      eventId,
       table: payload.table,
       operation: payload.operation,
       timestamp: payload.timestamp,

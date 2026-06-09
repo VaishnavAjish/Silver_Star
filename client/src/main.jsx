@@ -7,24 +7,13 @@ import { AuthProvider } from './core/context/AuthContext';
 import { ClipboardProvider } from './core/context/ClipboardContext';
 import { SocketProvider } from './core/context/SocketContext';
 import { SilverstarQueryProvider } from './shared/query/QueryProvider';
-import { useMultiTabSync } from './shared/hooks/useMultiTabSync';
 import './core/styles/app.css';
-
-/**
- * Bootstraps the BroadcastChannel multi-tab sync listener once at app root.
- * Must be inside SilverstarQueryProvider to access the query client.
- */
-function AppSyncBootstrap() {
-  useMultiTabSync(); // Sets up the cross-tab cache listener
-  return null;
-}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <AuthProvider>
       <SilverstarQueryProvider>
         <SocketProvider>
-          <AppSyncBootstrap />
           <ClipboardProvider>
               <App />
               <Toaster

@@ -1,164 +1,192 @@
-/**
- * ─── Silverstar Grow ERP — Socket.IO Client Context ─────────────────────────
- *
- * Provides a persistent, auto-reconnecting WebSocket connection to the backend.
- *
- * Features:
- *  - JWT authentication on connect
- *  - Auto-reconnect with exponential backoff
- *  - Room subscription helpers
- *  - Connection status indicator (isConnected)
- *  - Auto-resubscription after reconnect (resilient rooms)
- */
-
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 
 const SocketContext = createContext(null);
 
-// Resolve backend URL — works for both Vite dev proxy and direct connections
-function resolveServerUrl() {
+function resolveWsUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  // In dev, route through the Vite proxy (/socket.io is proxied to 127.0.0.1:5001)
-  // so the browser never needs a direct connection to port 5001 from any IP.
-  return window.location.origin;
+  const base = import.meta.env.VITE_API_URL || window.location.origin;
+  const protocol = base.startsWith('https') ? 'wss' : 'ws';
+  return `${protocol}://${base.replace(/^https?:\/\//, '')}`;
 }
 
 export function SocketProvider({ children }) {
   const { token, refreshUser } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectCount, setReconnectCount] = useState(0);
-  const socketRef = useRef(null);
-  // Track rooms to resubscribe after reconnect
+  const wsRef = useRef(null);
   const subscribedRoomsRef = useRef(new Set());
+  const listenersRef = useRef(new Map());
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+  const mountedRef = useRef(true);
+  const pingIntervalRef = useRef(null);
+
+  const MAX_RECONNECT_DELAY = 10000;
+  const PING_INTERVAL = 25000;
+
+  const clearReconnect = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const sendMessage = useCallback((msg) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  }, []);
+
+  const connect = useCallback(() => {
+    if (!token) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    const wsUrl = resolveWsUrl();
+    const url = `${wsUrl}/ws?token=${encodeURIComponent(token)}`;
+
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (!mountedRef.current) return;
+      setIsConnected(true);
+      reconnectAttemptsRef.current = 0;
+
+      const rooms = [...subscribedRoomsRef.current];
+      if (rooms.length > 0) {
+        sendMessage({ type: 'subscribe', rooms });
+      }
+
+      pingIntervalRef.current = setInterval(() => {
+        sendMessage({ type: 'ping' });
+      }, PING_INTERVAL);
+    };
+
+    ws.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      switch (msg.type) {
+        case 'connected':
+          break;
+        case 'event': {
+          const eventName = msg.event;
+          if (eventName === 'permission.changed') {
+            refreshUser().catch(() => {});
+          }
+          if (eventName === 'user.deactivated') {
+            console.warn('[WS] Account deactivated', msg.payload);
+          }
+          const cbs = listenersRef.current.get(eventName);
+          if (cbs) cbs.forEach(cb => { try { cb(msg.payload); } catch {} });
+
+          const dotIdx = msg.event.lastIndexOf('.');
+          if (dotIdx !== -1) {
+            const wildcard = msg.event.substring(0, dotIdx + 1) + '*';
+            const wc = listenersRef.current.get(wildcard);
+            if (wc) wc.forEach(cb => { try { cb(msg.payload); } catch {} });
+          }
+          break;
+        }
+        case 'subscribed':
+          break;
+        case 'unsubscribed':
+          break;
+        case 'pong':
+          break;
+        case 'error':
+          console.warn('[WS] Server error:', msg.message);
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return;
+      setIsConnected(false);
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror
+    };
+  }, [token, sendMessage]);
+
+  const scheduleReconnect = useCallback(() => {
+    if (!mountedRef.current) return;
+    clearReconnect();
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), MAX_RECONNECT_DELAY);
+    reconnectAttemptsRef.current += 1;
+    reconnectTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) {
+        setReconnectCount(c => c + 1);
+        connect();
+      }
+    }, delay);
+  }, [clearReconnect, connect]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearReconnect();
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, [clearReconnect]);
 
   useEffect(() => {
     if (!token) {
-      // Logged out — disconnect cleanly
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
+      clearReconnect();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
       setIsConnected(false);
       return;
     }
+    connect();
+  }, [token, connect, clearReconnect]);
 
-    // Prevent duplicate connections (React StrictMode double-invoke)
-    if (socketRef.current?.connected) return;
-
-    const serverUrl = resolveServerUrl();
-
-    const socket = io(serverUrl, {
-      auth: { token },
-      // Start with HTTP polling to reliably establish the session through any proxy,
-      // then automatically upgrade to WebSocket once the connection is confirmed.
-      // This avoids the noisy WebSocket upgrade failure that occurs when going
-      // through Vite's dev proxy or nginx before the session is established.
-      transports: ['polling', 'websocket'],
-      upgrade: true,
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 10000,
-      reconnectionAttempts: Infinity,
-      timeout: 10000,
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.info('[Socket.IO] ✅ Connected', socket.id);
-      setIsConnected(true);
-
-      // Resubscribe to all previously subscribed rooms after reconnect
-      const rooms = [...subscribedRoomsRef.current];
-      if (rooms.length > 0) {
-        socket.emit('subscribe', rooms);
-      }
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.info('[Socket.IO] ❌ Disconnected:', reason);
-      setIsConnected(false);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.warn('[Socket.IO] Connection error:', err.message);
-    });
-
-    socket.on('reconnect', (attempt) => {
-      console.info('[Socket.IO] Reconnected after', attempt, 'attempts');
-      setReconnectCount(c => c + 1);
-    });
-
-    // ── Permission-change handler ───────────────────────────────────────────
-    // When the server sends this, silently refresh the user's session data
-    // so new permissions take effect without logout
-    socket.on('permission.changed', async (payload) => {
-      console.info('[Socket.IO] Permission change detected — refreshing session', payload);
-      try {
-        await refreshUser();
-      } catch { /* ignore */ }
-    });
-
-    // ── Deactivated user handler ────────────────────────────────────────────
-    socket.on('user.deactivated', (payload) => {
-      // If this event is for the current user, force logout on next API call
-      // (the JWT will still be valid briefly but API will return 401)
-      console.warn('[Socket.IO] Account deactivated', payload);
-    });
-
-    return () => {
-      socket.off('permission.changed');
-      socket.off('user.deactivated');
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, [token, refreshUser]);
-
-  /**
-   * Subscribe the socket to one or more module rooms.
-   * Rooms are remembered and resubscribed on reconnect.
-   */
   const subscribe = useCallback((rooms) => {
     const roomArray = Array.isArray(rooms) ? rooms : [rooms];
     roomArray.forEach(r => subscribedRoomsRef.current.add(r));
+    sendMessage({ type: 'subscribe', rooms: roomArray });
+  }, [sendMessage]);
 
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('subscribe', roomArray);
-    }
-  }, []);
-
-  /**
-   * Unsubscribe from one or more rooms.
-   */
   const unsubscribe = useCallback((rooms) => {
     const roomArray = Array.isArray(rooms) ? rooms : [rooms];
     roomArray.forEach(r => subscribedRoomsRef.current.delete(r));
+    sendMessage({ type: 'unsubscribe', rooms: roomArray });
+  }, [sendMessage]);
 
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('unsubscribe', roomArray);
-    }
-  }, []);
-
-  /**
-   * Listen for a specific event on the socket.
-   * Returns an off() function for cleanup.
-   */
   const on = useCallback((event, handler) => {
-    socketRef.current?.on(event, handler);
-    return () => socketRef.current?.off(event, handler);
+    const existing = listenersRef.current.get(event) || [];
+    listenersRef.current.set(event, [...existing, handler]);
+    return () => {
+      const list = listenersRef.current.get(event) || [];
+      const filtered = list.filter(h => h !== handler);
+      if (filtered.length > 0) listenersRef.current.set(event, filtered);
+      else listenersRef.current.delete(event);
+    };
   }, []);
 
   return (
     <SocketContext.Provider value={{
-      socket: socketRef.current,
       isConnected,
       reconnectCount,
       subscribe,
       unsubscribe,
       on,
+      sendMessage,
     }}>
       {children}
     </SocketContext.Provider>

@@ -1,254 +1,288 @@
 'use strict';
 
-/**
- * ─── Silverstar Grow ERP — Real-Time Socket.IO Gateway ─────────────────────
- *
- * Enterprise-grade WebSocket server with:
- *  - JWT authentication on handshake
- *  - Redis Pub/Sub adapter for horizontal scalability
- *  - Smart room-based routing (module rooms + user private rooms)
- *  - Graceful fallback when Redis is unavailable (dev mode)
- *  - Structured logging
- */
-
-const { Server } = require('socket.io');
+const { WebSocketServer } = require('ws');
+const { URL } = require('url');
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 const securityConfig = require('../config/security');
 const { logger } = require('../middleware/logger');
 const { hasPermission } = require('../utils/permissions');
 
-let io = null;
+let wss = null;
 
-// ── Module → Room mapping ────────────────────────────────────────────────────
-// Keep in sync with ERP_EVENTS on the client side
+const rooms = new Map();
+const socketRooms = new Map();
+const processedEvents = new Map();
+const DEDUP_TTL = 5 * 60 * 1000;
+
 const MODULE_ROOMS = [
-  'room:inventory',
-  'room:purchase',
-  'room:sales',
-  'room:process',
-  'room:manufacturing',
-  'room:dashboard',
-  'room:admin',
-  'room:audit',
-  'room:reports',
+  'room:inventory', 'room:purchase', 'room:sales', 'room:process',
+  'room:manufacturing', 'room:dashboard', 'room:admin', 'room:audit', 'room:reports',
 ];
 
-// Room to module mapping for permission checks
 const ROOM_TO_MODULE = {
-  'room:inventory': 'inventory',
-  'room:purchase': 'purchase',
-  'room:sales': 'sales',
-  'room:process': 'process',
-  'room:manufacturing': 'manufacturing',
-  'room:dashboard': 'dashboard',
-  'room:admin': 'management',
-  'room:audit': 'admin',
-  'room:reports': 'reports',
+  'room:inventory': 'inventory', 'room:purchase': 'purchase', 'room:sales': 'sales',
+  'room:process': 'process', 'room:manufacturing': 'manufacturing',
+  'room:dashboard': 'dashboard', 'room:admin': 'management',
+  'room:audit': 'admin', 'room:reports': 'reports',
 };
 
-// ── Validate that a client is allowed to join a room ─────────────────────────
-async function canJoinRoom(user, room) {
-  // Super admin joins everything
-  if (user.role === 'super_admin' || user.role === 'admin') return true;
+let redisPub = null;
+let redisSub = null;
+const REDIS_CHANNEL = 'silverstar:ws:events';
+const REDIS_URL = process.env.REDIS_URL;
 
-  // Private user room — only the owner
-  if (room === `user:${user.id}`) return true;
-
-  // Role room — only matching role
-  if (room === `role:${user.role}`) return true;
-
-  // Module rooms — check view permission
-  const module = ROOM_TO_MODULE[room];
-  if (module) {
-    return await hasPermission(user.id, module, 'view');
+function sendToSocket(ws, message) {
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify(message));
   }
+}
 
+function addToRoom(ws, room) {
+  if (!rooms.has(room)) rooms.set(room, new Set());
+  rooms.get(room).add(ws);
+  if (!socketRooms.has(ws)) socketRooms.set(ws, new Set());
+  socketRooms.get(ws).add(room);
+}
+
+function removeFromRoom(ws, room) {
+  const set = rooms.get(room);
+  if (set) {
+    set.delete(ws);
+    if (set.size === 0) rooms.delete(room);
+  }
+  const sr = socketRooms.get(ws);
+  if (sr) sr.delete(room);
+}
+
+function removeSocket(ws) {
+  const sr = socketRooms.get(ws);
+  if (sr) {
+    for (const room of sr) {
+      const set = rooms.get(room);
+      if (set) {
+        set.delete(ws);
+        if (set.size === 0) rooms.delete(room);
+      }
+    }
+    socketRooms.delete(ws);
+  }
+}
+
+function markProcessed(eventId) {
+  if (!eventId) return false;
+  if (processedEvents.has(eventId)) return true;
+  processedEvents.set(eventId, Date.now());
   return false;
 }
 
-/**
- * Initialise the Socket.IO gateway bound to the HTTP server.
- * Falls back to in-process broadcast if Redis is unavailable.
- */
-async function initSocket(httpServer) {
-  const corsOrigins = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-    : ['http://localhost:5173', 'http://localhost:3000'];
-
-  io = new Server(httpServer, {
-    cors: {
-      origin: corsOrigins,
-      methods: ['GET', 'POST'],
-      credentials: true,
-    },
-    // Allow both polling fallback and native WebSocket
-    transports: ['websocket', 'polling'],
-    // Ping/pong to detect dead connections
-    pingInterval: 25000,
-    pingTimeout: 20000,
-    // Max message size 1 MB — prevent amplification attacks
-    maxHttpBufferSize: 1e6,
-    // Connection state recovery — clients automatically get missed events
-    // on reconnect without any extra code (Socket.IO v4.6+)
-    connectionStateRecovery: {
-      // Max duration (ms) a client can be disconnected and still recover
-      maxDisconnectionDuration: 2 * 60 * 1000,
-      skipMiddlewares: true,
-    },
-  });
-
-  // ── Attach Redis adapter (optional — dev works without Redis) ──────────────
-  const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) {
-    try {
-      const { createAdapter } = require('@socket.io/redis-adapter');
-      const Redis = require('ioredis');
-
-      const pubClient = new Redis(redisUrl, {
-        retryStrategy: (times) => Math.min(times * 50, 2000),
-        enableReadyCheck: false,
-        maxRetriesPerRequest: null,
-      });
-      const subClient = pubClient.duplicate();
-
-      pubClient.on('error', (err) => logger.error('[SocketIO] Redis pub error', { error: err.message }));
-      subClient.on('error', (err) => logger.error('[SocketIO] Redis sub error', { error: err.message }));
-
-      await Promise.all([
-        new Promise(r => pubClient.once('ready', r)),
-        new Promise(r => subClient.once('ready', r)),
-      ]);
-
-      io.adapter(createAdapter(pubClient, subClient));
-      logger.info('[SocketIO] Redis adapter attached — horizontal scaling enabled');
-    } catch (err) {
-      logger.warn('[SocketIO] Redis unavailable — running in single-node mode', { error: err.message });
-    }
-  } else {
-    logger.warn('[SocketIO] REDIS_URL not set — running in single-node mode (suitable for dev only)');
+setInterval(() => {
+  const cutoff = Date.now() - DEDUP_TTL;
+  for (const [id, ts] of processedEvents) {
+    if (ts < cutoff) processedEvents.delete(id);
   }
+}, 60_000).unref();
 
-  // ── JWT Authentication Middleware ──────────────────────────────────────────
-  io.use((socket, next) => {
-    const token = socket.handshake.auth?.token
-      || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+async function canJoinRoom(user, room) {
+  if (user.role === 'super_admin' || user.role === 'admin') return true;
+  if (room === `user:${user.id}`) return true;
+  if (room === `role:${user.role}`) return true;
+  const module = ROOM_TO_MODULE[room];
+  if (module) return await hasPermission(user.id, module, 'view');
+  return false;
+}
+
+function dispatchToRoomLocal(room, event, payload, eventId) {
+  if (!wss) return;
+  const members = rooms.get(room);
+  if (!members) return;
+  const msg = { type: 'event', event, payload, eventId, _ts: Date.now() };
+  for (const ws of members) {
+    sendToSocket(ws, msg);
+  }
+}
+
+function dispatchToUserLocal(userId, event, payload, eventId) {
+  dispatchToRoomLocal(`user:${userId}`, event, payload, eventId);
+}
+
+async function initSocket(httpServer) {
+  const wsPath = process.env.WS_PATH || '/ws';
+
+  wss = new WebSocketServer({ server: httpServer, path: wsPath });
+
+  wss.on('connection', (ws, req) => {
+    const queryParams = new URL(req.url, 'http://localhost').searchParams;
+    const token = queryParams.get('token') || req.headers['authorization']?.replace('Bearer ', '');
 
     if (!token) {
-      return next(new Error('Authentication required'));
+      sendToSocket(ws, { type: 'error', message: 'Authentication required' });
+      ws.close(4001, 'Authentication required');
+      return;
     }
 
+    let user;
     try {
-      const decoded = jwt.verify(token, securityConfig.jwt.accessSecret);
-      socket.user = decoded;
-      next();
+      user = jwt.verify(token, securityConfig.jwt.accessSecret);
     } catch (err) {
-      logger.warn('[SocketIO] Rejected connection — invalid token', { error: err.message });
-      next(new Error('Invalid or expired token'));
+      sendToSocket(ws, { type: 'error', message: 'Invalid or expired token' });
+      ws.close(4001, 'Invalid or expired token');
+      return;
     }
-  });
 
-  // ── Connection Handler ─────────────────────────────────────────────────────
-  io.on('connection', (socket) => {
-    const { id: userId, role, full_name } = socket.user;
+    ws.user = user;
+    const { id: userId, role, full_name } = user;
 
-    logger.info('[SocketIO] Client connected', {
-      socketId: socket.id,
-      userId,
-      role,
-      name: full_name,
-    });
+    addToRoom(ws, `user:${userId}`);
+    addToRoom(ws, `role:${role}`);
+    addToRoom(ws, 'room:dashboard');
 
-    // Auto-join private rooms
-    socket.join(`user:${userId}`);
-    socket.join(`role:${role}`);
+    logger.info('[WS] Client connected', { userId, role, name: full_name });
+    sendToSocket(ws, { type: 'connected', userId, role });
 
-    // Auto-join the dashboard room so every connected user gets live KPI updates
-    socket.join('room:dashboard');
+    ws.on('message', (data) => {
+      let msg;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
 
-    // ── Client subscribes to module rooms ────────────────────────────────────
-    socket.on('subscribe', async (rooms) => {
-      if (!Array.isArray(rooms)) return;
-      for (const room of rooms) {
-        if (await canJoinRoom(socket.user, room)) {
-          socket.join(room);
-        } else {
-          logger.warn('[SocketIO] Subscription denied', { userId, room });
+      switch (msg.type) {
+        case 'subscribe': {
+          if (!Array.isArray(msg.rooms)) return;
+          const joined = [];
+          for (const room of msg.rooms) {
+            if (canJoinRoom(user, room)) {
+              addToRoom(ws, room);
+              joined.push(room);
+            }
+          }
+          sendToSocket(ws, { type: 'subscribed', rooms: joined });
+          break;
+        }
+        case 'unsubscribe': {
+          if (!Array.isArray(msg.rooms)) return;
+          for (const room of msg.rooms) {
+            removeFromRoom(ws, room);
+          }
+          sendToSocket(ws, { type: 'unsubscribed', rooms: msg.rooms });
+          break;
+        }
+        case 'ping': {
+          sendToSocket(ws, { type: 'pong', ts: Date.now() });
+          break;
         }
       }
     });
 
-    // ── Client unsubscribes from rooms ───────────────────────────────────────
-    socket.on('unsubscribe', (rooms) => {
-      if (!Array.isArray(rooms)) return;
-      rooms.forEach(room => socket.leave(room));
+    ws.on('close', () => {
+      removeSocket(ws);
+      logger.info('[WS] Client disconnected', { userId, reason: 'connection closed' });
     });
 
-    // ── Heartbeat acknowledgment ─────────────────────────────────────────────
-    socket.on('ping_ack', () => {
-      socket.emit('pong_ack', { ts: Date.now() });
-    });
-
-    socket.on('disconnect', (reason) => {
-      logger.info('[SocketIO] Client disconnected', { socketId: socket.id, userId, reason });
-    });
-
-    socket.on('error', (err) => {
-      logger.error('[SocketIO] Socket error', { socketId: socket.id, userId, error: err.message });
+    ws.on('error', (err) => {
+      logger.error('[WS] Socket error', { userId, error: err.message });
+      removeSocket(ws);
     });
   });
 
-  logger.info('[SocketIO] Gateway initialised');
-  return io;
+  if (REDIS_URL) {
+    try {
+      const Redis = require('ioredis');
+      redisPub = new Redis(REDIS_URL, {
+        retryStrategy: (t) => Math.min(t * 50, 2000),
+        enableReadyCheck: false,
+        maxRetriesPerRequest: null,
+        lazyConnect: true,
+      });
+      redisSub = redisPub.duplicate();
+
+      await Promise.all([redisPub.connect(), redisSub.connect()]);
+
+      await redisSub.subscribe(REDIS_CHANNEL);
+
+      redisSub.on('message', (channel, message) => {
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed.eventId && markProcessed(parsed.eventId)) return;
+          const { event, payload, rooms: targetRooms, targetUserId } = parsed;
+          if (targetRooms) {
+            for (const room of targetRooms) {
+              dispatchToRoomLocal(room, event, payload, parsed.eventId);
+            }
+          }
+          if (targetUserId) {
+            dispatchToUserLocal(targetUserId, event, payload, parsed.eventId);
+          }
+        } catch (err) {
+          logger.warn('[WS-Redis] Failed to process message', { error: err.message });
+        }
+      });
+
+      logger.info('[WS] Redis Pub/Sub attached for multi-instance');
+    } catch (err) {
+      logger.warn('[WS] Redis unavailable — running in single-node mode', { error: err.message });
+      redisPub = null;
+      redisSub = null;
+    }
+  } else {
+    logger.info('[WS] REDIS_URL not set — single-node mode');
+  }
+
+  logger.info('[WS] Gateway initialised');
+  return wss;
 }
 
-/**
- * Get the Socket.IO server instance.
- * Safe to call even if initSocket hasn't been called yet (returns null).
- */
 function getIO() {
-  return io;
+  return wss;
 }
 
-/**
- * Dispatch an event to a specific room.
- * @param {string} room   - e.g. 'room:inventory'
- * @param {string} event  - e.g. 'inventory.created'
- * @param {object} payload
- */
 function dispatchToRoom(room, event, payload) {
-  if (!io) return;
-  io.to(room).emit(event, { ...payload, _ts: Date.now() });
+  if (!wss) return;
+  const eventId = uuidv4();
+  markProcessed(eventId);
+  dispatchToRoomLocal(room, event, payload, eventId);
+  if (redisPub) {
+    redisPub.publish(REDIS_CHANNEL, JSON.stringify({ event, payload, rooms: [room], eventId })).catch(() => {});
+  }
 }
 
-/**
- * Send an event to a single user's private room.
- * @param {string|number} userId
- * @param {string} event
- * @param {object} payload
- */
 function dispatchToUser(userId, event, payload) {
-  if (!io) return;
-  io.to(`user:${userId}`).emit(event, { ...payload, _ts: Date.now() });
+  if (!wss) return;
+  const eventId = uuidv4();
+  markProcessed(eventId);
+  dispatchToUserLocal(userId, event, payload, eventId);
+  if (redisPub) {
+    redisPub.publish(REDIS_CHANNEL, JSON.stringify({ event, payload, targetUserId: userId, eventId })).catch(() => {});
+  }
 }
 
-/**
- * Broadcast an event to ALL connected clients (use sparingly).
- */
 function broadcast(event, payload) {
-  if (!io) return;
-  io.emit(event, { ...payload, _ts: Date.now() });
+  if (!wss) return;
+  const eventId = uuidv4();
+  markProcessed(eventId);
+  const msg = { type: 'event', event, payload, eventId, _ts: Date.now() };
+  wss.clients.forEach((ws) => {
+    sendToSocket(ws, msg);
+  });
 }
 
-/**
- * Get live metrics about connected clients.
- */
 async function getMetrics() {
-  if (!io) return { connected: 0, rooms: 0 };
-  const sockets = await io.fetchSockets();
-  return {
-    connected: sockets.length,
-    rooms: io.sockets.adapter.rooms?.size || 0,
-  };
+  if (!wss) return { connected: 0, rooms: 0 };
+  return { connected: wss.clients.size, rooms: rooms.size };
+}
+
+async function fetchSockets() {
+  const result = [];
+  if (!wss) return result;
+  wss.clients.forEach((ws) => {
+    if (ws.user) {
+      const sr = socketRooms.get(ws);
+      result.push({ user: ws.user, rooms: sr ? [...sr] : [] });
+    }
+  });
+  return result;
 }
 
 module.exports = {
@@ -258,4 +292,5 @@ module.exports = {
   dispatchToUser,
   broadcast,
   getMetrics,
+  fetchSockets,
 };

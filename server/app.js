@@ -177,7 +177,6 @@ const searchRoutes = require('./routes/search');
 const quickCreateRoutes = require('./routes/quickCreate');
 const fixedAssetCatsRoutes = require('./routes/fixedAssetCategories');
 const jeAllocationsRoutes = require('./routes/jeAllocations');
-const sseRoutes = require('./routes/sse');
 const debugAccRoutes = require('./routes/debugAccounting');
 const jobRoutes = require('./routes/jobs');
 const stockTransferRoutes = require('./routes/stockTransfer');
@@ -281,9 +280,6 @@ app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
 
-// ── SSE (Server-Sent Events) Streaming ─────────────────────────────────────
-app.use('/api/sse', sseRoutes);
-
 // ── Metrics (admin only) ──────────────────────────────────────────────────
 app.use('/api/metrics', require('./routes/metrics'));
 
@@ -311,11 +307,6 @@ app.post('/api/cache/flush', authenticate, async (req, res) => {
   }
 });
 
-// ── SignalR Bridge (authenticated) ──────────────────────────────────────────
-const { negotiateSignalR, handleSignalRMessage } = require('./services/signalrBridge');
-app.get('/api/signalr/negotiate', authenticate, negotiateSignalR);
-app.post('/api/signalr', authenticate, handleSignalRMessage);
-
 // ── Static React Build (production single-server mode) ───────────────────────
 if (process.env.SERVE_STATIC === 'true') {
   const path = require('path');
@@ -323,7 +314,7 @@ if (process.env.SERVE_STATIC === 'true') {
   app.use(express.static(staticDir, { maxAge: '1y', immutable: true }));
   // SPA fallback — all non-API routes serve index.html
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }

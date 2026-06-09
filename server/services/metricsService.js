@@ -32,26 +32,22 @@ function snapshot() {
 
 function getBridgeStatus() {
   const statuses = {};
-  const bridges = ['redisPubSub', 'kafkaEventSink', 'mqttBroker', 'natsClient', 'firebaseSync', 'pgNotifyListener', 'presenceService'];
+  const bridges = ['pgNotifyListener', 'presenceService'];
   for (const name of bridges) {
     try {
       const mod = require(`./${name}`);
-      statuses[name] = mod.isConnected !== undefined ? { connected: mod.isConnected } : { available: true };
+      statuses[name] = { available: true };
     } catch {
       statuses[name] = { available: false, error: 'not loaded' };
     }
   }
-  // Socket.IO status
+  // WebSocket native status
   try {
     const { getIO, getMetrics } = require('./socketService');
-    const io = getIO();
-    statuses.socketIO = io ? {
-      connected: true,
-      connections: io.engine?.clientsCount || 0,
-      rooms: io.sockets?.adapter?.rooms?.size || 0,
-    } : { connected: false };
+    const wss = getIO();
+    statuses.ws = wss ? { connected: true } : { connected: false };
   } catch {
-    statuses.socketIO = { connected: false };
+    statuses.ws = { connected: false };
   }
   return statuses;
 }

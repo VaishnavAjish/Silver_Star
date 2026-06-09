@@ -46,12 +46,26 @@ const MAX_NOTIFICATIONS = 50;
  * Returns { notifications, unreadCount, markAllRead, clearAll }
  */
 export function useNotifications() {
-  const { socket, isConnected } = useSocket();
+  const { isConnected, on } = useSocket();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const idRef = useRef(0);
+  const dedupTimers = useRef({});
 
   const addNotification = useCallback((event, payload) => {
+    const entityId = payload && (payload.id || payload._entityId);
+    const dedupKey = entityId ? `${event}:${entityId}` : null;
+
+    if (dedupKey && dedupTimers.current[dedupKey]) {
+      return;
+    }
+
+    if (dedupKey) {
+      dedupTimers.current[dedupKey] = setTimeout(() => {
+        delete dedupTimers.current[dedupKey];
+      }, 5000);
+    }
+
     const config = EVENT_CONFIG[event] || { icon: '📢', label: event, type: 'info' };
     const notification = {
       id: ++idRef.current,
@@ -67,7 +81,6 @@ export function useNotifications() {
     setNotifications(prev => [notification, ...prev].slice(0, MAX_NOTIFICATIONS));
     setUnreadCount(c => c + 1);
 
-    // Also show a react-hot-toast for immediate visual feedback
     const toastFn =
       config.type === 'error'   ? toast.error :
       config.type === 'warning' ? toast :
@@ -88,18 +101,16 @@ export function useNotifications() {
   }, []);
 
   useEffect(() => {
-    if (!socket || !isConnected) return;
+    if (!isConnected) return;
 
-    const handlers = ALL_EVENTS.map(event => {
-      const handler = (payload) => addNotification(event, payload);
-      socket.on(event, handler);
-      return { event, handler };
+    const cleanups = ALL_EVENTS.map(event => {
+      return on(event, (payload) => addNotification(event, payload));
     });
 
     return () => {
-      handlers.forEach(({ event, handler }) => socket.off(event, handler));
+      cleanups.forEach(fn => { try { fn(); } catch {} });
     };
-  }, [socket, isConnected, addNotification]);
+  }, [isConnected, addNotification, on]);
 
   const markAllRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
