@@ -3,6 +3,13 @@ import toast from 'react-hot-toast';
 
 const AuthContext = createContext(null);
 
+// Storage keys for tab persistence
+const STORAGE_KEYS = {
+  TOKEN: 'sg_token',
+  OPEN_TABS: 'sg_open_tabs',
+  ACTIVE_TAB: 'sg_active_tab',
+};
+
 async function readJsonResponse(res) {
   const text = await res.text();
   if (!text) return null;
@@ -61,7 +68,9 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('sg_token');
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_TAB);
     sessionStorage.clear();
     setToken(null);
     setUser(null);
@@ -136,6 +145,11 @@ export function AuthProvider({ children }) {
       throw new Error(getAuthErrorMessage(res, data));
     }
     if (!data?.token) throw new Error('Login response was missing a token');
+
+    // Clear previous tab state for clean workspace on new login
+    localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_TAB);
+
     localStorage.setItem('sg_token', data.token);
     setToken(data.token);
     // /me will be called by the useEffect above; set minimal user immediately

@@ -1,0 +1,1 @@
+const jwt=require('jsonwebtoken'); const token = jwt.sign({id:1,role:'admin'},'change-this-to-a-random-64-char-secret-string',{expiresIn:'7d'}); (async () => { try { let r = await fetch('http://localhost:5001/api/manufacturing/kpi', {headers:{Authorization:'Bearer '+token}}); console.log('KPI:', r.status, await r.text()); } catch(e) { console.error(e); } })();

@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
+// Configuration flag - set to false to disable auto-restore of tabs (clean workspace on login)
+const AUTO_RESTORE_TABS = false;
+
 const STORAGE_KEY = 'sg_open_tabs';
 const STORAGE_ACTIVE_KEY = 'sg_active_tab';
 const MAX_TABS = 15;
@@ -15,6 +18,11 @@ const HOME_TAB = {
 const DEAD_TAB_IDS = new Set(['/rough-growth/new']);
 
 function loadPersistedTabs() {
+  // If auto-restore is disabled, always return clean workspace with only Dashboard
+  if (!AUTO_RESTORE_TABS) {
+    return [HOME_TAB];
+  }
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -38,6 +46,11 @@ function loadPersistedTabs() {
 }
 
 function loadPersistedActive() {
+  // If auto-restore is disabled, always start at Dashboard
+  if (!AUTO_RESTORE_TABS) {
+    return '/';
+  }
+
   try {
     const active = localStorage.getItem(STORAGE_ACTIVE_KEY) || '/';
     return DEAD_TAB_IDS.has(active) ? '/' : active;

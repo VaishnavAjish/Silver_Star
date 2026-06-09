@@ -138,4 +138,14 @@ async function shutdown() {
   logger.info('Database pools closed');
 }
 
-module.exports = { query, transaction, streamQuery, poolStats, healthCheck, primaryPool, shutdown };
+module.exports = {
+  query,
+  transaction,
+  streamQuery,
+  poolStats,
+  healthCheck,
+  primaryPool,
+  // Backward-compatible alias: some modules call pool.connect() directly
+  connect: primaryPool.connect.bind(primaryPool),
+  shutdown,
+};
