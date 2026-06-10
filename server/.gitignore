@@ -1,0 +1,45 @@
+# ── Secrets / environment ──────────────────────────────
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# ── Dependencies ───────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build output ───────────────────────────────────────
+dist/
+client/dist/
+build/
+
+# ── Database dumps / backups ───────────────────────────
+*.dump
+*.sql.gz
+*.backup
+
+# ── Logs ───────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+history_error.log
+global_500_err.txt
+err_out.txt
+
+# ── OS / editor ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Scratch / diagnostic files ─────────────────────────
+test.js
+test.py
+diag_*.js
+query_test.js
+test_insert.js
+test_sql_*.js
+drop_broken_fks.js
+mig_output.json

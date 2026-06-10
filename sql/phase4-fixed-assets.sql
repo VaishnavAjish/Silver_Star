@@ -241,3 +241,63 @@ SELECT 'FAC-FURN','Furniture & Fixtures',10.00,'SLM',10,
   (SELECT id FROM accounts WHERE code='2099'),
   (SELECT id FROM accounts WHERE code='5009')
 WHERE NOT EXISTS (SELECT 1 FROM fixed_asset_categories WHERE code='FAC-FURN');
+
+-- ============================================================
+-- ASSET TEMPLATES SEED DATA
+-- ============================================================
+INSERT INTO asset_templates (
+  code, name, category_id, default_model_no, default_brand,
+  default_manufacturer, default_uom_id, default_useful_life,
+  default_depr_rate, description, status
+)
+SELECT
+  'AT-PLANT-001',
+  'Plant & Machinery Standard',
+  (SELECT id FROM fixed_asset_categories WHERE code = 'FAC-PLANT'),
+  'STD-PLANT',
+  'Generic',
+  'Silverstar Grow',
+  (SELECT id FROM uom WHERE code = 'PCS'),
+  (SELECT useful_life_years FROM fixed_asset_categories WHERE code = 'FAC-PLANT'),
+  (SELECT depreciation_rate_pct FROM fixed_asset_categories WHERE code = 'FAC-PLANT'),
+  'Default template for plant and machinery assets',
+  'active'
+WHERE NOT EXISTS (SELECT 1 FROM asset_templates WHERE code = 'AT-PLANT-001');
+
+INSERT INTO asset_templates (
+  code, name, category_id, default_model_no, default_brand,
+  default_manufacturer, default_uom_id, default_useful_life,
+  default_depr_rate, description, status
+)
+SELECT
+  'AT-COMP-001',
+  'Computer & IT Standard',
+  (SELECT id FROM fixed_asset_categories WHERE code = 'FAC-COMP'),
+  'STD-COMP',
+  'HP',
+  'Silverstar Grow',
+  (SELECT id FROM uom WHERE code = 'PCS'),
+  (SELECT useful_life_years FROM fixed_asset_categories WHERE code = 'FAC-COMP'),
+  (SELECT depreciation_rate_pct FROM fixed_asset_categories WHERE code = 'FAC-COMP'),
+  'Default template for computers and IT equipment',
+  'active'
+WHERE NOT EXISTS (SELECT 1 FROM asset_templates WHERE code = 'AT-COMP-001');
+
+INSERT INTO asset_templates (
+  code, name, category_id, default_model_no, default_brand,
+  default_manufacturer, default_uom_id, default_useful_life,
+  default_depr_rate, description, status
+)
+SELECT
+  'AT-FURN-001',
+  'Furniture & Fixtures Standard',
+  (SELECT id FROM fixed_asset_categories WHERE code = 'FAC-FURN'),
+  'STD-FURN',
+  'Generic',
+  'Silverstar Grow',
+  (SELECT id FROM uom WHERE code = 'PCS'),
+  (SELECT useful_life_years FROM fixed_asset_categories WHERE code = 'FAC-FURN'),
+  (SELECT depreciation_rate_pct FROM fixed_asset_categories WHERE code = 'FAC-FURN'),
+  'Default template for furniture and fixtures',
+  'active'
+WHERE NOT EXISTS (SELECT 1 FROM asset_templates WHERE code = 'AT-FURN-001');
