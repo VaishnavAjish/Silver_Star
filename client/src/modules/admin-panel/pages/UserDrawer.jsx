@@ -297,7 +297,7 @@ export default function UserDrawer({ user, onClose, onSaved }) {
 
   if (!user) return null;
 
-  const isAdmin  = basic.role === 'admin' || basic.role === 'super_admin';
+  const isAdmin  = basic.role === 'super_admin';
   const isSelf   = user.id === me?.id;
   const roleCls  = { super_admin: 'b-active', admin: 'b-active', operator: 'b-draft', viewer: 'b-inactive' };
 

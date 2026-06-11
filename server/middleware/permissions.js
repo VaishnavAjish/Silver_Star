@@ -60,7 +60,7 @@ function checkPermission(module, action, submodule = '') {
       }
 
       // 2. Legacy admin role bypass
-      if (req.user.role === 'admin') return next();
+      // if (req.user.role === 'admin') return next();
 
       // 3. Legacy user_permissions overrides
       const { rows } = await pool.query(

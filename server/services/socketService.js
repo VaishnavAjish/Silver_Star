@@ -84,7 +84,7 @@ setInterval(() => {
 }, 60_000).unref();
 
 async function canJoinRoom(user, room) {
-  if (user.role === 'super_admin' || user.role === 'admin') return true;
+  if (user.role === 'super_admin') return true;
   if (room === `user:${user.id}`) return true;
   if (room === `role:${user.role}`) return true;
   const module = ROOM_TO_MODULE[room];
