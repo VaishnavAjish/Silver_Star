@@ -5,6 +5,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+client/package-lock.json
 
 # ── Dependencies ───────────────────────────────────────
 node_modules/
