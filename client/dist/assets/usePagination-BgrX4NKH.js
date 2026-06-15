@@ -1,0 +1,1 @@
+import{r as e}from"./index-cEBOwSKe.js";function f(t,o=[],s=1e3){const[c,a]=e.useState(1),[n,g]=e.useState(s);e.useEffect(()=>{a(1)},o);const r=t||[],u=Math.ceil(((t==null?void 0:t.length)||0)/n)||1;return{page:c,setPage:a,paginatedItems:r,totalPages:u,pageSize:n,setPageSize:g}}export{f as u};
