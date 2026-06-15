@@ -1,0 +1,1 @@
+import{r as u}from"./index-cEBOwSKe.js";function a(e,t){const[r,n]=u.useState(()=>{try{const o=sessionStorage.getItem(e);return o?{...t,...JSON.parse(o)}:t}catch{return t}}),s=u.useRef(null);return u.useEffect(()=>(clearTimeout(s.current),s.current=setTimeout(()=>{sessionStorage.setItem(e,JSON.stringify(r))},300),()=>clearTimeout(s.current)),[e,r]),[r,n]}export{a as u};
