@@ -17,43 +17,58 @@ async function genTransferNum(client) {
 (async () => {
   try {
     const client = await pool.primaryPool.connect();
-    await client.query(`
-      -- Sequences required by transfer number generation and partial lot splits
-      CREATE SEQUENCE IF NOT EXISTS st_seq START 1;
-      CREATE SEQUENCE IF NOT EXISTS lot_op_id_seq START 1;
+    try {
+      // Step 1: Sequences and tables (app user has permission for these)
+      await client.query(`
+        CREATE SEQUENCE IF NOT EXISTS st_seq START 1;
+        CREATE SEQUENCE IF NOT EXISTS lot_op_id_seq START 1;
 
-      ALTER TYPE lot_movement_type ADD VALUE IF NOT EXISTS 'transfer';
+        CREATE TABLE IF NOT EXISTS pending_transfers (
+          id SERIAL PRIMARY KEY,
+          transfer_id VARCHAR(50) UNIQUE NOT NULL,
+          source_location_id INTEGER REFERENCES locations(id),
+          destination_location_id INTEGER REFERENCES locations(id),
+          source_account_name VARCHAR(100),
+          dest_account_name VARCHAR(100),
+          status VARCHAR(20) DEFAULT 'Pending',
+          created_at TIMESTAMP DEFAULT NOW(),
+          created_by INTEGER REFERENCES users(id),
+          approved_by INTEGER REFERENCES users(id),
+          approved_at TIMESTAMP
+        );
+        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
+        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);
 
-      CREATE TABLE IF NOT EXISTS pending_transfers (
-        id SERIAL PRIMARY KEY,
-        transfer_id VARCHAR(50) UNIQUE NOT NULL,
-        source_location_id INTEGER REFERENCES locations(id),
-        destination_location_id INTEGER REFERENCES locations(id),
-        source_account_name VARCHAR(100),
-        dest_account_name VARCHAR(100),
-        status VARCHAR(20) DEFAULT 'Pending',
-        created_at TIMESTAMP DEFAULT NOW(),
-        created_by INTEGER REFERENCES users(id),
-        approved_by INTEGER REFERENCES users(id),
-        approved_at TIMESTAMP
-      );
-      ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
-      ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
-      ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);
+        CREATE TABLE IF NOT EXISTS pending_transfer_lots (
+          id SERIAL PRIMARY KEY,
+          pending_transfer_id INTEGER REFERENCES pending_transfers(id) ON DELETE CASCADE,
+          lot_id INTEGER REFERENCES inventory(id),
+          transfer_qty NUMERIC(15,4)
+        );
+      `);
+      logger.info('stockTransfer DB init complete (sequences + tables ready)');
+    } finally {
+      client.release();
+    }
 
-      CREATE TABLE IF NOT EXISTS pending_transfer_lots (
-        id SERIAL PRIMARY KEY,
-        pending_transfer_id INTEGER REFERENCES pending_transfers(id) ON DELETE CASCADE,
-        lot_id INTEGER REFERENCES inventory(id),
-        transfer_qty NUMERIC(15,4)
-      );
-    `);
-    client.release();
-    logger.info('stockTransfer DB init complete (sequences + tables ready)');
+    // Step 2: Try to add enum value — requires type ownership; skip if not allowed
+    try {
+      const client2 = await pool.primaryPool.connect();
+      try {
+        await client2.query(`ALTER TYPE lot_movement_type ADD VALUE IF NOT EXISTS 'transfer';`);
+        logger.info('stockTransfer: lot_movement_type enum updated');
+      } finally {
+        client2.release();
+      }
+    } catch (enumErr) {
+      logger.warn('stockTransfer: could not alter lot_movement_type (needs superuser/owner) — value may already exist', { error: enumErr.message });
+    }
   } catch (e) {
     logger.error('stockTransfer DB init failed', { error: e.message, stack: e.stack });
   }
 })();
+
 
 router.post('/preview', authenticate, async (req, res) => {
   try {
