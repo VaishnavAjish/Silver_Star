@@ -165,3 +165,6 @@ function gracefulShutdown(signal) {
 
 process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.once('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+// trigger restart
+

@@ -88,6 +88,7 @@ export const NAV = [
       { label: 'Accounts Receivable', path: '/reports/accounts-receivable' },
       { label: 'Accounts Payable', path: '/reports/accounts-payable' },
       { label: 'Cost Center P&L', path: '/reports/cost-center' },
+      { label: 'Cost Centre Reports', path: '/cost-center-reports' },
     ]
   },
   {
@@ -100,6 +101,8 @@ export const NAV = [
       { label: 'UOM', path: '/uom' },
       { label: 'Expense Categories', path: '/expense-categories' },
       { label: 'Asset Categories', path: '/fixed-asset-categories' },
+      { label: 'Cost Centres', path: '/cost-centers' },
+      { label: 'Cost Centre Corrections', path: '/cost-center-corrections' },
     ]
   },
   { label: 'Admin Panel', icon: ShieldCheck, path: '/admin/users', adminOnly: true },
@@ -112,7 +115,7 @@ const ROOT_PATHS = new Set([
   '/lot-movements', '/inventory/process-issues',
   '/vendors', '/customers', '/assets',
   '/ledger', '/trial-balance', '/pnl', '/costing', '/balance-sheet',
-  '/fixed-asset-categories', '/items', '/machines', '/departments',
+  '/fixed-asset-categories', '/cost-centers', '/cost-center-corrections', '/cost-center-reports', '/items', '/machines', '/departments',
   '/locations', '/uom', '/expense-categories', '/asset-templates',
   '/manufacturing/control-tower', '/manufacturing/process-master',
   '/reports/fixed-asset-register', '/reports/depreciation-schedule',
@@ -226,6 +229,9 @@ function LayoutInner() {
     '/payments': 'Payments', '/payments/new': 'New Payment', '/receipts': 'Receipts', '/receipts/new': 'New Receipt', '/ledger': 'Account Ledger', '/trial-balance': 'Trial Balance',
     '/pnl': 'Profit & Loss', '/costing': 'Costing Report', '/balance-sheet': 'Balance Sheet',
     '/fixed-asset-categories': 'Fixed Asset Categories',
+    '/cost-centers': 'Cost Centres',
+    '/cost-center-corrections': 'Cost Centre Corrections',
+    '/cost-center-reports': 'Cost Centre Reports',
     '/asset-templates': 'Asset Templates',
     '/assets': 'Fixed Assets', '/assets/new': 'Manual Asset Entry',
     '/depreciation-runs': 'Depreciation Runs', '/depreciation-runs/new': 'New Depreciation Run',

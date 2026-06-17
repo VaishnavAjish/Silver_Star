@@ -5,14 +5,11 @@ const pool = require('../db/pool');
 /**
  * Row-Level Security (RLS) Middleware
  *
- * IMPORTANT: SET LOCAL only affects the current connection for the duration
- * of a transaction. We must attach a dedicated pg client to req so the same
+ * We attach a dedicated pg client to req so the same
  * connection is used for both the RLS setup AND the actual query in route
  * handlers. The client is released in the response finish handler.
- *
- * Routes that need RLS must use req.db (the pinned client) instead of
- * pool.query() — or call pool.query() and accept that RLS won't apply to
- * those queries (fine for super_admin or non-RLS tables).
+ * By wrapping the execution with rlsContext, all subsequent pool.query()
+ * calls automatically inherit this RLS-enabled client.
  */
 async function setRLSContext(req, res, next) {
   if (!req.user) return next();
@@ -51,7 +48,9 @@ async function setRLSContext(req, res, next) {
       else _json(body);
     };
 
-    next();
+    pool.rlsContext.run(client, () => {
+      next();
+    });
   } catch (err) {
     console.warn('[RLS] Failed to pin client or set session variables:', err.message);
     next(); // degrade gracefully — routes still work, just without RLS

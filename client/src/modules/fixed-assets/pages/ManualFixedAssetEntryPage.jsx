@@ -304,6 +304,7 @@ export default function ManualFixedAssetEntry() {
   const [locs,        setLocs]        = useState([]);
   const [depts,       setDepts]       = useState([]);
   const [uoms,        setUoms]        = useState([]);
+  const [costCenters, setCostCenters] = useState([]);
   const [saving,      setSaving]      = useState(false);
   const [selectedTpl, setSelectedTpl] = useState(null);
 
@@ -323,6 +324,7 @@ export default function ManualFixedAssetEntry() {
     total_invoice_value: '', purchase_cost: '', salvage_value: '0',
     accumulated_depreciation: '0',
     location_id: '', department_id: '', custodian: '', remarks: '',
+    cost_center_id: '',
   });
 
   useEffect(() => {
@@ -333,13 +335,15 @@ export default function ManualFixedAssetEntry() {
       get('/api/locations?limit=100'),
       get('/api/departments?limit=100'),
       get('/api/uom'),
-    ]).then(([c, t, v, l, d, u]) => {
+      get('/api/cost-centers'),
+    ]).then(([c, t, v, l, d, u, cc]) => {
       setCats(c.data || []);
       setTemplates(t.data || []);
       setVendors(v.data || []);
       setLocs(l.data || []);
       setDepts(d.data || []);
       setUoms(u.data || []);
+      setCostCenters(cc.data || []);
     }).catch(() => toast.error('Failed to load form data'));
   }, []);
 
@@ -621,6 +625,19 @@ export default function ManualFixedAssetEntry() {
               <div style={fg}>
                 <label>Invoice No</label>
                 <input value={form.invoice_no} onChange={e => set('invoice_no', e.target.value)} placeholder="Invoice number" />
+              </div>
+            </div>
+
+            {/* Cost Centre (analytical metadata only) */}
+            <div style={row}>
+              <div style={{ ...fg, flex: 2 }}>
+                <label>Cost Centre</label>
+                <SelectDropdown value={form.cost_center_id} onChange={e => set('cost_center_id', e.target.value)}>
+                  <option value="">— None —</option>
+                  {costCenters.map(cc => (
+                    <option key={cc.id} value={cc.id}>{cc.code ? `${cc.code} — ${cc.name}` : cc.name}</option>
+                  ))}
+                </SelectDropdown>
               </div>
             </div>
 

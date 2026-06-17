@@ -8,10 +8,10 @@ const DB_CONFIG = {
   database: process.env.DB_NAME || 'silverstar_grow',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
-  max: parseInt(process.env.DB_POOL_MAX) || 50,
+  max: parseInt(process.env.DB_POOL_MAX) || 100,
   min: parseInt(process.env.DB_POOL_MIN) || 5,
   idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000,
-  connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT) || 3000,
+  connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT) || 10000,
   statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT) || 25000,
   lock_timeout: parseInt(process.env.DB_LOCK_TIMEOUT) || 5000,
   idle_in_transaction_session_timeout: parseInt(process.env.DB_IDLE_TX_TIMEOUT) || 30000,
@@ -23,6 +23,9 @@ const DB_CONFIG = {
     ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
     : false,
 };
+
+const { AsyncLocalStorage } = require('async_hooks');
+const rlsContext = new AsyncLocalStorage();
 
 const primaryPool = new Pool(DB_CONFIG);
 
@@ -37,10 +40,10 @@ function initReplicas() {
   replicaPools = replicaUrls.map(url => {
     const p = new Pool({
       connectionString: url,
-      max: parseInt(process.env.DB_POOL_MAX) || 50,
+      max: parseInt(process.env.DB_POOL_MAX) || 100,
       min: 2,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 10000,
       statement_timeout: 60000,
     });
     p.on('error', (err) => logger.error('Unexpected error on idle replica client', { error: err.message }));
@@ -148,4 +151,5 @@ module.exports = {
   // Backward-compatible alias: some modules call pool.connect() directly
   connect: primaryPool.connect.bind(primaryPool),
   shutdown,
+  rlsContext,
 };

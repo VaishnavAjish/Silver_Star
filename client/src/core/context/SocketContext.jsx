@@ -6,7 +6,7 @@ const SocketContext = createContext(null);
 function resolveWsUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
   const base = import.meta.env.VITE_API_URL || window.location.origin;
-  const protocol = base.startsWith('https') ? 'ws' : 'ws';
+  const protocol = base.startsWith('https') ? 'wss' : 'ws';
   return `${protocol}://${base.replace(/^https?:\/\//, '')}`;
 }
 

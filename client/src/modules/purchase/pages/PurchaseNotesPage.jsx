@@ -201,6 +201,7 @@ export function PurchaseNoteForm() {
   const [vendors, setVendors] = useState([]);
   const [items,   setItems]   = useState([]);
   const [depts,   setDepts]   = useState([]);
+  const [costCenters, setCostCenters] = useState([]);
   const [cats,    setCats]    = useState([]);
   const [saving,  setSaving]  = useState(false);
   const [viewData, setViewData] = useState(null);
@@ -209,7 +210,7 @@ export function PurchaseNoteForm() {
   const [form, setForm] = useState({
     doc_date: new Date().toISOString().split('T')[0],
     vendor_id: '', item_type: 'seed', department_id: '', payment_term: 'Immediate',
-    currency: 'INR', reference_no: '', remark: '',
+    currency: 'INR', reference_no: '', remark: '', cost_center_id: '',
   });
   const [lines, setLines] = useState([{ ...INITIAL_LINE }]);
 
@@ -221,12 +222,13 @@ export function PurchaseNoteForm() {
       doc_date: new Date().toISOString().split('T')[0],
       vendor_id: '', vendor_name: '', item_type: 'seed', department_id: '',
       dept_name: '', payment_term: 'Immediate', currency: 'INR',
-      reference_no: '', remark: '',
+      reference_no: '', remark: '', cost_center_id: '',
     });
     setLines([{ ...INITIAL_LINE }]);
     api.get('/api/vendors?limit=2000').then(r => { if (!ignore) setVendors(r.data || []) }).catch(() => {});
     api.get('/api/items?limit=500').then(r => { if (!ignore) setItems(r.data || []) }).catch(() => {});
     api.get('/api/departments?limit=200').then(r => { if (!ignore) setDepts(r.data || []) }).catch(() => {});
+    api.get('/api/cost-centers').then(r => { if (!ignore) setCostCenters(r.data || []) }).catch(() => {});
     api.get('/api/fixed-asset-categories').then(r => { if (!ignore) setCats(r.data || []) }).catch(() => {});
     if (isView) {
       setDetailLoading(true);
@@ -407,6 +409,20 @@ export function PurchaseNoteForm() {
               <SelectDropdown value={form.department_id || ''} onChange={e => setForm(p => ({ ...p, department_id: e.target.value }))}>
                 <option value="">— Select —</option>
                 {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </SelectDropdown>
+            )}
+          </div>
+          <div className="fg">
+            <label>Cost Centre</label>
+            {isView ? (
+              <input
+                value={costCenters.find(c => String(c.id) === String(form.cost_center_id))?.name || ''}
+                disabled
+              />
+            ) : (
+              <SelectDropdown value={form.cost_center_id || ''} onChange={e => setForm(p => ({ ...p, cost_center_id: e.target.value }))}>
+                <option value="">— None —</option>
+                {costCenters.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>)}
               </SelectDropdown>
             )}
           </div>

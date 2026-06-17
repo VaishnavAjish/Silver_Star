@@ -37,6 +37,7 @@ async function buildPreviewLines(period_from, period_to) {
       category_name:             asset.category_name,
       gl_depr_expense_account_id: asset.gl_depr_expense_account_id,
       gl_accum_depr_account_id:  asset.gl_accum_depr_account_id,
+      cost_center_id:            asset.cost_center_id || null,
       opening_wdv:               result.opening_wdv,
       depreciation_amount:       result.depreciation_amount,
       closing_wdv:               result.closing_wdv,
@@ -124,13 +125,18 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     );
 
     // ── Build JE lines grouped by (expense_account, accum_account) ────────
+    // Group by (expense_account, accum_account, cost_centre) so each cost centre
+    // posts its own balanced line pair. Totals are identical to the ungrouped sum —
+    // this only splits the same debit/credit more granularly by cost centre.
     const groupMap = {};
     for (const l of lines) {
-      const key = `${l.gl_depr_expense_account_id}_${l.gl_accum_depr_account_id}`;
+      const cc  = l.cost_center_id || null;
+      const key = `${l.gl_depr_expense_account_id}_${l.gl_accum_depr_account_id}_${cc ?? 'none'}`;
       if (!groupMap[key]) groupMap[key] = {
-        expAccId:   l.gl_depr_expense_account_id,
-        accumAccId: l.gl_accum_depr_account_id,
-        total:      0,
+        expAccId:     l.gl_depr_expense_account_id,
+        accumAccId:   l.gl_accum_depr_account_id,
+        costCenterId: cc,
+        total:        0,
       };
       groupMap[key].total = Math.round((groupMap[key].total + l.depreciation_amount) * 100) / 100;
     }
@@ -138,9 +144,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     const jeLines = [];
     for (const g of Object.values(groupMap)) {
       jeLines.push({ accountId: g.expAccId,   debit: g.total, credit: 0,
-                     narration: `Depreciation ${period_from} to ${period_to}` });
+                     narration: `Depreciation ${period_from} to ${period_to}`,
+                     costCenterId: g.costCenterId });
       jeLines.push({ accountId: g.accumAccId, debit: 0, credit: g.total,
-                     narration: `Accumulated depreciation ${period_from} to ${period_to}` });
+                     narration: `Accumulated depreciation ${period_from} to ${period_to}`,
+                     costCenterId: g.costCenterId });
     }
 
     // ── Create JE inside the SAME transaction so everything is atomic ─────
@@ -260,7 +268,7 @@ router.post('/:id/cancel', authenticate, authorize('admin'), async (req, res) =>
 
     // Get run lines for reversal (inside the transaction)
     const linesR = await client.query(
-      `SELECT drl.*, fa.category_id,
+      `SELECT drl.*, fa.category_id, fa.cost_center_id,
               fac.gl_depr_expense_account_id, fac.gl_accum_depr_account_id
        FROM depreciation_run_lines drl
        JOIN fixed_assets fa ON drl.fixed_asset_id = fa.id
@@ -288,11 +296,15 @@ router.post('/:id/cancel', authenticate, authorize('admin'), async (req, res) =>
     );
 
     // Build reversal JE (Cr expense, Dr accum)
+    // Mirror the original grouping (incl. cost centre) so the reversal nets each
+    // cost centre back to zero. Totals identical to the original run.
     const groupMap = {};
     for (const l of linesR.rows) {
-      const key = `${l.gl_depr_expense_account_id}_${l.gl_accum_depr_account_id}`;
+      const cc  = l.cost_center_id || null;
+      const key = `${l.gl_depr_expense_account_id}_${l.gl_accum_depr_account_id}_${cc ?? 'none'}`;
       if (!groupMap[key]) groupMap[key] = {
-        expAccId: l.gl_depr_expense_account_id, accumAccId: l.gl_accum_depr_account_id, total: 0,
+        expAccId: l.gl_depr_expense_account_id, accumAccId: l.gl_accum_depr_account_id,
+        costCenterId: cc, total: 0,
       };
       groupMap[key].total = Math.round((groupMap[key].total + parseFloat(l.depreciation_amount)) * 100) / 100;
     }
@@ -300,9 +312,11 @@ router.post('/:id/cancel', authenticate, authorize('admin'), async (req, res) =>
     const jeLines = [];
     for (const g of Object.values(groupMap)) {
       jeLines.push({ accountId: g.accumAccId, debit: g.total, credit: 0,
-                     narration: `Reversal of depreciation run ${run.run_number}` });
+                     narration: `Reversal of depreciation run ${run.run_number}`,
+                     costCenterId: g.costCenterId });
       jeLines.push({ accountId: g.expAccId,   debit: 0, credit: g.total,
-                     narration: `Reversal of depreciation run ${run.run_number}` });
+                     narration: `Reversal of depreciation run ${run.run_number}`,
+                     costCenterId: g.costCenterId });
     }
 
     // Create reversal JE inside the same transaction → fully atomic

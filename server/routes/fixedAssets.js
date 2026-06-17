@@ -174,6 +174,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
       asset_tag, condition, warranty_expiry, installation_date, custodian,
       // Template linkage (optional — standardization layer only)
       template_id,
+      // Cost centre (optional analytical metadata only)
+      cost_center_id,
     } = req.body;
 
     if (!asset_name || !category_id || !purchase_date || !in_service_date || purchase_cost == null)
@@ -228,10 +230,10 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
           purchase_cost, salvage_value, accumulated_depreciation, remarks,
           serial_no, model_no, brand, manufacturer, qty, uom_id,
           asset_tag, condition, warranty_expiry, installation_date, custodian,
-          created_by)
+          created_by, cost_center_id)
        VALUES
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-          $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
+          $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
        RETURNING *`,
       [
         assetCode, asset_name, category_id,
@@ -250,6 +252,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
         ['new','good','fair','poor','damaged'].includes(condition) ? condition : 'new',
         warranty_expiry || null, installation_date || null, custodian || null,
         req.user.id,
+        cost_center_id ? parseInt(cost_center_id) : null,
       ]
     );
     const asset = result.rows[0];
@@ -295,9 +298,11 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
       sourceId:    asset.id,
       lines: [
         { accountId: assetAccId,   debit: capitalizedCost, credit: 0,
-          narration: `Capitalized asset cost - ${assetCode}` },
+          narration: `Capitalized asset cost - ${assetCode}`,
+          costCenterId: asset.cost_center_id || null },
         { accountId: payableAccId, debit: 0, credit: capitalizedCost,
-          narration: `Payable to ${vendorName} - ${assetCode}` },
+          narration: `Payable to ${vendorName} - ${assetCode}`,
+          costCenterId: asset.cost_center_id || null },
       ],
       autoPost:   true,
       createdBy:  req.user.id,
@@ -334,6 +339,7 @@ router.patch('/:id', authenticate, authorize('admin', 'operator'), async (req, r
 
     // Always editable
     if (req.body.template_id      !== undefined) add('template_id',      req.body.template_id      ? parseInt(req.body.template_id) : null);
+    if (req.body.cost_center_id   !== undefined) add('cost_center_id',   req.body.cost_center_id   ? parseInt(req.body.cost_center_id)   : null);
     if (req.body.asset_name       !== undefined) add('asset_name',       req.body.asset_name);
     if (req.body.location_id      !== undefined) add('location_id',      req.body.location_id      || null);
     if (req.body.department_id    !== undefined) add('department_id',    req.body.department_id    || null);

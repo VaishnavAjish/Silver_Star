@@ -6,7 +6,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node test_db.js",
-    "debug": "node debug_db.js",
+    "debug": "node test_api.js",
     "db:indexes": "psql -h localhost -p 5433 -U postgres -d silverstar_grow -f migrations/perf_indexes.sql",
     "db:partition": "psql -h localhost -p 5433 -U postgres -d silverstar_grow -f migrations/enterprise_partitioning.sql",
     "db:refresh-mv": "psql -h localhost -p 5433 -U postgres -d silverstar_grow -c \"SELECT refresh_materialized_views();\"",

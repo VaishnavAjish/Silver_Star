@@ -172,7 +172,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     await client.query('BEGIN');
 
     const { doc_date, vendor_id, item_type, department_id, payment_term, currency,
-            reference_no, remark, lines } = req.body;
+            reference_no, remark, lines, cost_center_id } = req.body;
+    const costCenterId = cost_center_id ? parseInt(cost_center_id) : null;
 
     if (!lines || lines.length === 0) throw new Error('At least one line item required');
 
@@ -352,7 +353,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     const jeLines = [];
     for (const [accId, amount] of Object.entries(drAccountMap)) {
       jeLines.push({ accountId: parseInt(accId), debit: amount, credit: 0,
-                     narration: `Purchase ${item_type} - ${docNumber}` });
+                     narration: `Purchase ${item_type} - ${docNumber}`,
+                     costCenterId });
     }
 
     // Add GST if applicable
@@ -360,7 +362,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       const gstAccId = await getAccountId('3002', client);
       if (gstAccId) {
         jeLines.push({ accountId: gstAccId, debit: Math.round(taxAmount * 100) / 100, credit: 0,
-                       narration: `GST on ${docNumber}` });
+                       narration: `GST on ${docNumber}`,
+                       costCenterId });
       }
     }
 
@@ -371,6 +374,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     jeLines.push({
       accountId: payableAccId, debit: 0, credit: Math.round(grandTotal * 100) / 100,
       narration: `Payable to ${vendorNameR.rows[0]?.name || 'Unknown Vendor'}`,
+      costCenterId,
     });
 
     const je = await journalEngine.createEntry({
