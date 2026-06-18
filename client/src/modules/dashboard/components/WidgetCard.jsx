@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
 import { WIDGET_REGISTRY } from './widgetRegistry';
 import { renderWidget } from './DashboardWidgets';
-import { useDashboardSync } from '../../../shared/hooks/useRealTimeSync';
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 function Skeleton({ size }) {
@@ -44,9 +43,6 @@ export default function WidgetCard({ widgetKey }) {
     return loadData(true);
   }, [widgetKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useDashboardSync(() => {
-    loadData(false);
-  });
 
   if (!meta) return null;
   const Icon = meta.icon;

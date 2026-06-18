@@ -6,5 +6,5 @@
   "status": 500,
   "message": "Connection terminated due to connection timeout",
   "stack": "Error: Connection terminated due to connection timeout\n    at E:\\silverstar-grow\\silverstar-grow\\server\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Object.query (E:\\silverstar-grow\\silverstar-grow\\server\\db\\pool.js:70:20)\n    at async Promise.all (index 0)\n    at async E:\\silverstar-grow\\silverstar-grow\\server\\routes\\auth.js:268:55",
-  "timestamp": "2026-06-17T10:48:35.550Z"
+  "timestamp": "2026-06-18T05:48:14.679Z"
 }

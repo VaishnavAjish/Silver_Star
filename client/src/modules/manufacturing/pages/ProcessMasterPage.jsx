@@ -5,7 +5,6 @@ import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import { useApi } from '../../../shared/hooks/useApi';
 import useResizableColumns from '../../../shared/hooks/useResizableColumns';
-import { useProcessSync } from '../../../shared/hooks/useRealTimeSync';
 import toast from 'react-hot-toast';
 import { Plus, Edit2, Search, X, Settings, Check, Layers } from 'lucide-react';
 
@@ -275,10 +274,6 @@ export default function ProcessMasterPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Real-Time Socket.IO Sync
-  useProcessSync(() => {
-    load();
-  });
 
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {

@@ -15,14 +15,6 @@
   status = 200
   force = true
 
-# Proxy WebSocket (native ws) to the Render backend.
-# Must come before the SPA catch-all so it isn't swallowed by /*.
-[[redirects]]
-  from = "/ws"
-  to = "https://silverstar-grow.onrender.com/ws"
-  status = 200
-  force = true
-
 # SPA fallback — every other path serves index.html (React Router takes over).
 [[redirects]]
   from = "/*"

@@ -1,116 +1,43 @@
 /**
- * ─── Silverstar Grow ERP — Live Notification Center ─────────────────────────
+ * ─── Silverstar Grow ERP — Notification Center ──────────────────────────────
  *
- * Real-time notification bell that shows live ERP events.
- * Receives events from Socket.IO and displays them as toast + in-app feed.
+ * Notification bell + dropdown.
+ *
+ * NOTE: The real-time WebSocket event feed has been removed. This component
+ * is kept as an inert placeholder (empty feed) so the header layout and any
+ * future polling/REST-based notification source can plug in without a rewrite.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSocket } from '../../core/context/SocketContext';
-import toast from 'react-hot-toast';
 
-// ── Event → UI mapping ────────────────────────────────────────────────────────
-const EVENT_CONFIG = {
-  'inventory.created':     { icon: '📦', label: 'Inventory Created',     type: 'success' },
-  'inventory.updated':     { icon: '📦', label: 'Inventory Updated',     type: 'info' },
-  'inventory.deleted':     { icon: '📦', label: 'Inventory Removed',     type: 'warning' },
-  'inventory.transferred': { icon: '🚚', label: 'Stock Transferred',     type: 'info' },
-  'inventory.adjusted':    { icon: '⚖️', label: 'Stock Adjusted',        type: 'info' },
-  'inventory.opening':     { icon: '📋', label: 'Opening Entry Added',   type: 'success' },
-  'inventory.closing':     { icon: '📋', label: 'Closing Entry Added',   type: 'success' },
-  'purchase.created':      { icon: '🛒', label: 'Purchase Created',      type: 'success' },
-  'purchase.updated':      { icon: '🛒', label: 'Purchase Updated',      type: 'info' },
-  'purchase.approved':     { icon: '✅', label: 'Purchase Approved',     type: 'success' },
-  'sale.created':          { icon: '💰', label: 'Sale Created',          type: 'success' },
-  'sale.approved':         { icon: '✅', label: 'Sale Approved',         type: 'success' },
-  'process.started':       { icon: '⚙️', label: 'Process Started',       type: 'info' },
-  'process.completed':     { icon: '✅', label: 'Process Completed',     type: 'success' },
-  'process.cancelled':     { icon: '❌', label: 'Process Cancelled',     type: 'warning' },
-  'process.approved':      { icon: '✅', label: 'Process Approved',      type: 'success' },
-  'process.rejected':      { icon: '🚫', label: 'Process Rejected',      type: 'error' },
-  'batch.created':         { icon: '📊', label: 'Batch Created',         type: 'success' },
-  'batch.closed':          { icon: '📊', label: 'Batch Closed',          type: 'info' },
-  'lot.split':             { icon: '✂️', label: 'Lot Split',             type: 'info' },
-  'lot.merged':            { icon: '🔗', label: 'Lots Merged',           type: 'info' },
-  'user.created':          { icon: '👤', label: 'User Created',          type: 'info' },
-  'user.updated':          { icon: '👤', label: 'User Updated',          type: 'info' },
-  'role.updated':          { icon: '🔑', label: 'Role Updated',          type: 'warning' },
-  'permission.changed':    { icon: '🔒', label: 'Your permissions were updated', type: 'warning' },
-};
-
-const ALL_EVENTS = Object.keys(EVENT_CONFIG);
 const MAX_NOTIFICATIONS = 50;
 
 /**
- * Hook that accumulates real-time ERP notifications.
+ * Hook that holds notification state.
  * Returns { notifications, unreadCount, markAllRead, clearAll }
+ *
+ * With WebSocket removed there is currently no live event source, so the feed
+ * stays empty. `addNotification` is exposed for a future REST/polling source.
  */
 export function useNotifications() {
-  const { isConnected, on } = useSocket();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const idRef = useRef(0);
-  const dedupTimers = useRef({});
 
-  const addNotification = useCallback((event, payload) => {
-    const entityId = payload && (payload.id || payload._entityId);
-    const dedupKey = entityId ? `${event}:${entityId}` : null;
-
-    if (dedupKey && dedupTimers.current[dedupKey]) {
-      return;
-    }
-
-    if (dedupKey) {
-      dedupTimers.current[dedupKey] = setTimeout(() => {
-        delete dedupTimers.current[dedupKey];
-      }, 5000);
-    }
-
-    const config = EVENT_CONFIG[event] || { icon: '📢', label: event, type: 'info' };
+  const addNotification = useCallback((event, payload, meta = {}) => {
     const notification = {
       id: ++idRef.current,
       event,
-      icon: config.icon,
-      label: config.label,
-      type: config.type,
+      icon: meta.icon || '📢',
+      label: meta.label || event,
+      type: meta.type || 'info',
       payload,
       ts: Date.now(),
       read: false,
     };
-
     setNotifications(prev => [notification, ...prev].slice(0, MAX_NOTIFICATIONS));
     setUnreadCount(c => c + 1);
-
-    const toastFn =
-      config.type === 'error'   ? toast.error :
-      config.type === 'warning' ? toast :
-      config.type === 'success' ? toast.success :
-      toast;
-
-    toastFn(`${config.icon} ${config.label}`, {
-      duration: 3500,
-      style: {
-        background: '#ffffff',
-        color: '#334155',
-        border: '1px solid #e2e8f0',
-        borderRadius: '8px',
-        fontSize: '13px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-      },
-    });
   }, []);
-
-  useEffect(() => {
-    if (!isConnected) return;
-
-    const cleanups = ALL_EVENTS.map(event => {
-      return on(event, (payload) => addNotification(event, payload));
-    });
-
-    return () => {
-      cleanups.forEach(fn => { try { fn(); } catch {} });
-    };
-  }, [isConnected, addNotification, on]);
 
   const markAllRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -122,7 +49,7 @@ export function useNotifications() {
     setUnreadCount(0);
   }, []);
 
-  return { notifications, unreadCount, markAllRead, clearAll };
+  return { notifications, unreadCount, addNotification, markAllRead, clearAll };
 }
 
 /**
@@ -131,7 +58,6 @@ export function useNotifications() {
  */
 export function NotificationCenter() {
   const { notifications, unreadCount, markAllRead, clearAll } = useNotifications();
-  const { isConnected } = useSocket();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -166,7 +92,7 @@ export function NotificationCenter() {
       <button
         id="notification-bell-btn"
         onClick={handleOpen}
-        title={isConnected ? 'Live — Notifications' : 'Disconnected'}
+        title="Notifications"
         style={{
           position: 'relative',
           background: 'none',
@@ -193,13 +119,6 @@ export function NotificationCenter() {
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
-        {/* Connection indicator dot */}
-        <span style={{
-          position: 'absolute', bottom: 4, right: 4,
-          width: 8, height: 8, borderRadius: '50%',
-          background: isConnected ? '#22c55e' : '#ef4444',
-          border: '1px solid rgba(0,0,0,0.3)',
-        }} />
       </button>
 
       {/* Dropdown */}
@@ -221,14 +140,7 @@ export function NotificationCenter() {
             borderBottom: '1px solid #f1f5f9',
           }}>
             <span style={{ fontWeight: 600, color: '#1e293b', fontSize: 14 }}>
-              Live Notifications
-              <span style={{
-                marginLeft: 8, fontSize: 11, padding: '2px 6px',
-                borderRadius: 10, background: isConnected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                color: isConnected ? '#22c55e' : '#ef4444',
-              }}>
-                {isConnected ? '● Live' : '○ Offline'}
-              </span>
+              Notifications
             </span>
             {notifications.length > 0 && (
               <button
@@ -244,8 +156,7 @@ export function NotificationCenter() {
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {notifications.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                No notifications yet.<br />
-                <span style={{ fontSize: 11 }}>Events will appear here in real time.</span>
+                No notifications.
               </div>
             ) : (
               notifications.map(n => (

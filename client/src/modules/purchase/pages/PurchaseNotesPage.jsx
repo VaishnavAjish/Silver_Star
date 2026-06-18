@@ -12,7 +12,6 @@ import ExportMenu from '../../../shared/components/ExportMenu';
 import { useTabs } from '../../../core/tabs';
 import DatePicker from '../../../shared/components/DatePicker';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
-import { usePurchaseSync } from '../../../shared/hooks/useRealTimeSync';
 import { Plus, Save, Trash2, FileText, ShoppingCart, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -89,10 +88,6 @@ export function PurchaseNotesPage() {
     return () => clearTimeout(debRef.current);
   }, [page, filters]);
 
-  // Real-Time Socket.IO Sync
-  usePurchaseSync(() => {
-    loadPNs(page, filters);
-  });
 
   const handleFilterChange = (k, v) => { setPage(1); setFilters(p => ({ ...p, [k]: v })); };
   const handleFilterReset  = () => { setPage(1); setFilters({}); };

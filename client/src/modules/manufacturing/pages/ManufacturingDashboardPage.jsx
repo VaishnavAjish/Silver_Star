@@ -9,7 +9,6 @@ import {
   Layers, User, Calendar, LayoutGrid, List, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { useApi } from '../../../shared/hooks/useApi';
-import { useProcessSync } from '../../../shared/hooks/useRealTimeSync';
 import toast from 'react-hot-toast';
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -1071,10 +1070,6 @@ export default function ManufacturingDashboard() {
     }
   }, [filters]);
 
-  // Real-Time Socket.IO Sync
-  useProcessSync(() => {
-    loadAll();
-  });
 
   // Load lookup data once (operators, seed lots, departments, process master)
   // Each call is independent — one failure does not blank the others.

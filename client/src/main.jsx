@@ -5,7 +5,6 @@ import { Toaster } from 'react-hot-toast';
 import App from './App';
 import { AuthProvider } from './core/context/AuthContext';
 import { ClipboardProvider } from './core/context/ClipboardContext';
-import { SocketProvider } from './core/context/SocketContext';
 import { SilverstarQueryProvider } from './shared/query/QueryProvider';
 import './core/styles/app.css';
 
@@ -13,7 +12,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <AuthProvider>
       <SilverstarQueryProvider>
-        <SocketProvider>
           <ClipboardProvider>
               <App />
               <Toaster
@@ -24,7 +22,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 }}
               />
           </ClipboardProvider>
-        </SocketProvider>
       </SilverstarQueryProvider>
     </AuthProvider>
   </BrowserRouter>

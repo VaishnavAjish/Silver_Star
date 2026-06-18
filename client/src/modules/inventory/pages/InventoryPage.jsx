@@ -5,7 +5,6 @@ import Paginator from '../../../shared/components/Paginator';
 import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
-import { useInventorySync } from '../../../shared/hooks/useRealTimeSync';
 import { useClipboard } from '../../../core/context/ClipboardContext';
 import { exportToCSV, printTable } from '../../../shared/utils/exportUtils';
 import ColumnLayoutPanel from '../../../core/layout/ColumnLayoutPanel';
@@ -327,11 +326,6 @@ export default function InventoryPage() {
     } catch {}
   }, [api]);
 
-  // Real-Time Socket.IO Synchronization
-  useInventorySync(useCallback(() => {
-    load();
-    loadPending();
-  }, [load, loadPending]));
 
 
   useEffect(() => {

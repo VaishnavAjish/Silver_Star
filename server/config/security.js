@@ -61,7 +61,6 @@ module.exports = {
   },
 
   // Helmet Content-Security-Policy (CSP) Directives
-  // connectSrc must include ws:// and wss:// for Socket.IO WebSocket upgrades
   cspDirectives: {
     defaultSrc: ["'self'"],
     scriptSrc: [
@@ -70,16 +69,11 @@ module.exports = {
     styleSrc: ["'self'", "'unsafe-inline'"],
     imgSrc: ["'self'", "data:", "blob:"],
     fontSrc: ["'self'", "data:"],
-    // Allow same-origin WebSocket + any origins declared in CORS_ORIGIN env var
+    // Allow same-origin XHR/fetch + any origins declared in CORS_ORIGIN env var
     connectSrc: [
       "'self'",
-      // Dev fallbacks
-      ...(process.env.NODE_ENV !== 'production'
-        ? ['ws://localhost:5000', 'ws://localhost:5001', 'ws://localhost:5173']
-        : []),
-      // Production origins from CORS_ORIGIN env (http→ws, https→wss)
       ...(process.env.CORS_ORIGIN
-        ? process.env.CORS_ORIGIN.split(',').map(o => o.trim().replace(/^http/, 'ws'))
+        ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
         : []),
     ],
     objectSrc: ["'none'"],

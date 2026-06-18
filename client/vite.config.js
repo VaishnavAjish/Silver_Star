@@ -28,12 +28,6 @@ export default defineConfig({
         cookieDomainRewrite: { '*': '' }, // strip cookie domain so browser keeps it for its own origin
         cookiePathRewrite: { '*': '/' },
       },
-      '/ws': {
-        target: 'http://127.0.0.1:5001',
-        changeOrigin: true,
-        ws: true,
-        headers: { origin: 'http://localhost:5173' },
-      },
     },
     fs: { strict: false },
     watch: { usePolling: true },

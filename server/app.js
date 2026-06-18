@@ -287,17 +287,6 @@ app.use('/api/stock-transfer', stockTransferRoutes);
 // ── Metrics (admin only) ──────────────────────────────────────────────────
 app.use('/api/metrics', require('./routes/metrics'));
 
-// ── WebSocket Stats (authenticated) ──────────────────────────────────────────
-app.get('/api/ws/stats', authenticate, async (req, res) => {
-  try {
-    const { getMetrics } = require('./services/socketService');
-    const metrics = await getMetrics();
-    res.json({ ok: true, ...metrics });
-  } catch (err) {
-    res.status(500).json({ error: err.message, ok: false });
-  }
-});
-
 // ── Cache Flush (authenticated) ───────────────────────────────────────────
 const { clearCache } = require('./middleware/requestDedup');
 const cache = require('./db/cache');
@@ -318,7 +307,7 @@ if (process.env.SERVE_STATIC === 'true') {
   app.use(express.static(staticDir, { maxAge: '1y', immutable: true }));
   // SPA fallback — all non-API routes serve index.html
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+    if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }

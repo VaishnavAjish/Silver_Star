@@ -34,21 +34,7 @@ if (missingEnv.length) {
   process.exit(1);
 }
 
-const { initSocket } = require('./services/socketService');
-const { startPgNotifyListener, stopPgNotifyListener } = require('./services/pgNotifyListener');
-const { startPresenceTracking, stopPresenceTracking } = require('./services/presenceService');
-
 const server = http.createServer(app);
-
-initSocket(server).catch(err => {
-  console.error('[startup] WebSocket init error:', err.message);
-}).then(() => {
-  startPgNotifyListener().catch(err => {
-    console.warn('[startup] PGNotify listener init error:', err.message);
-  });
-
-  startPresenceTracking();
-});
 
 server.keepAliveTimeout    = 65_000;
 server.headersTimeout      = 66_000;
@@ -146,8 +132,6 @@ function gracefulShutdown(signal) {
       console.error('[server] Error during shutdown:', err.message);
       process.exit(1);
     }
-    stopPgNotifyListener();
-    stopPresenceTracking();
     dbShutdown().then(() => {
       console.log('[server] HTTP server and DB pools closed.');
       process.exit(0);

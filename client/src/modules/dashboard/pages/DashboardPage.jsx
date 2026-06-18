@@ -10,7 +10,6 @@ import {
 import toast from 'react-hot-toast';
 import WidgetCard from '../components/WidgetCard';
 import WidgetSelectorModal from '../components/WidgetSelectorModal';
-import { useDashboardSync } from '../../../shared/hooks/useRealTimeSync';
 
 // Quick-link card (same as original)
 function NavCard({ icon: Icon, label, path, color }) {

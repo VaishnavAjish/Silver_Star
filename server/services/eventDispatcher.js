@@ -2,7 +2,6 @@
 
 const crypto = require('crypto');
 const cache = require('../db/cache');
-const { dispatchToRoom, dispatchToUser, broadcast, getIO } = require('./socketService');
 const { logger } = require('../middleware/logger');
 
 const DEDUP_WINDOW_MS = 2000;
@@ -135,36 +134,17 @@ const EVENT_ROUTES = {
   'permission.changed':  ['room:admin'],
 };
 
-async function dispatchEvent(topic, payload, opts = {}) {
-  const { targetUserId, broadcastAll = false } = opts;
-
+// Server-side cache invalidation triggered by domain events.
+// (Real-time WebSocket fan-out was removed; cache invalidation remains so
+//  cached API responses still refresh after a write.)
+async function dispatchEvent(topic, payload, _opts = {}) {
   try {
     const { trackEvent } = require('./metricsService');
     trackEvent(topic);
 
     const key = dedupKey(topic, payload);
     if (isDuplicate(key)) {
-      logger.debug(`[EventDispatcher] Dedup suppressed duplicate WebSocket broadcast for ${key}`);
       return;
-    }
-
-    if (!getIO()) {
-      logger.warn(`[EventDispatcher] Socket not ready, skipping real-time dispatch for ${topic}`);
-      return;
-    }
-
-    if (broadcastAll) {
-      broadcast(topic, payload);
-    } else {
-      const rooms = EVENT_ROUTES[topic] || ['room:dashboard'];
-      const uniqueRooms = [...new Set(rooms)];
-      for (const room of uniqueRooms) {
-        dispatchToRoom(room, topic, payload);
-      }
-
-      if (targetUserId) {
-        dispatchToUser(targetUserId, topic, payload);
-      }
     }
 
     const cachePrefix = topic.split('.')[0];

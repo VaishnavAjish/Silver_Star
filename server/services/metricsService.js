@@ -31,25 +31,8 @@ function snapshot() {
 }
 
 function getBridgeStatus() {
-  const statuses = {};
-  const bridges = ['pgNotifyListener', 'presenceService'];
-  for (const name of bridges) {
-    try {
-      const mod = require(`./${name}`);
-      statuses[name] = { available: true };
-    } catch {
-      statuses[name] = { available: false, error: 'not loaded' };
-    }
-  }
-  // WebSocket native status
-  try {
-    const { getIO, getMetrics } = require('./socketService');
-    const wss = getIO();
-    statuses.ws = wss ? { connected: true } : { connected: false };
-  } catch {
-    statuses.ws = { connected: false };
-  }
-  return statuses;
+  // Real-time bridges (WebSocket, pg-notify listener, presence) were removed.
+  return {};
 }
 
 function reset() {
