@@ -181,8 +181,10 @@ const fixedAssetCatsRoutes = require('./routes/fixedAssetCategories');
 const jeAllocationsRoutes = require('./routes/jeAllocations');
 const debugAccRoutes = require('./routes/debugAccounting');
 const jobRoutes = require('./routes/jobs');
+const sseStreamRoutes = require('./routes/sseStream');
 const stockTransferRoutes = require('./routes/stockTransfer');
 const roleRoutes = require('./routes/roles');
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountsRoutes);
@@ -283,6 +285,8 @@ app.use('/api/fixed-asset-categories', fixedAssetCatsRoutes);
 app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
+app.use('/api/events', sseStreamRoutes);
+
 
 // ── Metrics (admin only) ──────────────────────────────────────────────────
 app.use('/api/metrics', require('./routes/metrics'));

@@ -134,9 +134,7 @@ const EVENT_ROUTES = {
   'permission.changed':  ['room:admin'],
 };
 
-// Server-side cache invalidation triggered by domain events.
-// (Real-time WebSocket fan-out was removed; cache invalidation remains so
-//  cached API responses still refresh after a write.)
+// Server-side cache invalidation + SSE real-time fan-out.
 async function dispatchEvent(topic, payload, _opts = {}) {
   try {
     const { trackEvent } = require('./metricsService');
@@ -160,6 +158,12 @@ async function dispatchEvent(topic, payload, _opts = {}) {
         cache.invalidatePrefix(p).catch(() => {});
       }
     }
+
+    // Fan-out to SSE clients (real-time notifications in the browser)
+    try {
+      const { broadcast } = require('./sseClients');
+      broadcast(topic, payload ?? {});
+    } catch (_) { /* SSE module not loaded yet — safe to ignore */ }
   } catch (err) {
     logger.error(`[EventDispatcher] Failed to dispatch ${topic}`, { error: err.message });
   }

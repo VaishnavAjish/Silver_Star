@@ -1,36 +1,81 @@
 /**
  * ─── Silverstar Grow ERP — Notification Center ──────────────────────────────
  *
- * Notification bell + dropdown.
- *
- * NOTE: The real-time WebSocket event feed has been removed. This component
- * is kept as an inert placeholder (empty feed) so the header layout and any
- * future polling/REST-based notification source can plug in without a rewrite.
+ * Real-time notifications via Server-Sent Events (SSE).
+ * Shows a live/offline indicator and displays domain events as they happen.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const MAX_NOTIFICATIONS = 50;
+const SSE_URL = '/api/events/stream';
 
-/**
- * Hook that holds notification state.
- * Returns { notifications, unreadCount, markAllRead, clearAll }
- *
- * With WebSocket removed there is currently no live event source, so the feed
- * stays empty. `addNotification` is exposed for a future REST/polling source.
- */
-export function useNotifications() {
+// Map domain event topics → human-readable labels + icons
+const EVENT_META = {
+  'inventory.created':      { icon: '📦', label: 'New inventory lot added' },
+  'inventory.updated':      { icon: '📦', label: 'Inventory updated' },
+  'inventory.transferred':  { icon: '🔄', label: 'Stock transferred' },
+  'inventory.adjusted':     { icon: '⚖️',  label: 'Inventory adjusted' },
+  'inventory.opening':      { icon: '📦', label: 'Opening entry created' },
+  'inventory.closing':      { icon: '📦', label: 'Closing entry created' },
+  'purchase.created':       { icon: '🛒', label: 'New purchase note created' },
+  'purchase.updated':       { icon: '🛒', label: 'Purchase note updated' },
+  'purchase.approved':      { icon: '✅', label: 'Purchase note approved' },
+  'sale.created':           { icon: '💰', label: 'New sale / invoice created' },
+  'sale.updated':           { icon: '💰', label: 'Invoice updated' },
+  'sale.approved':          { icon: '✅', label: 'Invoice approved' },
+  'payment.created':        { icon: '💳', label: 'New payment recorded' },
+  'receipt.created':        { icon: '🧾', label: 'New receipt recorded' },
+  'journal.created':        { icon: '📒', label: 'Journal entry created' },
+  'journal.posted':         { icon: '📒', label: 'Journal entry posted' },
+  'journal.reversed':       { icon: '↩️', label: 'Journal entry reversed' },
+  'expense.created':        { icon: '💸', label: 'New expense recorded' },
+  'bank_deposit.created':   { icon: '🏦', label: 'Bank deposit created' },
+  'bank_deposit.reversed':  { icon: '↩️', label: 'Bank deposit reversed' },
+  'process.started':        { icon: '⚙️',  label: 'Process started' },
+  'process.completed':      { icon: '✅', label: 'Process completed' },
+  'process.cancelled':      { icon: '❌', label: 'Process cancelled' },
+  'asset.created':          { icon: '🏗️',  label: 'Fixed asset added' },
+  'depreciation.created':   { icon: '📉', label: 'Depreciation run created' },
+  'user.created':           { icon: '👤', label: 'New user created' },
+  'user.updated':           { icon: '👤', label: 'User updated' },
+  'user.login':             { icon: '🔐', label: 'User logged in' },
+  'permission.changed':     { icon: '🔑', label: 'Permissions changed' },
+  'master.created':         { icon: '🗂️',  label: 'Master record created' },
+  'master.updated':         { icon: '🗂️',  label: 'Master record updated' },
+  'vendor.created':         { icon: '🏪', label: 'New vendor added' },
+  'customer.created':       { icon: '👥', label: 'New customer added' },
+  'recon.created':          { icon: '🔍', label: 'Bank reconciliation created' },
+};
+
+function getEventMeta(topic) {
+  if (EVENT_META[topic]) return EVENT_META[topic];
+  // Fallback: derive from topic name
+  const parts = topic.split('.');
+  const action = parts[parts.length - 1];
+  const entity = parts.slice(0, -1).join(' ');
+  return {
+    icon: '🔔',
+    label: `${entity.replace(/_/g, ' ')} ${action}`,
+  };
+}
+
+export function NotificationCenter() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLive, setIsLive] = useState(false);   // SSE connection status
+  const dropdownRef = useRef(null);
   const idRef = useRef(0);
+  const esRef = useRef(null);
 
-  const addNotification = useCallback((event, payload, meta = {}) => {
+  const addNotification = useCallback((topic, payload) => {
+    const meta = getEventMeta(topic);
     const notification = {
       id: ++idRef.current,
-      event,
-      icon: meta.icon || '📢',
-      label: meta.label || event,
-      type: meta.type || 'info',
+      topic,
+      icon: meta.icon,
+      label: meta.label,
       payload,
       ts: Date.now(),
       read: false,
@@ -39,27 +84,55 @@ export function useNotifications() {
     setUnreadCount(c => c + 1);
   }, []);
 
-  const markAllRead = useCallback(() => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    setUnreadCount(0);
-  }, []);
+  // Connect to SSE stream
+  useEffect(() => {
+    let reconnectTimer = null;
+    let es = null;
 
-  const clearAll = useCallback(() => {
-    setNotifications([]);
-    setUnreadCount(0);
-  }, []);
+    function connect() {
+      if (es) { es.close(); }
 
-  return { notifications, unreadCount, addNotification, markAllRead, clearAll };
-}
+      es = new EventSource(SSE_URL, { withCredentials: true });
+      esRef.current = es;
 
-/**
- * Notification Bell + Dropdown component.
- * Drop this into your Layout header.
- */
-export function NotificationCenter() {
-  const { notifications, unreadCount, markAllRead, clearAll } = useNotifications();
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
+      es.addEventListener('connected', () => {
+        setIsLive(true);
+      });
+
+      es.onmessage = (e) => {
+        // Generic message (no event name)
+        try {
+          const data = JSON.parse(e.data);
+          addNotification('notification', data);
+        } catch (_) {}
+      };
+
+      // Listen for ALL domain events
+      Object.keys(EVENT_META).forEach(topic => {
+        es.addEventListener(topic, (e) => {
+          try {
+            const payload = JSON.parse(e.data);
+            addNotification(topic, payload);
+          } catch (_) {}
+        });
+      });
+
+      es.onerror = () => {
+        setIsLive(false);
+        es.close();
+        // Reconnect after 5 seconds
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+    }
+
+    connect();
+
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (es) es.close();
+      setIsLive(false);
+    };
+  }, [addNotification]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -75,8 +148,16 @@ export function NotificationCenter() {
   const handleOpen = () => {
     setIsOpen(o => !o);
     if (!isOpen && unreadCount > 0) {
-      setTimeout(markAllRead, 300);
+      setTimeout(() => {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        setUnreadCount(0);
+      }, 300);
     }
+  };
+
+  const clearAll = () => {
+    setNotifications([]);
+    setUnreadCount(0);
   };
 
   const formatTime = (ts) => {
@@ -87,7 +168,17 @@ export function NotificationCenter() {
   };
 
   return (
-    <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+
+      {/* Live / Offline indicator dot */}
+      <div title={isLive ? 'Live — connected' : 'Offline — reconnecting…'} style={{
+        width: 8, height: 8, borderRadius: '50%',
+        background: isLive ? '#22c55e' : '#ef4444',
+        boxShadow: isLive ? '0 0 6px #22c55e' : 'none',
+        transition: 'background 0.4s, box-shadow 0.4s',
+        flexShrink: 0,
+      }} />
+
       {/* Bell button */}
       <button
         id="notification-bell-btn"
@@ -98,18 +189,20 @@ export function NotificationCenter() {
           background: 'none',
           border: 'none',
           cursor: 'pointer',
-          padding: '8px',
+          padding: '6px',
           borderRadius: '8px',
           color: 'var(--text-secondary, #94a3b8)',
           fontSize: '20px',
           transition: 'background 0.2s',
+          display: 'flex',
+          alignItems: 'center',
         }}
       >
         🔔
         {/* Unread badge */}
         {unreadCount > 0 && (
           <span style={{
-            position: 'absolute', top: 4, right: 4,
+            position: 'absolute', top: 2, right: 2,
             background: '#ef4444', color: '#fff',
             borderRadius: '50%', fontSize: '10px',
             minWidth: '16px', height: '16px',
@@ -129,7 +222,7 @@ export function NotificationCenter() {
           background: '#ffffff',
           border: '1px solid #e2e8f0',
           borderRadius: '12px',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.08)',
           overflow: 'hidden',
           display: 'flex', flexDirection: 'column',
         }}>
@@ -139,9 +232,17 @@ export function NotificationCenter() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             borderBottom: '1px solid #f1f5f9',
           }}>
-            <span style={{ fontWeight: 600, color: '#1e293b', fontSize: 14 }}>
-              Notifications
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, color: '#1e293b', fontSize: 14 }}>Notifications</span>
+              <span style={{
+                fontSize: 11, padding: '2px 7px', borderRadius: 20,
+                background: isLive ? '#dcfce7' : '#fee2e2',
+                color: isLive ? '#16a34a' : '#dc2626',
+                fontWeight: 600,
+              }}>
+                {isLive ? '● Live' : '○ Offline'}
+              </span>
+            </div>
             {notifications.length > 0 && (
               <button
                 onClick={clearAll}
@@ -156,7 +257,7 @@ export function NotificationCenter() {
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {notifications.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                No notifications.
+                {isLive ? 'No notifications yet. Activity will appear here.' : 'Connecting to live feed…'}
               </div>
             ) : (
               notifications.map(n => (
@@ -164,7 +265,7 @@ export function NotificationCenter() {
                   padding: '10px 16px',
                   borderBottom: '1px solid #f8fafc',
                   display: 'flex', alignItems: 'flex-start', gap: 10,
-                  background: n.read ? 'transparent' : '#f1f5f9',
+                  background: n.read ? 'transparent' : '#f0fdf4',
                   transition: 'background 0.3s',
                 }}>
                   <span style={{ fontSize: 18, flexShrink: 0 }}>{n.icon}</span>
@@ -176,6 +277,9 @@ export function NotificationCenter() {
                       {formatTime(n.ts)}
                     </div>
                   </div>
+                  {!n.read && (
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flexShrink: 0, marginTop: 4 }} />
+                  )}
                 </div>
               ))
             )}
