@@ -12,7 +12,7 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = ({ children }) => {
-  const { auth, refreshToken } = useAuth();
+  const { token, refreshUser } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectCount, setReconnectCount] = useState(0);
   
@@ -24,14 +24,14 @@ export const SocketProvider = ({ children }) => {
 
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-    if (!auth?.token) return;
+    if (!token) return;
 
     // Use VITE_WS_URL or derive from location
     const wsBaseUrl = import.meta.env.VITE_WS_URL 
       ? import.meta.env.VITE_WS_URL 
       : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
 
-    const ws = new WebSocket(`${wsBaseUrl}/ws?token=${auth.token}`);
+    const ws = new WebSocket(`${wsBaseUrl}/ws?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -67,7 +67,7 @@ export const SocketProvider = ({ children }) => {
 
           // Special global cases
           if (msg.event === 'permission.changed') {
-            refreshToken(); // Refresh token grabs new permissions
+            refreshUser(); // Refresh user grabs new permissions
           }
         }
       } catch (err) {
@@ -79,7 +79,7 @@ export const SocketProvider = ({ children }) => {
       setIsConnected(false);
       clearInterval(pingIntervalRef.current);
       
-      if (auth?.token) {
+      if (token) {
         // Exponential backoff
         const delay = Math.min(1000 * Math.pow(2, reconnectCount), 10000);
         reconnectTimeoutRef.current = setTimeout(() => {
@@ -93,7 +93,7 @@ export const SocketProvider = ({ children }) => {
       console.error('WebSocket error:', err);
       ws.close();
     };
-  }, [auth?.token, reconnectCount, refreshToken]);
+  }, [token, reconnectCount, refreshUser]);
 
   useEffect(() => {
     connect();
@@ -110,7 +110,7 @@ export const SocketProvider = ({ children }) => {
 
   // Auth context changes (logout) clears everything
   useEffect(() => {
-    if (!auth?.token) {
+    if (!token) {
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -118,7 +118,7 @@ export const SocketProvider = ({ children }) => {
       subscribedRoomsRef.current.clear();
       setIsConnected(false);
     }
-  }, [auth?.token]);
+  }, [token]);
 
   const subscribe = useCallback((rooms) => {
     const arr = Array.isArray(rooms) ? rooms : [rooms];
