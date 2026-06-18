@@ -145,10 +145,7 @@ export function NotificationCenter() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
-  // If no unread notifications and dropdown is closed, hide the entire bell
-  if (unreadCount === 0 && !isOpen && notifications.length === 0) {
-    return null;
-  }
+
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
