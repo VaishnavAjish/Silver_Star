@@ -56,7 +56,8 @@ function initSocket(server) {
         }
 
         try {
-          const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET || 'dev_secret');
+          const secret = process.env.JWT_SECRET || 'dev_secret';
+          const decoded = jwt.verify(token, secret);
           ws.userId = decoded.id || decoded.userId;
           ws.role = decoded.role;
           
