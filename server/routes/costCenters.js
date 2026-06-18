@@ -11,29 +11,44 @@ const router = express.Router();
 // Counts the LIVE je_lines (never je_lines_old), expense_lines and fixed_assets.
 // ---------------------------------------------------------------------------
 async function getUsageCount(id) {
-  const { rows } = await pool.query(
-    `SELECT
-       (SELECT COUNT(*) FROM je_lines      WHERE cost_center_id = $1)::int AS je_lines,
-       (SELECT COUNT(*) FROM expense_lines WHERE cost_center_id = $1)::int AS expense_lines,
-       (SELECT COUNT(*) FROM fixed_assets  WHERE cost_center_id = $1)::int AS fixed_assets`,
-    [id]
-  );
-  const r = rows[0] || { je_lines: 0, expense_lines: 0, fixed_assets: 0 };
-  return { ...r, total: r.je_lines + r.expense_lines + r.fixed_assets };
+  // Resilient: if a referenced column does not exist yet (migration not applied),
+  // return zeros instead of failing the whole request.
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM je_lines      WHERE cost_center_id = $1)::int AS je_lines,
+         (SELECT COUNT(*) FROM expense_lines WHERE cost_center_id = $1)::int AS expense_lines,
+         (SELECT COUNT(*) FROM fixed_assets  WHERE cost_center_id = $1)::int AS fixed_assets`,
+      [id]
+    );
+    const r = rows[0] || { je_lines: 0, expense_lines: 0, fixed_assets: 0 };
+    return { ...r, total: r.je_lines + r.expense_lines + r.fixed_assets };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[costCenters] usage count failed:', err.message);
+    return { je_lines: 0, expense_lines: 0, fixed_assets: 0, total: 0 };
+  }
 }
 
 // Append an audit row for a master-data change. entity_type = 'cost_center'.
 // Never throws into the caller — audit failure must not break the operation,
 // but it is logged so it is never silently swallowed.
 async function auditMasterChange(client, { userId, costCenterId, reason }) {
+  // Wrap in a SAVEPOINT so that if the audit table is missing (migration not yet
+  // applied) the failed INSERT does NOT abort the surrounding transaction — which
+  // would otherwise turn the caller's COMMIT into a silent ROLLBACK and lose the
+  // create/update. On failure we roll back only to the savepoint and continue.
   try {
+    await client.query('SAVEPOINT cc_audit');
     await client.query(
       `INSERT INTO cost_center_audit
          (user_id, entity_type, entity_id, old_cost_center_id, new_cost_center_id, reason)
        VALUES ($1, 'cost_center', $2, $2, $2, $3)`,
       [userId || null, costCenterId, reason]
     );
+    await client.query('RELEASE SAVEPOINT cc_audit');
   } catch (err) {
+    await client.query('ROLLBACK TO SAVEPOINT cc_audit').catch(() => {});
     // eslint-disable-next-line no-console
     console.error('[costCenters] audit write failed:', err.message);
   }
