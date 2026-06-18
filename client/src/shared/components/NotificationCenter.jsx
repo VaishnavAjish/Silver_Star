@@ -145,17 +145,14 @@ export function NotificationCenter() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
+  // If no unread notifications and dropdown is closed, hide the entire bell
+  if (unreadCount === 0 && !isOpen && notifications.length === 0) {
+    return null;
+  }
+
   return (
     <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
 
-      {/* Live / Offline indicator dot */}
-      <div title={isLive ? 'Live — connected' : 'Offline — reconnecting…'} style={{
-        width: 8, height: 8, borderRadius: '50%',
-        background: isLive ? '#22c55e' : '#ef4444',
-        boxShadow: isLive ? '0 0 6px #22c55e' : 'none',
-        transition: 'background 0.4s, box-shadow 0.4s',
-        flexShrink: 0,
-      }} />
 
       {/* Bell button */}
       <button
@@ -212,14 +209,6 @@ export function NotificationCenter() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontWeight: 600, color: '#1e293b', fontSize: 14 }}>Notifications</span>
-              <span style={{
-                fontSize: 11, padding: '2px 7px', borderRadius: 20,
-                background: isLive ? '#dcfce7' : '#fee2e2',
-                color: isLive ? '#16a34a' : '#dc2626',
-                fontWeight: 600,
-              }}>
-                {isLive ? '● Live' : '○ Offline'}
-              </span>
             </div>
             {notifications.length > 0 && (
               <button
