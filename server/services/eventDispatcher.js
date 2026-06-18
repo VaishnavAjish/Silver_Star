@@ -159,11 +159,20 @@ async function dispatchEvent(topic, payload, _opts = {}) {
       }
     }
 
-    // Fan-out to SSE clients (real-time notifications in the browser)
+    // Fan-out to WebSocket clients (real-time notifications in the browser)
     try {
-      const { broadcast } = require('./sseClients');
-      broadcast(topic, payload ?? {});
-    } catch (_) { /* SSE module not loaded yet — safe to ignore */ }
+      const { getIO, dispatchToRoom, dispatchToUser, broadcast } = require('./socketService');
+      if (getIO()) {
+        if (_opts.broadcastAll) {
+          broadcast(topic, payload);
+        } else if (_opts.targetUserId) {
+          dispatchToUser(_opts.targetUserId, topic, payload);
+        } else {
+          const rooms = EVENT_ROUTES[topic] || ['room:dashboard'];
+          rooms.forEach((room) => dispatchToRoom(room, topic, payload));
+        }
+      }
+    } catch (_) { /* WebSocket module not loaded yet — safe to ignore */ }
   } catch (err) {
     logger.error(`[EventDispatcher] Failed to dispatch ${topic}`, { error: err.message });
   }

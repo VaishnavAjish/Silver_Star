@@ -1,1 +1,0 @@
-import{j as t}from"./index-cEBOwSKe.js";function i({left:e,right:o,hint:s,children:r}){return t.jsxs("div",{className:"txn-footer",children:[t.jsx("div",{className:"txn-footer-left",children:e}),s&&t.jsx("span",{className:"txn-footer-hint",children:s}),t.jsx("div",{className:"txn-footer-right",children:o??r})]})}export{i as S};

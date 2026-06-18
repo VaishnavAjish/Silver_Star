@@ -4,6 +4,7 @@ import SelectDropdown from '../../../shared/components/SelectDropdown';
 import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useProcessMasterSync } from '../../../shared/hooks/useModuleSync';
 import useResizableColumns from '../../../shared/hooks/useResizableColumns';
 import toast from 'react-hot-toast';
 import { Plus, Edit2, Search, X, Settings, Check, Layers } from 'lucide-react';
@@ -273,6 +274,10 @@ export default function ProcessMasterPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  
+  useProcessMasterSync(() => {
+    load();
+  });
 
 
   // ── Filtered list ─────────────────────────────────────────────────────────

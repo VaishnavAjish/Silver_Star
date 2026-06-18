@@ -28,6 +28,10 @@ export default defineConfig({
         cookieDomainRewrite: { '*': '' }, // strip cookie domain so browser keeps it for its own origin
         cookiePathRewrite: { '*': '/' },
       },
+      '/ws': {
+        target: 'ws://127.0.0.1:5001',
+        ws: true,
+      },
     },
     fs: { strict: false },
     watch: { usePolling: true },

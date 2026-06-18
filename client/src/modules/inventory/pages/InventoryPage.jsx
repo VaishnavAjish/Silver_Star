@@ -5,6 +5,7 @@ import Paginator from '../../../shared/components/Paginator';
 import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useInventorySync } from '../../../shared/hooks/useModuleSync';
 import { useClipboard } from '../../../core/context/ClipboardContext';
 import { exportToCSV, printTable } from '../../../shared/utils/exportUtils';
 import ColumnLayoutPanel from '../../../core/layout/ColumnLayoutPanel';
@@ -333,9 +334,6 @@ export default function InventoryPage() {
     const handleTransferUpdated = () => { loadPending(); load(); };
     window.addEventListener('pending_transfers_updated', handleTransferUpdated);
 
-    const handleInvUpdated = () => load();
-    window.addEventListener('inventory_updated', handleInvUpdated);
-
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') { load(); loadPending(); }
     };
@@ -343,10 +341,14 @@ export default function InventoryPage() {
 
     return () => {
       window.removeEventListener('pending_transfers_updated', handleTransferUpdated);
-      window.removeEventListener('inventory_updated', handleInvUpdated);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [loadPending, load]);
+
+  useInventorySync(() => {
+    load();
+    loadPending();
+  });
 
   const handleRefresh = useCallback(async () => {
     setSpinning(true);

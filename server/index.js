@@ -3,6 +3,9 @@
 const http    = require('http');
 const app     = require('./app');
 const { shutdown: dbShutdown } = require('./db/pool');
+const { initSocket } = require('./services/socketService');
+const { startPgNotifyListener, stopPgNotifyListener } = require('./services/pgNotifyListener');
+const { startPresenceTracking, stopPresenceTracking } = require('./services/presenceService');
 
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
@@ -38,6 +41,13 @@ const server = http.createServer(app);
 
 server.keepAliveTimeout    = 65_000;
 server.headersTimeout      = 66_000;
+
+initSocket(server)
+  .catch(err => console.error('[startup] WebSocket init error:', err.message))
+  .then(() => {
+    startPgNotifyListener().catch(err => console.warn('[startup] PGNotify init error:', err.message));
+    startPresenceTracking();
+  });
 
 function autoKillPort(port, callback) {
   const { execSync } = require('child_process');
@@ -132,6 +142,8 @@ function gracefulShutdown(signal) {
       console.error('[server] Error during shutdown:', err.message);
       process.exit(1);
     }
+    stopPgNotifyListener();
+    stopPresenceTracking();
     dbShutdown().then(() => {
       console.log('[server] HTTP server and DB pools closed.');
       process.exit(0);

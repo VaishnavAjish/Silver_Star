@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useDashboardSync } from '../../../shared/hooks/useModuleSync';
 import { useAuth } from '../../../core/context/AuthContext';
 import {
   Leaf, Settings, Warehouse, ShoppingCart, Receipt,
@@ -38,6 +39,8 @@ function GridSkeleton() {
 export default function Dashboard() {
   const { user } = useAuth();
   const api      = useApi();
+  
+  useDashboardSync();
 
   const [widgets,       setWidgets]       = useState([]);
   const [configLoading, setConfigLoading] = useState(true);

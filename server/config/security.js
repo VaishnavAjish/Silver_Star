@@ -72,6 +72,12 @@ module.exports = {
     // Allow same-origin XHR/fetch + any origins declared in CORS_ORIGIN env var
     connectSrc: [
       "'self'",
+      ...(process.env.NODE_ENV !== 'production'
+        ? ['ws://localhost:5000', 'ws://localhost:5001', 'ws://localhost:5173']
+        : []),
+      ...(process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(',').map(o => o.trim().replace(/^http/, 'ws'))
+        : []),
       ...(process.env.CORS_ORIGIN
         ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
         : []),

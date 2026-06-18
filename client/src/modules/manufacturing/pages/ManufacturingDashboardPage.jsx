@@ -9,6 +9,7 @@ import {
   Layers, User, Calendar, LayoutGrid, List, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useManufacturingSync } from '../../../shared/hooks/useModuleSync';
 import toast from 'react-hot-toast';
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -1093,6 +1094,10 @@ export default function ManufacturingDashboard() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  useManufacturingSync(() => {
+    loadAll();
+  });
 
   // ── Action handlers ──────────────────────────────────────────────────────────
   const handleStartProcess = async (formData) => {

@@ -89,6 +89,16 @@ app.use('/api', globalLimiter);
 // ── Timeout ────────────────────────────────────────────────────────────────
 app.use(requestTimeout(parseInt(process.env.REQUEST_TIMEOUT_MS) || 30000));
 
+// ── WS Stats Endpoint (authenticated) ──────────────────────────────────────────────
+app.get('/api/ws/stats', authenticate, async (req, res) => {
+  try {
+    const { getMetrics } = require('./services/socketService');
+    res.json({ ok: true, ...(await getMetrics()) });
+  } catch (err) {
+    res.status(500).json({ error: err.message, ok: false });
+  }
+});
+
 // ── Metrics Endpoint (authenticated) ──────────────────────────────────────────────
 // SECURITY: Prometheus metrics expose request counts, error rates, and query
 // patterns. Restrict to authenticated users only.
@@ -181,7 +191,6 @@ const fixedAssetCatsRoutes = require('./routes/fixedAssetCategories');
 const jeAllocationsRoutes = require('./routes/jeAllocations');
 const debugAccRoutes = require('./routes/debugAccounting');
 const jobRoutes = require('./routes/jobs');
-const sseStreamRoutes = require('./routes/sseStream');
 const stockTransferRoutes = require('./routes/stockTransfer');
 const roleRoutes = require('./routes/roles');
 
@@ -285,7 +294,6 @@ app.use('/api/fixed-asset-categories', fixedAssetCatsRoutes);
 app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
-app.use('/api/events', sseStreamRoutes);
 
 
 // ── Metrics (admin only) ──────────────────────────────────────────────────
@@ -311,7 +319,7 @@ if (process.env.SERVE_STATIC === 'true') {
   app.use(express.static(staticDir, { maxAge: '1y', immutable: true }));
   // SPA fallback — all non-API routes serve index.html
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }

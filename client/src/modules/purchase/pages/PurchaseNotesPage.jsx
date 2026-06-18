@@ -4,6 +4,7 @@ import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import FilterBar from '../../../shared/components/FilterBar';
 import { useApi } from '../../../shared/hooks/useApi';
+import { usePurchaseSync } from '../../../shared/hooks/useModuleSync';
 import { useAuth } from '../../../core/context/AuthContext';
 import { useNavigate, useParams } from 'react-router-dom';
 import DataGrid from '../../../shared/components/DataGrid';
@@ -87,6 +88,10 @@ export function PurchaseNotesPage() {
     debRef.current = setTimeout(() => loadPNs(page, filters), filters.search ? 300 : 0);
     return () => clearTimeout(debRef.current);
   }, [page, filters]);
+
+  usePurchaseSync(() => {
+    loadPNs(page, filters);
+  });
 
 
   const handleFilterChange = (k, v) => { setPage(1); setFilters(p => ({ ...p, [k]: v })); };

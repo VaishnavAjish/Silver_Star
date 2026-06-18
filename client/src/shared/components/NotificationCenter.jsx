@@ -6,9 +6,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRealtime } from '../hooks/useRealtime';
 
 const MAX_NOTIFICATIONS = 50;
-const SSE_URL = '/api/events/stream';
 
 // Map domain event topics → human-readable labels + icons
 const EVENT_META = {
@@ -84,55 +84,33 @@ export function NotificationCenter() {
     setUnreadCount(c => c + 1);
   }, []);
 
-  // Connect to SSE stream
+  const { isConnected, subscribeToDomain } = useRealtime();
+
+  // Sync isLive with isConnected
   useEffect(() => {
-    let reconnectTimer = null;
-    let es = null;
+    setIsLive(isConnected);
+  }, [isConnected]);
 
-    function connect() {
-      if (es) { es.close(); }
+  // Connect to WebSocket stream
+  useEffect(() => {
+    // Listen for ALL domain events
+    const unsubscribes = [];
+    
+    // Generic notification
+    unsubscribes.push(subscribeToDomain('notification', (payload) => {
+      addNotification('notification', payload);
+    }));
 
-      es = new EventSource(SSE_URL, { withCredentials: true });
-      esRef.current = es;
-
-      es.addEventListener('connected', () => {
-        setIsLive(true);
-      });
-
-      es.onmessage = (e) => {
-        // Generic message (no event name)
-        try {
-          const data = JSON.parse(e.data);
-          addNotification('notification', data);
-        } catch (_) {}
-      };
-
-      // Listen for ALL domain events
-      Object.keys(EVENT_META).forEach(topic => {
-        es.addEventListener(topic, (e) => {
-          try {
-            const payload = JSON.parse(e.data);
-            addNotification(topic, payload);
-          } catch (_) {}
-        });
-      });
-
-      es.onerror = () => {
-        setIsLive(false);
-        es.close();
-        // Reconnect after 5 seconds
-        reconnectTimer = setTimeout(connect, 5000);
-      };
-    }
-
-    connect();
+    Object.keys(EVENT_META).forEach(topic => {
+      unsubscribes.push(subscribeToDomain(topic, (payload) => {
+        addNotification(topic, payload);
+      }));
+    });
 
     return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (es) es.close();
-      setIsLive(false);
+      unsubscribes.forEach(unsub => unsub());
     };
-  }, [addNotification]);
+  }, [addNotification, subscribeToDomain]);
 
   // Close dropdown on outside click
   useEffect(() => {
