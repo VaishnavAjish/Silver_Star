@@ -84,7 +84,7 @@ export function NotificationCenter() {
     setUnreadCount(c => c + 1);
   }, []);
 
-  const { isConnected, subscribeToDomain } = useRealtime();
+  const { connected: isConnected, subscribe: subscribeToDomain } = useRealtime();
 
   // Sync isLive with isConnected
   useEffect(() => {
