@@ -11,29 +11,31 @@ import { MODULE_TREE, PERM_BITS, ACTIONS as PERM_ACTIONS, FULL_ACCESS } from '..
 
 const ROLES = ['super_admin', 'admin', 'operator', 'viewer'];
 
+
+
 // Use shared MODULE_TREE + PERM_ACTIONS from permissions constants
 // PERM_ACTIONS = [{ id:'view',label:'VIEW' }, ...]
 
 const VISIBILITY_KEYS = [
-  { key: 'vis.show_cogs',          label: 'Cost of Goods (COGS)',      desc: 'Per-lot cost figures' },
-  { key: 'vis.show_purchase_rate', label: 'Purchase Rate',             desc: 'Per-unit buy price' },
-  { key: 'vis.show_sale_rate',     label: 'Sale Rate',                 desc: 'Per-unit sell price' },
-  { key: 'vis.show_margin',        label: 'Margin %',                  desc: 'Profit margin percentage' },
-  { key: 'vis.show_gross_profit',  label: 'Gross Profit',              desc: 'Revenue minus direct costs' },
-  { key: 'vis.show_net_profit',    label: 'Net Profit',                desc: 'After all deductions' },
-  { key: 'vis.show_balances',      label: 'Account Balances',          desc: 'Ledger balance amounts' },
+  { key: 'vis.show_cogs', label: 'Cost of Goods (COGS)', desc: 'Per-lot cost figures' },
+  { key: 'vis.show_purchase_rate', label: 'Purchase Rate', desc: 'Per-unit buy price' },
+  { key: 'vis.show_sale_rate', label: 'Sale Rate', desc: 'Per-unit sell price' },
+  { key: 'vis.show_margin', label: 'Margin %', desc: 'Profit margin percentage' },
+  { key: 'vis.show_gross_profit', label: 'Gross Profit', desc: 'Revenue minus direct costs' },
+  { key: 'vis.show_net_profit', label: 'Net Profit', desc: 'After all deductions' },
+  { key: 'vis.show_balances', label: 'Account Balances', desc: 'Ledger balance amounts' },
 ];
 
 const PREF_DEFS = [
   {
     key: 'landing_page', label: 'Landing Page', type: 'select',
     options: [
-      { value: '/',               label: 'Dashboard' },
-      { value: '/inventory',      label: 'Inventory' },
-      { value: '/invoices',       label: 'Invoices' },
+      { value: '/', label: 'Dashboard' },
+      { value: '/inventory', label: 'Inventory' },
+      { value: '/invoices', label: 'Invoices' },
       { value: '/purchase-notes', label: 'Purchase Notes' },
-      { value: '/ledger',         label: 'Ledger' },
-      { value: '/rough-growth',   label: 'Rough Growth' },
+      { value: '/ledger', label: 'Ledger' },
+      { value: '/rough-growth', label: 'Rough Growth' },
     ],
   },
   {
@@ -47,8 +49,8 @@ const PREF_DEFS = [
     key: 'theme', label: 'Theme', type: 'select',
     options: [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark (coming soon)' }],
   },
-  { key: 'compact_mode',   label: 'Compact Mode',    type: 'toggle', desc: 'Reduce table row spacing' },
-  { key: 'default_branch', label: 'Default Branch',  type: 'text',   placeholder: 'e.g. Surat HO' },
+  { key: 'compact_mode', label: 'Compact Mode', type: 'toggle', desc: 'Reduce table row spacing' },
+  { key: 'default_branch', label: 'Default Branch', type: 'text', placeholder: 'e.g. Surat HO' },
 ];
 
 const PREF_DEFAULTS = {
@@ -61,11 +63,11 @@ const PREF_DEFAULTS = {
 };
 
 const TABS = [
-  { id: 'basic',       label: 'Basic Info',     icon: User    },
-  { id: 'permissions', label: 'Permissions',    icon: Shield  },
-  { id: 'visibility',  label: 'Data Visibility',icon: Eye     },
-  { id: 'preferences', label: 'Preferences',    icon: Settings},
-  { id: 'security',    label: 'Security',        icon: Lock    },
+  { id: 'basic', label: 'Basic Info', icon: User },
+  { id: 'permissions', label: 'Permissions', icon: Shield },
+  { id: 'visibility', label: 'Data Visibility', icon: Eye },
+  { id: 'preferences', label: 'Preferences', icon: Settings },
+  { id: 'security', label: 'Security', icon: Lock },
 ];
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -135,21 +137,21 @@ export default function UserDrawer({ user, onClose, onSaved }) {
   const api = useApi();
   const { user: me, refreshUser } = useAuth();
 
-  const [tab,      setTab]      = useState('basic');
+  const [tab, setTab] = useState('basic');
   const [fetching, setFetching] = useState(true);
-  const [saving,   setSaving]   = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [basic,       setBasic]       = useState({ username: '', email: '', full_name: '', role: 'operator', department_id: '' });
-  const [prefs,       setPrefs]       = useState({ ...PREF_DEFAULTS });
-  const [pw,          setPw]          = useState({ password: '', confirm: '' });
+  const [basic, setBasic] = useState({ username: '', email: '', full_name: '', role: 'operator', department_id: '' });
+  const [prefs, setPrefs] = useState({ ...PREF_DEFAULTS });
+  const [pw, setPw] = useState({ password: '', confirm: '' });
   const [departments, setDepartments] = useState([]);
-  const [allRoles,    setAllRoles]    = useState([]);
+  const [allRoles, setAllRoles] = useState([]);
   const [assignedRoleIds, setAssignedRoleIds] = useState([]);
 
   // Submodule permission matrix (effective from roles, editable)
   const [effectivePerms, setEffectivePerms] = useState({}); // { 'module:submodule': bitmask }
-  const [expanded,       setExpanded]       = useState({}); // { moduleKey: bool }
-  const [permsDirty,     setPermsDirty]     = useState(false);
+  const [expanded, setExpanded] = useState({}); // { moduleKey: bool }
+  const [permsDirty, setPermsDirty] = useState(false);
 
   // Stable api ref — prevents effect re-fires
   const apiRef = useRef(api);
@@ -297,9 +299,9 @@ export default function UserDrawer({ user, onClose, onSaved }) {
 
   if (!user) return null;
 
-  const isAdmin  = basic.role === 'super_admin';
-  const isSelf   = user.id === me?.id;
-  const roleCls  = { super_admin: 'b-active', admin: 'b-active', operator: 'b-draft', viewer: 'b-inactive' };
+  const isAdmin = basic.role === 'super_admin';
+  const isSelf = user.id === me?.id;
+  const roleCls = { super_admin: 'b-active', admin: 'b-active', operator: 'b-draft', viewer: 'b-inactive' };
 
   /* ── Render ── */
   const drawer = (
