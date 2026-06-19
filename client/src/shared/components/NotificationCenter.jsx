@@ -64,7 +64,8 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [isLive, setIsLive] = useState(false);   // SSE connection status
+  const [isLive, setIsLive] = useState(false);   // WebSocket connection status
+  const [hasEverConnected, setHasEverConnected] = useState(false);
   const dropdownRef = useRef(null);
   const idRef = useRef(0);
   const esRef = useRef(null);
@@ -89,6 +90,7 @@ export function NotificationCenter() {
   // Sync isLive with isConnected
   useEffect(() => {
     setIsLive(isConnected);
+    if (isConnected) setHasEverConnected(true);
   }, [isConnected]);
 
   // Connect to WebSocket stream
@@ -221,7 +223,9 @@ export function NotificationCenter() {
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {notifications.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                {isLive ? 'No notifications yet. Activity will appear here.' : 'Connecting to live feed…'}
+                {hasEverConnected || isLive
+                  ? 'No notifications yet. Activity will appear here.'
+                  : 'Connecting to live feed…'}
               </div>
             ) : (
               notifications.map(n => (

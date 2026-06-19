@@ -14,7 +14,7 @@ export const useSocket = () => {
 export const SocketProvider = ({ children }) => {
   const { token, refreshUser } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
-  const [reconnectCount, setReconnectCount] = useState(0);
+  const reconnectCountRef = useRef(0);
   
   const wsRef = useRef(null);
   const subscribedRoomsRef = useRef(new Set());
@@ -23,7 +23,7 @@ export const SocketProvider = ({ children }) => {
   const reconnectTimeoutRef = useRef(null);
 
   const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
     if (!token) return;
 
     // Use VITE_WS_URL or derive from location
@@ -36,7 +36,7 @@ export const SocketProvider = ({ children }) => {
 
     ws.onopen = () => {
       setIsConnected(true);
-      setReconnectCount(0);
+      reconnectCountRef.current = 0;
       
       // Resubscribe to previous rooms
       const rooms = Array.from(subscribedRoomsRef.current);
@@ -81,9 +81,9 @@ export const SocketProvider = ({ children }) => {
       
       if (token) {
         // Exponential backoff
-        const delay = Math.min(1000 * Math.pow(2, reconnectCount), 10000);
+        const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current), 10000);
         reconnectTimeoutRef.current = setTimeout(() => {
-          setReconnectCount(prev => prev + 1);
+          reconnectCountRef.current += 1;
           connect();
         }, delay);
       }
@@ -93,7 +93,7 @@ export const SocketProvider = ({ children }) => {
       console.error('WebSocket error:', err);
       ws.close();
     };
-  }, [token, reconnectCount, refreshUser]);
+  }, [token, refreshUser]);
 
   useEffect(() => {
     connect();
@@ -171,7 +171,6 @@ export const SocketProvider = ({ children }) => {
 
   const value = {
     isConnected,
-    reconnectCount,
     subscribe,
     unsubscribe,
     on,
