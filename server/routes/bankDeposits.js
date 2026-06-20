@@ -240,8 +240,6 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
 
     if (dep.status === 'reversed')
       { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Already reversed. Cannot edit a reversed deposit.' }); }
-    if (dep.je_status === 'posted')
-      { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cannot edit posted deposit. Reverse first.' }); }
 
     const { date, bank_account_id, memo, lines } = req.body;
     if (!date)                                       { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Date is required' }); }

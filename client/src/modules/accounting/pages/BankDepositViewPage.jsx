@@ -102,7 +102,7 @@ export default function BankDepositViewPage() {
           backLabel="Bank Deposits"
           actions={
             <div style={{ display: 'flex', gap: 8 }}>
-              {isDraft && canEdit() && (
+              {!isReversed && canEdit() && (
                 <button className="btn btn-sm" onClick={() => navigate(`/bank-deposits/${id}/edit`)}>
                   <Edit2 size={13} /> Edit
                 </button>

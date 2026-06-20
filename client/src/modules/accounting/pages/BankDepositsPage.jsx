@@ -82,7 +82,7 @@ export default function BankDepositsPage() {
       render: (_, row) => {
         const isPosted   = (row.status || 'posted') === 'posted';
         const isReversed = row.status === 'reversed';
-        const canEditRow = canEdit() && !isReversed && row.je_status !== 'posted';
+        const canEditRow = canEdit() && !isReversed;
         return (
           <div style={{ display: 'flex', gap: 4 }}>
             <button
@@ -94,7 +94,7 @@ export default function BankDepositsPage() {
             </button>
             <button
               className="icon-btn"
-              title={canEditRow ? 'Edit' : 'Cannot edit posted/reversed deposit'}
+              title={canEditRow ? 'Edit' : 'Cannot edit reversed deposit'}
               disabled={!canEditRow}
               onClick={e => { e.stopPropagation(); navigate(`/bank-deposits/${row.id}/edit`); }}
             >
