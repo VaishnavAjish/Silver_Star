@@ -44,13 +44,13 @@ export default function FixedAssetDetail() {
   const { id }   = useParams();
   const { get, post } = useApi();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const isAdmin  = ['admin', 'super_admin'].includes(user?.role);
+  const { user, hasRole } = useAuth();
+  const isAdmin  = hasRole('admin', 'super_admin');
   
-  const isSuperAdmin = user?.role === 'super_admin';
-  const explicitAssetEdit = user?.permissions?.find(p => p.module === 'assets' && p.permission_key === 'edit')?.allowed ||
-                            user?.rbac_permissions?.some(p => p.module === 'assets' && (parseInt(p.mask) & 4) === 4);
-  const canEditAsset = isSuperAdmin || (user?.role === 'admin' && explicitAssetEdit);
+  const isSuperAdmin = hasRole('super_admin');
+  const explicitAssetEdit = user?.permissions?.find(p => ['assets', 'fixed_assets', 'fixed-assets'].includes(p.module) && p.permission_key === 'edit')?.allowed ||
+                            user?.rbac_permissions?.some(p => ['assets', 'fixed_assets', 'fixed-assets'].includes(p.module) && (parseInt(p.mask) & 4) === 4);
+  const canEditAsset = isSuperAdmin || (hasRole('admin') && explicitAssetEdit);
 
   const [asset,     setAsset]     = useState(null);
   const [schedule,  setSchedule]  = useState(null);
