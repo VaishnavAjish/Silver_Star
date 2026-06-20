@@ -850,11 +850,10 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
       base_data AS (
         SELECT
           pn.grand_total AS bill_amount,
-          COALESCE(pp.total_paid, 0) AS paid_amount,
-          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          COALESCE(pn.amount_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pn.amount_paid, 0)) AS balance_amount,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date
         FROM purchase_notes pn
-        LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
         WHERE ${whereInner}
       )
       SELECT 
@@ -888,13 +887,13 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           COALESCE(pn.payment_term, '') AS payment_term,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date,
           pn.grand_total AS bill_amount,
-          COALESCE(pp.total_paid, 0) AS paid_amount,
-          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          COALESCE(pn.amount_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pn.amount_paid, 0)) AS balance_amount,
           CASE
-            WHEN pn.grand_total - COALESCE(pp.total_paid, 0) <= 0 THEN 'Paid'
+            WHEN pn.grand_total - COALESCE(pn.amount_paid, 0) <= 0 THEN 'Paid'
             WHEN (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date < CURRENT_DATE
-              AND pn.grand_total - COALESCE(pp.total_paid, 0) > 0 THEN 'Overdue'
-            WHEN COALESCE(pp.total_paid, 0) > 0 THEN 'Partial'
+              AND pn.grand_total - COALESCE(pn.amount_paid, 0) > 0 THEN 'Overdue'
+            WHEN COALESCE(pn.amount_paid, 0) > 0 THEN 'Partial'
             ELSE 'Unpaid'
           END AS pay_status,
           (CURRENT_DATE - pn.doc_date::date) AS ageing_days

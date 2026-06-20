@@ -336,9 +336,6 @@ export default function VendorDetailsPage() {
 
               {/* Header actions */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button className="btn btn-sm" onClick={loadVendor} disabled={loading}>
-                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
-                </button>
                 {canEdit() && (
                   <button className="btn btn-sm" onClick={openEdit}>
                     <Edit2 size={13} /> Edit
@@ -385,6 +382,11 @@ export default function VendorDetailsPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Refresh Button placed after New Transaction */}
+                <button className="btn btn-sm" onClick={loadVendor} disabled={loading}>
+                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
+                </button>
               </div>
             </div>
 

@@ -18,6 +18,7 @@ const cache   = require('../db/cache');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getVendorOpenBills } = require('../services/openDocumentService');
 const { reserveCode } = require('../services/codeGeneratorService');
+const { getVendorPosition } = require('../services/vendorAdvanceService');
 const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
 
@@ -53,20 +54,15 @@ router.get('/summary', authenticate, async (req, res) => {
     const data = await cache.get('vendor_summary', 30, async () => {
       const r = await pool.query(`
         SELECT
-          COALESCE(SUM(GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0)), 0) AS total_payables,
+          COALESCE(SUM(GREATEST(pn.grand_total - COALESCE(pn.amount_paid, 0), 0)), 0) AS total_payables,
           COALESCE(SUM(
             CASE WHEN (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
-                 THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END
+                 THEN GREATEST(pn.grand_total - COALESCE(pn.amount_paid, 0), 0) ELSE 0 END
           ), 0) AS overdue,
           (SELECT COALESCE(SUM(amount), 0)
              FROM payments
             WHERE date >= CURRENT_DATE - INTERVAL '30 days') AS paid_last_30
         FROM purchase_notes pn
-        LEFT JOIN (
-          SELECT purchase_note_id, SUM(amount) AS total_paid
-          FROM payment_allocations
-          GROUP BY purchase_note_id
-        ) pa_agg ON pa_agg.purchase_note_id = pn.id
         WHERE pn.payment_status != 'PAID' AND pn.status != 'cancelled'
       `);
       const row = r.rows[0] || {};
@@ -210,37 +206,39 @@ router.get('/', authenticate, async (req, res) => {
           LIMIT $${lp} OFFSET $${op}
         ),
         vendor_pns AS (
-          SELECT id, vendor_id, grand_total, doc_date, payment_term
+          SELECT id, vendor_id, grand_total, COALESCE(amount_paid, 0) AS amount_paid, doc_date, payment_term
           FROM purchase_notes
           WHERE status != 'cancelled' AND payment_status != 'PAID'
             AND vendor_id IN (SELECT id FROM paginated_vendors)
         ),
-        vendor_allocations AS (
-          SELECT pa.purchase_note_id, SUM(pa.amount) AS total_paid
-          FROM payment_allocations pa
-          JOIN vendor_pns pn ON pn.id = pa.purchase_note_id
-          GROUP BY pa.purchase_note_id
-        ),
         vendor_balances AS (
           SELECT
             pn.vendor_id,
-            SUM(GREATEST(pn.grand_total - COALESCE(va.total_paid, 0), 0)) AS open_balance,
+            SUM(GREATEST(pn.grand_total - pn.amount_paid, 0)) AS open_balance,
             SUM(CASE WHEN (pn.doc_date + (
-              CASE pn.payment_term 
+              CASE pn.payment_term
                 WHEN '7 Days' THEN 7 WHEN '15 Days' THEN 15 WHEN '30 Days' THEN 30
                 WHEN '45 Days' THEN 45 WHEN '60 Days' THEN 60 WHEN '90 Days' THEN 90 ELSE 0 END
             )) < CURRENT_DATE
-                     THEN GREATEST(pn.grand_total - COALESCE(va.total_paid, 0), 0) ELSE 0 END) AS overdue_balance
+                     THEN GREATEST(pn.grand_total - pn.amount_paid, 0) ELSE 0 END) AS overdue_balance
           FROM vendor_pns pn
-          LEFT JOIN vendor_allocations va ON va.purchase_note_id = pn.id
           GROUP BY pn.vendor_id
+        ),
+        vendor_adv AS (
+          SELECT vendor_id, SUM(remaining_amount) AS advances
+          FROM vendor_advances
+          WHERE status = 'OPEN' AND vendor_id IN (SELECT id FROM paginated_vendors)
+          GROUP BY vendor_id
         )
         SELECT
           v.*,
           COALESCE(b.open_balance,    0) AS open_balance,
-          COALESCE(b.overdue_balance, 0) AS overdue_balance
+          COALESCE(b.overdue_balance, 0) AS overdue_balance,
+          COALESCE(adv.advances,      0) AS vendor_advances,
+          COALESCE(b.open_balance, 0) - COALESCE(adv.advances, 0) AS net_position
         FROM paginated_vendors v
         LEFT JOIN vendor_balances b ON b.vendor_id = v.id
+        LEFT JOIN vendor_adv adv ON adv.vendor_id = v.id
       `, params);
 
       return { data: result.rows, total };
@@ -316,7 +314,15 @@ router.get('/:id', authenticate, async (req, res) => {
     `, [req.params.id]);
 
     if (!result.rows.length) return res.status(404).json({ error: 'Vendor not found' });
-    res.json(result.rows[0]);
+    // Single source of truth: reuse the Vendor Advance Engine for workspace balances.
+    const position = await getVendorPosition(parseInt(req.params.id));
+    res.json({
+      ...result.rows[0],
+      open_balance:      position.outstanding_bills,   // authoritative (amount_paid based)
+      outstanding_bills: position.outstanding_bills,
+      vendor_advances:   position.vendor_advances,
+      net_position:      position.net_position,
+    });
   } catch (err) {
     logger.error('[vendors GET /:id]', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
