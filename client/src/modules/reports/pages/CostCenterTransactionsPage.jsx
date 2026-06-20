@@ -10,9 +10,13 @@ function getVoucherPath(sourceType, sourceId, jeId) {
   if (sourceId) {
     switch (sourceType) {
       case 'bank_deposit':  return `/bank-deposits/${sourceId}`;
-      case 'purchase_note': return `/purchase-notes/${sourceId}`;
+      case 'purchase_note':
+      case 'purchase':      return `/purchase-notes/${sourceId}`;
       case 'invoice':       return `/invoices/${sourceId}`;
       case 'rough_growth':  return `/rough-growth/${sourceId}`;
+      case 'receipt':       return `/receipts/${sourceId}`;
+      case 'payment':       return `/payments/${sourceId}`;
+      case 'fixed_asset':   return `/fixed-assets/${sourceId}`;
     }
   }
   return jeId ? `/journal-entries/${jeId}` : null;
@@ -35,7 +39,7 @@ export default function CostCenterTransactionsPage() {
   const PAGE_SIZE = 500;
 
   useEffect(() => {
-    if (!costCenterId) { setError('No cost center specified.'); return; }
+    if (!costCenterId) { setData(null); return; }
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ cost_center_id: costCenterId, page: page, pageSize: PAGE_SIZE });
@@ -67,6 +71,12 @@ export default function CostCenterTransactionsPage() {
           </div>
         </div>
       </div>
+
+      {!costCenterId && !data && !loading && (
+        <div className="empty-state" style={{ padding: '40px 0', color: 'var(--g400)' }}>
+          Please select a cost center to view transactions.
+        </div>
+      )}
 
       {loading && <div className="empty-state"><div className="spinner" /></div>}
       {error && (

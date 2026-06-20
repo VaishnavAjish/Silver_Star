@@ -1,0 +1,277 @@
+'use strict';
+
+/**
+ * Vendor Advance Consumption Engine
+ *
+ * Applies OPEN vendor advances against vendor bills (purchase_notes), posting
+ * a balanced journal entry per application and maintaining a full audit trail.
+ *
+ * Accounting rule (per application total):
+ *     Dr  Accounts Payable      (role ACCOUNTS_PAYABLE)
+ *     Cr  Vendor Advance         (role VENDOR_ADVANCE)
+ *
+ * Guarantees:
+ *  - Never touches historical postings or existing payment_allocations.
+ *  - Only ADDS new JEs + vendor_advance_applications rows; advances are drawn
+ *    down via remaining_amount and flipped to status APPLIED when exhausted.
+ *  - All mutations happen inside the caller's transaction when a client is
+ *    supplied (so it can be embedded in Purchase Note creation atomically).
+ *
+ * Supports: one advance → many bills, many advances → one bill, partial
+ * consumption, auto (FIFO) or manual allocation.
+ */
+
+const pool = require('../db/pool');
+const journalEngine = require('./journalEngine');
+const { getAccountByRole } = require('./accountResolver');
+
+const EPS = 0.005;
+const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+
+/**
+ * Open advances for a vendor (remaining > 0), FIFO by creation.
+ * @param {number} vendorId
+ * @param {object} [client] pg client or pool
+ * @returns {Promise<Array<{id:number, amount:number, remaining_amount:number, created_at:string}>>}
+ */
+async function getOpenAdvances(vendorId, client = pool) {
+  const r = await client.query(
+    `SELECT id, amount, remaining_amount, created_at
+       FROM vendor_advances
+      WHERE vendor_id = $1 AND status = 'OPEN' AND remaining_amount > 0
+      ORDER BY created_at, id`,
+    [parseInt(vendorId)]
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    amount: parseFloat(row.amount),
+    remaining_amount: parseFloat(row.remaining_amount),
+    created_at: row.created_at,
+  }));
+}
+
+/**
+ * Total unapplied advance balance for a vendor.
+ * @param {number} vendorId
+ * @param {object} [client]
+ * @returns {Promise<number>}
+ */
+async function getAvailableAdvanceTotal(vendorId, client = pool) {
+  const r = await client.query(
+    `SELECT COALESCE(SUM(remaining_amount), 0) AS total
+       FROM vendor_advances
+      WHERE vendor_id = $1 AND status = 'OPEN'`,
+    [parseInt(vendorId)]
+  );
+  return round2(r.rows[0].total);
+}
+
+/**
+ * Net vendor position: outstanding bills, unapplied advances, and the net.
+ * Outstanding is read from purchase_notes (grand_total - amount_paid), the
+ * authoritative settled column maintained by both payments and this engine.
+ * @param {number} vendorId
+ * @param {object} [client]
+ * @returns {Promise<{outstanding_bills:number, vendor_advances:number, net_position:number, bills:Array}>}
+ */
+async function getVendorPosition(vendorId, client = pool) {
+  const vid = parseInt(vendorId);
+
+  const billsR = await client.query(
+    `SELECT id, doc_number, doc_date, grand_total,
+            COALESCE(amount_paid, 0) AS amount_paid,
+            GREATEST(grand_total - COALESCE(amount_paid, 0), 0) AS balance,
+            COALESCE(payment_status, 'UNPAID') AS payment_status
+       FROM purchase_notes
+      WHERE vendor_id = $1 AND status != 'cancelled' AND payment_status != 'PAID'
+      ORDER BY doc_date, id`,
+    [vid]
+  );
+
+  const outstanding = round2(
+    billsR.rows.reduce((s, b) => s + parseFloat(b.balance), 0)
+  );
+  const advances = await getAvailableAdvanceTotal(vid, client);
+
+  return {
+    outstanding_bills: outstanding,
+    vendor_advances: advances,
+    net_position: round2(outstanding - advances),
+    bills: billsR.rows.map((b) => ({
+      id: b.id,
+      doc_number: b.doc_number,
+      doc_date: b.doc_date,
+      grand_total: parseFloat(b.grand_total),
+      amount_paid: parseFloat(b.amount_paid),
+      balance: parseFloat(b.balance),
+      payment_status: b.payment_status,
+    })),
+  };
+}
+
+/**
+ * Apply vendor advances against a single bill.
+ *
+ * @param {object}   params
+ * @param {number}   params.purchaseNoteId
+ * @param {number}   [params.vendorId]               Optional guard; derived from the bill if omitted.
+ * @param {'auto'|'manual'} [params.mode='auto']     'auto' = FIFO up to bill balance; 'manual' = use allocations[].
+ * @param {Array<{advance_id:number, amount:number}>} [params.allocations]  Required when mode='manual'.
+ * @param {number}   params.userId
+ * @param {object}   params.client                   Active pg transaction client (REQUIRED).
+ * @returns {Promise<{applied:number, je_id:number|null, breakdown:Array, bill_balance_after:number}>}
+ */
+async function applyAdvancesToBill({ purchaseNoteId, vendorId, mode = 'auto', allocations = null, userId, client }) {
+  if (!client) throw new Error('applyAdvancesToBill requires an active transaction client');
+  const pnId = parseInt(purchaseNoteId);
+
+  // Lock the bill so balance can't race with a concurrent payment.
+  const pnR = await client.query(
+    `SELECT id, vendor_id, grand_total, COALESCE(amount_paid, 0) AS amount_paid, status
+       FROM purchase_notes
+      WHERE id = $1
+      FOR UPDATE`,
+    [pnId]
+  );
+  if (!pnR.rows[0]) throw new Error('Purchase note not found');
+  const pn = pnR.rows[0];
+  if (pn.status === 'cancelled') throw new Error('Cannot apply advances to a cancelled bill');
+
+  const vid = vendorId ? parseInt(vendorId) : pn.vendor_id;
+  if (parseInt(pn.vendor_id) !== vid) {
+    throw new Error('Bill does not belong to the specified vendor');
+  }
+
+  const grandTotal = round2(pn.grand_total);
+  const amountPaid = round2(pn.amount_paid);
+  let billBalance = round2(grandTotal - amountPaid);
+  if (billBalance <= EPS) {
+    return { applied: 0, je_id: null, breakdown: [], bill_balance_after: billBalance };
+  }
+
+  // Lock the candidate advances FOR UPDATE (FIFO order) to serialise draw-down.
+  const advR = await client.query(
+    `SELECT id, remaining_amount
+       FROM vendor_advances
+      WHERE vendor_id = $1 AND status = 'OPEN' AND remaining_amount > 0
+      ORDER BY created_at, id
+      FOR UPDATE`,
+    [vid]
+  );
+  const openAdvances = advR.rows.map((a) => ({ id: a.id, remaining: round2(a.remaining_amount) }));
+  if (openAdvances.length === 0) {
+    return { applied: 0, je_id: null, breakdown: [], bill_balance_after: billBalance };
+  }
+
+  // Decide per-advance amounts.
+  const plan = []; // { advance_id, amount }
+
+  if (mode === 'manual') {
+    if (!Array.isArray(allocations) || allocations.length === 0) {
+      throw new Error('Manual mode requires a non-empty allocations array');
+    }
+    const byId = new Map(openAdvances.map((a) => [a.id, a]));
+    for (const alloc of allocations) {
+      const aid = parseInt(alloc.advance_id);
+      const amt = round2(alloc.amount);
+      if (amt <= EPS) continue;
+      const adv = byId.get(aid);
+      if (!adv) throw new Error(`Advance ${aid} is not an OPEN advance for this vendor`);
+      if (amt > adv.remaining + EPS) {
+        throw new Error(`Allocation ₹${amt.toFixed(2)} exceeds advance ${aid} remaining ₹${adv.remaining.toFixed(2)}`);
+      }
+      if (amt > billBalance + EPS) {
+        throw new Error(`Allocation ₹${amt.toFixed(2)} exceeds bill balance ₹${billBalance.toFixed(2)}`);
+      }
+      plan.push({ advance_id: aid, amount: amt });
+      billBalance = round2(billBalance - amt);
+    }
+  } else {
+    // AUTO (FIFO): consume each advance up to the remaining bill balance.
+    let remainingBill = billBalance;
+    for (const adv of openAdvances) {
+      if (remainingBill <= EPS) break;
+      const take = round2(Math.min(adv.remaining, remainingBill));
+      if (take <= EPS) continue;
+      plan.push({ advance_id: adv.id, amount: take });
+      remainingBill = round2(remainingBill - take);
+    }
+  }
+
+  const totalApplied = round2(plan.reduce((s, p) => s + p.amount, 0));
+  if (totalApplied <= EPS) {
+    return { applied: 0, je_id: null, breakdown: [], bill_balance_after: round2(grandTotal - amountPaid) };
+  }
+
+  // Resolve GL accounts by ROLE (COA-restructuring safe).
+  const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
+  if (!payableAccId) throw new Error('Accounts Payable account role (ACCOUNTS_PAYABLE) not configured');
+  const advanceAccId = await getAccountByRole('VENDOR_ADVANCE', client);
+  if (!advanceAccId) throw new Error('Vendor Advance account role (VENDOR_ADVANCE) not configured — run phase42 migration');
+
+  // Post ONE balanced JE for the application total: Dr AP / Cr Vendor Advance.
+  const je = await journalEngine.createEntry({
+    date: new Date().toISOString().slice(0, 10),
+    description: `Vendor advance applied to bill #${pnId}`,
+    sourceType: 'advance_application',
+    sourceId: pnId,
+    lines: [
+      { accountId: payableAccId, debit: totalApplied, credit: 0, narration: 'Advance adjusted against payable', entityType: 'vendor', entityId: vid },
+      { accountId: advanceAccId, debit: 0, credit: totalApplied, narration: 'Vendor advance consumed', entityType: 'vendor', entityId: vid },
+    ],
+    autoPost: true,
+    createdBy: userId,
+    client,
+  });
+
+  // Draw down each advance + write the audit row.
+  const breakdown = [];
+  for (const p of plan) {
+    const upd = await client.query(
+      `UPDATE vendor_advances
+          SET remaining_amount = remaining_amount - $1,
+              status = CASE WHEN remaining_amount - $1 <= $2 THEN 'APPLIED' ELSE 'OPEN' END,
+              updated_at = NOW()
+        WHERE id = $3
+        RETURNING remaining_amount, status`,
+      [p.amount, EPS, p.advance_id]
+    );
+
+    await client.query(
+      `INSERT INTO vendor_advance_applications
+         (advance_id, purchase_note_id, vendor_id, amount, je_id, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'APPLIED', $6)`,
+      [p.advance_id, pnId, vid, p.amount, je.id, userId || null]
+    );
+
+    breakdown.push({
+      advance_id: p.advance_id,
+      amount: p.amount,
+      remaining_after: round2(upd.rows[0].remaining_amount),
+      advance_status: upd.rows[0].status,
+    });
+  }
+
+  // Settle the bill: increment amount_paid, recompute balance_due + status.
+  const newAmountPaid = round2(amountPaid + totalApplied);
+  const newBalance = round2(grandTotal - newAmountPaid);
+  const newStatus = newBalance <= EPS ? 'PAID' : 'PARTIAL';
+  await client.query(
+    `UPDATE purchase_notes
+        SET amount_paid    = $1,
+            balance_due    = $2,
+            payment_status = $3,
+            updated_at     = NOW()
+      WHERE id = $4`,
+    [newAmountPaid, newBalance, newStatus, pnId]
+  );
+
+  return { applied: totalApplied, je_id: je.id, breakdown, bill_balance_after: newBalance };
+}
+
+module.exports = {
+  getOpenAdvances,
+  getAvailableAdvanceTotal,
+  getVendorPosition,
+  applyAdvancesToBill,
+};
