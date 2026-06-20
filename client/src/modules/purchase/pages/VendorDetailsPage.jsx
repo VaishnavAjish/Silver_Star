@@ -5,7 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Search, ChevronRight, Edit2, Plus, X,
   Phone, Mail, MapPin, FileText, CreditCard, Receipt,
-  AlertCircle, Clock, CheckCircle, ChevronDown, Link2,
+  AlertCircle, Clock, CheckCircle, ChevronDown, Link2, RefreshCw,
 } from 'lucide-react';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
@@ -336,6 +336,9 @@ export default function VendorDetailsPage() {
 
               {/* Header actions */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button className="btn btn-sm" onClick={loadVendor} disabled={loading}>
+                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
+                </button>
                 {canEdit() && (
                   <button className="btn btn-sm" onClick={openEdit}>
                     <Edit2 size={13} /> Edit

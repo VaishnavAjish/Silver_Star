@@ -294,6 +294,7 @@ app.use('/api/fixed-asset-categories', fixedAssetCatsRoutes);
 app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
+app.use('/api/vendor-advances', require('./routes/vendorAdvances'));
 
 
 // ── Metrics (admin only) ──────────────────────────────────────────────────
