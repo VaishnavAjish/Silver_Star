@@ -47,10 +47,12 @@ export default function FixedAssetDetail() {
   const { user, hasRole } = useAuth();
   const isAdmin  = hasRole('admin', 'super_admin');
   
-  const isSuperAdmin = hasRole('super_admin');
+  const roleString = String(user?.role || '').trim().toLowerCase();
+  const isSuperAdmin = roleString === 'super_admin' || roleString === 'superadmin' || roleString === 'super admin';
+  const isAdminRole = roleString === 'admin';
   const explicitAssetEdit = user?.permissions?.find(p => ['assets', 'fixed_assets', 'fixed-assets'].includes(p.module) && p.permission_key === 'edit')?.allowed ||
                             user?.rbac_permissions?.some(p => ['assets', 'fixed_assets', 'fixed-assets'].includes(p.module) && (parseInt(p.mask) & 4) === 4);
-  const canEditAsset = isSuperAdmin || (hasRole('admin') && explicitAssetEdit);
+  const canEditAsset = isSuperAdmin || (isAdminRole && explicitAssetEdit);
 
   const [asset,     setAsset]     = useState(null);
   const [schedule,  setSchedule]  = useState(null);
@@ -59,6 +61,8 @@ export default function FixedAssetDetail() {
   const [loading,   setLoading]   = useState(true);
   const [dispForm,  setDispForm]  = useState({ disposal_date: '', disposal_value: '', remarks: '' });
   const [disposing, setDisposing] = useState(false);
+
+  console.log('[DEBUG ASSET PAGE]', { roleString, isSuperAdmin, isAdminRole, explicitAssetEdit, canEditAsset, user });
 
   useEffect(() => {
     setLoading(true);
