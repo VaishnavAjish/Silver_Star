@@ -1,7 +1,7 @@
 /**
  * ─── Silverstar Grow ERP — Notification Center ──────────────────────────────
  *
- * Real-time notifications via Server-Sent Events (SSE).
+ * Real-time notifications via WebSocket.
  * Shows a live/offline indicator and displays domain events as they happen.
  */
 
@@ -50,7 +50,6 @@ const EVENT_META = {
 
 function getEventMeta(topic) {
   if (EVENT_META[topic]) return EVENT_META[topic];
-  // Fallback: derive from topic name
   const parts = topic.split('.');
   const action = parts[parts.length - 1];
   const entity = parts.slice(0, -1).join(' ');
@@ -64,11 +63,10 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [isLive, setIsLive] = useState(false);   // WebSocket connection status
+  const [isLive, setIsLive] = useState(false);
   const [hasEverConnected, setHasEverConnected] = useState(false);
   const dropdownRef = useRef(null);
   const idRef = useRef(0);
-  const esRef = useRef(null);
 
   const addNotification = useCallback((topic, payload) => {
     const meta = getEventMeta(topic);
@@ -87,31 +85,24 @@ export function NotificationCenter() {
 
   const { connected: isConnected, subscribe: subscribeToDomain } = useRealtime();
 
-  // Sync isLive with isConnected
+  // Sync live status
   useEffect(() => {
     setIsLive(isConnected);
     if (isConnected) setHasEverConnected(true);
   }, [isConnected]);
 
-  // Connect to WebSocket stream
+  // Subscribe to all domain events
   useEffect(() => {
-    // Listen for ALL domain events
     const unsubscribes = [];
-    
-    // Generic notification
     unsubscribes.push(subscribeToDomain('notification', (payload) => {
       addNotification('notification', payload);
     }));
-
     Object.keys(EVENT_META).forEach(topic => {
       unsubscribes.push(subscribeToDomain(topic, (payload) => {
         addNotification(topic, payload);
       }));
     });
-
-    return () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
+    return () => unsubscribes.forEach(unsub => unsub());
   }, [addNotification, subscribeToDomain]);
 
   // Close dropdown on outside click
@@ -147,11 +138,8 @@ export function NotificationCenter() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
-
-
   return (
     <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-
 
       {/* Bell button */}
       <button
@@ -200,6 +188,7 @@ export function NotificationCenter() {
           overflow: 'hidden',
           display: 'flex', flexDirection: 'column',
         }}>
+
           {/* Header */}
           <div style={{
             padding: '12px 16px',
@@ -208,6 +197,22 @@ export function NotificationCenter() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontWeight: 600, color: '#1e293b', fontSize: 14 }}>Notifications</span>
+              {/* Live / Offline status pill */}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 8px', borderRadius: '99px', fontSize: 11, fontWeight: 600,
+                background: isLive ? '#dcfce7' : '#fee2e2',
+                color: isLive ? '#16a34a' : '#dc2626',
+                transition: 'background 0.4s, color 0.4s',
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: isLive ? '#22c55e' : '#ef4444',
+                  display: 'inline-block',
+                  flexShrink: 0,
+                }} />
+                {isLive ? 'Live' : 'Offline'}
+              </span>
             </div>
             {notifications.length > 0 && (
               <button

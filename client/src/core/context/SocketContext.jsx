@@ -15,7 +15,7 @@ export const SocketProvider = ({ children }) => {
   const { token, refreshUser } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const reconnectCountRef = useRef(0);
-  
+
   const wsRef = useRef(null);
   const subscribedRoomsRef = useRef(new Set());
   const eventHandlersRef = useRef(new Map());
@@ -23,76 +23,89 @@ export const SocketProvider = ({ children }) => {
   const reconnectTimeoutRef = useRef(null);
 
   const connect = useCallback(() => {
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
+    if (wsRef.current && (
+      wsRef.current.readyState === WebSocket.OPEN ||
+      wsRef.current.readyState === WebSocket.CONNECTING
+    )) return;
     if (!token) return;
 
-    // Use VITE_WS_URL or derive from location
-    const wsBaseUrl = import.meta.env.VITE_WS_URL 
-      ? import.meta.env.VITE_WS_URL 
+    const wsBaseUrl = import.meta.env.VITE_WS_URL
+      ? import.meta.env.VITE_WS_URL
       : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
 
-    const ws = new WebSocket(`${wsBaseUrl}/ws?token=${token}`);
-    wsRef.current = ws;
+    // On the very first attempt give the page 600ms to settle fully —
+    // this prevents the "WebSocket error" console message on initial page load.
+    const initialDelay = reconnectCountRef.current === 0 ? 600 : 0;
 
-    ws.onopen = () => {
-      setIsConnected(true);
-      reconnectCountRef.current = 0;
-      
-      // Resubscribe to previous rooms
-      const rooms = Array.from(subscribedRoomsRef.current);
-      if (rooms.length > 0) {
-        ws.send(JSON.stringify({ type: 'subscribe', rooms }));
-      }
+    setTimeout(() => {
+      // Re-check guard after the delay
+      if (wsRef.current && (
+        wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING
+      )) return;
 
-      // Start pinging every 25s
-      pingIntervalRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
+      const ws = new WebSocket(`${wsBaseUrl}/ws?token=${token}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        reconnectCountRef.current = 0;
+
+        // Resubscribe to rooms that were active before disconnect
+        const rooms = Array.from(subscribedRoomsRef.current);
+        if (rooms.length > 0) {
+          ws.send(JSON.stringify({ type: 'subscribe', rooms }));
         }
-      }, 25000);
-    };
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'event') {
-          // Trigger exact match listeners
-          const handlers = eventHandlersRef.current.get(msg.event) || new Set();
-          handlers.forEach(cb => cb(msg.payload, msg.event));
-
-          // Trigger wildcard prefix listeners (e.g., 'inventory.*')
-          const prefix = msg.event.split('.')[0] + '.*';
-          const prefixHandlers = eventHandlersRef.current.get(prefix) || new Set();
-          prefixHandlers.forEach(cb => cb(msg.payload, msg.event));
-
-          // Special global cases
-          if (msg.event === 'permission.changed') {
-            refreshUser(); // Refresh user grabs new permissions
+        // Keep-alive ping every 25s
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
           }
+        }, 25000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'event') {
+            // Exact topic listeners
+            const handlers = eventHandlersRef.current.get(msg.event) || new Set();
+            handlers.forEach(cb => cb(msg.payload, msg.event));
+
+            // Wildcard prefix listeners e.g. 'inventory.*'
+            const prefix = msg.event.split('.')[0] + '.*';
+            const prefixHandlers = eventHandlersRef.current.get(prefix) || new Set();
+            prefixHandlers.forEach(cb => cb(msg.payload, msg.event));
+
+            // Refresh user permissions when they change
+            if (msg.event === 'permission.changed') {
+              refreshUser();
+            }
+          }
+        } catch (err) {
+          console.error('WebSocket message parse error:', err);
         }
-      } catch (err) {
-        console.error('WebSocket message parse error:', err);
-      }
-    };
+      };
 
-    ws.onclose = () => {
-      setIsConnected(false);
-      clearInterval(pingIntervalRef.current);
-      
-      if (token) {
-        // Exponential backoff
-        const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current), 10000);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectCountRef.current += 1;
-          connect();
-        }, delay);
-      }
-    };
+      ws.onclose = () => {
+        setIsConnected(false);
+        clearInterval(pingIntervalRef.current);
 
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
-      ws.close();
-    };
+        if (token) {
+          // Exponential backoff: 1s → 2s → 4s … max 30s
+          const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectCountRef.current += 1;
+            connect();
+          }, delay);
+        }
+      };
+
+      // Errors always fire before onclose — onclose handles the retry silently
+      ws.onerror = () => ws.close();
+
+    }, initialDelay);
   }, [token, refreshUser]);
 
   useEffect(() => {
@@ -108,7 +121,7 @@ export const SocketProvider = ({ children }) => {
     };
   }, [connect]);
 
-  // Auth context changes (logout) clears everything
+  // Clear everything on logout
   useEffect(() => {
     if (!token) {
       if (wsRef.current) {
@@ -129,7 +142,6 @@ export const SocketProvider = ({ children }) => {
         needsSend = true;
       }
     });
-
     if (needsSend && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'subscribe', rooms: arr }));
     }
@@ -144,7 +156,6 @@ export const SocketProvider = ({ children }) => {
         needsSend = true;
       }
     });
-
     if (needsSend && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'unsubscribe', rooms: arr }));
     }
@@ -169,13 +180,7 @@ export const SocketProvider = ({ children }) => {
     }
   }, []);
 
-  const value = {
-    isConnected,
-    subscribe,
-    unsubscribe,
-    on,
-    sendMessage
-  };
+  const value = { isConnected, subscribe, unsubscribe, on, sendMessage };
 
   return (
     <SocketContext.Provider value={value}>

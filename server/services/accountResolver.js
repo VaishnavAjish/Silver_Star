@@ -2,93 +2,72 @@ const pool = require('../db/pool');
 
 /**
  * Account Resolution Service
- * Centralized account code lookup with caching
- * Replaces hardcoded account codes scattered across routes
+ * Resolves accounts purely by their logical role.
+ * Hardcoded code lookup is deprecated and completely removed.
  */
-
-const ACCOUNT_CODES = {
-  // Inventory accounts by category
-  inventory: {
-    seed: '2001',
-    gas: '2002',
-    consumable: '2003',
-    rough: '2004',
-    growth_run: '2005',
-  },
-  // Payable/Receivable
-  payable: '3001',
-  gst: '3002',
-  receivable: '4001',
-  // Revenue/COGS
-  revenue: {
-    default: '5001',
-    cogs: ['5001', '5002', '5003'],
-  },
-  // Fixed assets
-  fixedAsset: '1001',
-  accumulatedDepreciation: '1002',
-  depreciationExpense: '5004',
-  // Bank/Cash
-  bank: '1003',
-  cash: '1004',
-};
 
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-async function getAccountId(code, client = pool) {
-  const cacheKey = `account:${code}`;
+/**
+ * ONLY USE THIS FUNCTION TO LOOKUP SYSTEM ACCOUNTS
+ */
+async function getAccountByRole(role, client = pool) {
+  const cacheKey = `role:${role}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.time < CACHE_TTL) {
     return cached.value;
   }
 
-  const r = await client.query('SELECT id FROM accounts WHERE code = $1', [code]);
-  const id = r.rows[0]?.id;
+  const r = await client.query('SELECT id, code, name FROM accounts WHERE account_role = $1', [role]);
+  if (!r.rows.length) {
+    throw new Error(`[AccountResolver] Required account mapping not found for role: "${role}"`);
+  }
+  
+  const id = r.rows[0].id;
   cache.set(cacheKey, { value: id, time: Date.now() });
   return id;
 }
 
+// Kept purely for the transition of the few specific getters currently used,
+// but they all map directly to roles now.
 async function getAccountIdByCategory(category, client = pool) {
-  const code = ACCOUNT_CODES.inventory[category] || ACCOUNT_CODES.inventory.seed;
-  return getAccountId(code, client);
+  const role = 'INVENTORY_' + category.toUpperCase();
+  return getAccountByRole(role, client);
 }
 
 async function getPayableAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.payable, client);
+  return getAccountByRole('ACCOUNTS_PAYABLE', client);
 }
 
 async function getGSTAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.gst, client);
+  return getAccountByRole('GST_PAYABLE', client);
 }
 
 async function getReceivableAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.receivable, client);
+  return getAccountByRole('ACCOUNTS_RECEIVABLE', client);
 }
 
 async function getRevenueAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.revenue.default, client);
+  return getAccountByRole('SALES_REVENUE', client);
 }
 
 async function getCOGSAccountIds(client = pool) {
-  const ids = [];
-  for (const code of ACCOUNT_CODES.revenue.cogs) {
-    const id = await getAccountId(code, client);
-    if (id) ids.push(id);
-  }
-  return ids;
+  // Returns array as before, but only one COGS account is used primarily now
+  const id = await getAccountByRole('COGS', client);
+  return [id];
 }
 
 async function getFixedAssetAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.fixedAsset, client);
+  return getAccountByRole('FIXED_ASSET', client);
 }
 
 async function getBankAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.bank, client);
+  return getAccountByRole('BANK_MAIN', client);
 }
 
 async function getCashAccountId(client = pool) {
-  return getAccountId(ACCOUNT_CODES.cash, client);
+  return getAccountByRole('CASH_MAIN', client);
 }
 
 function clearCache() {
@@ -96,7 +75,7 @@ function clearCache() {
 }
 
 module.exports = {
-  getAccountId,
+  getAccountByRole,
   getAccountIdByCategory,
   getPayableAccountId,
   getGSTAccountId,
@@ -107,5 +86,4 @@ module.exports = {
   getBankAccountId,
   getCashAccountId,
   clearCache,
-  ACCOUNT_CODES,
 };

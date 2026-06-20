@@ -7,10 +7,7 @@ const { logger } = require('../middleware/logger');
 
 const router = express.Router();
 
-async function getAccountId(code, client = pool) {
-  const r = await client.query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id;
-}
+const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/receipts
 router.get('/', authenticate, async (req, res) => {
@@ -156,7 +153,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       return fail(400, `Invoice allocations ₹${appliedToInvoices.toFixed(2)} exceed receipt amount ₹${totalAmount.toFixed(2)}`);
     }
 
-    const arAccId = await getAccountId('1003', client);
+    const arAccId = await getAccountByRole('ACCOUNTS_RECEIVABLE', client);
     if (!arAccId) return fail(400, 'Accounts Receivable (1003) not configured in chart of accounts');
 
     const manualLines = (Array.isArray(rawManualLines) ? rawManualLines : [])
@@ -170,7 +167,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     let custAdvanceAccId = null;
     const remainingAdvance = Math.round((advanceAmount - manualLinesTotal) * 100) / 100;
     if (remainingAdvance > 0.005) {
-      custAdvanceAccId = await getAccountId('2050', client);
+      custAdvanceAccId = await getAccountByRole('CUSTOMER_ADVANCE', client);
       if (!custAdvanceAccId) return fail(400, 'Customer Advance account (2050) not found. Run sql/phase12-advances.sql migration.');
     }
 

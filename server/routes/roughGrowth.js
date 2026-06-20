@@ -8,10 +8,7 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
-async function getAccountId(code, client) {
-  const r = await (client || pool).query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id;
-}
+const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/rough-growth
 router.get('/', authenticate, async (req, res) => {
@@ -411,8 +408,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     }
 
     // Create JE: Dr Rough Diamond Inventory (2004), Cr Work-in-Progress (2005)
-    const roughAccId = await getAccountId('2004', client);
-    const wipAccId   = await getAccountId('2005', client);
+    const roughAccId = await getAccountByRole('INVENTORY_ROUGH', client);
+    const wipAccId   = await getAccountByRole('INVENTORY_GROWTH_RUN', client);
 
     if (roughAccId && wipAccId && totalCost > 0) {
       const je = await journalEngine.createEntry({

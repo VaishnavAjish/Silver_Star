@@ -6,6 +6,10 @@ const { shutdown: dbShutdown } = require('./db/pool');
 const { initSocket } = require('./services/socketService');
 const { startPgNotifyListener, stopPgNotifyListener } = require('./services/pgNotifyListener');
 const { startPresenceTracking, stopPresenceTracking } = require('./services/presenceService');
+const { validateAccountRoles } = require('./services/accountRoleValidator');
+
+// Validate critical account configuration on boot
+validateAccountRoles();
 
 const PORT = parseInt(process.env.PORT || '5000', 10);
 

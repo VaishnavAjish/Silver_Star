@@ -11,11 +11,7 @@ const { logger } = require('../middleware/logger');
 const router = express.Router();
 
 
-// Account code to ID lookup helper — always queries fresh to avoid stale data
-async function getAccountId(code, client) {
-  const r = await (client || pool).query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id;
-}
+const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/purchase-notes/debug
 router.get('/debug', async (req, res) => {
@@ -338,16 +334,17 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         insertedLines.push(lineR.rows[0]);
 
         // Accumulate Dr line by item category
-        const invAccCode = invAccountCodeMap[item.category] || '2001';
-        const invAccId   = await getAccountId(invAccCode, client);
-        if (!invAccId) throw new Error(`Inventory account '${invAccCode}' not found in Chart of Accounts. Please ensure your COA is set up correctly.`);
+        const invRoleMap = { seed: 'INVENTORY_SEED', gas: 'INVENTORY_GAS', consumable: 'INVENTORY_CONSUMABLE' };
+        const invAccRole = invRoleMap[item.category] || 'INVENTORY_SEED';
+        const invAccId   = await getAccountByRole(invAccRole, client);
+        if (!invAccId) throw new Error(`Inventory account role '${invAccRole}' not found in Chart of Accounts.`);
         drAccountMap[invAccId] = Math.round(((drAccountMap[invAccId] || 0) + amt) * 100) / 100;
         await applyPurchase(client, line.item_id, line.qty, line.rate, amt);
       }
     }
 
-    const payableAccId = await getAccountId('3001', client);
-    if (!payableAccId) throw new Error(`Payable account '3001' not found in Chart of Accounts. Run seed-data.sql to restore default accounts.`);
+    const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
+    if (!payableAccId) throw new Error(`Payable account role 'ACCOUNTS_PAYABLE' not found in Chart of Accounts.`);
 
     // Build JE debit lines from drAccountMap
     const jeLines = [];
@@ -359,7 +356,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     // Add GST if applicable
     if (taxAmount > 0) {
-      const gstAccId = await getAccountId('3002', client);
+      const gstAccId = await getAccountByRole('GST_PAYABLE', client);
       if (gstAccId) {
         jeLines.push({ accountId: gstAccId, debit: Math.round(taxAmount * 100) / 100, credit: 0,
                        narration: `GST on ${docNumber}`,

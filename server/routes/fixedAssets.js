@@ -9,10 +9,7 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
-async function getAccountId(code, client = pool) {
-  const r = await client.query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id;
-}
+const { getAccountByRole } = require('../services/accountResolver');
 
 const money = value => Math.round((parseFloat(value) || 0) * 100) / 100;
 
@@ -287,8 +284,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const assetAccId = catR.rows[0]?.gl_asset_account_id;
     if (!assetAccId) throw new Error('Fixed asset category is missing an asset GL account');
 
-    const payableAccId = await getAccountId('3001', client);
-    if (!payableAccId) throw new Error('Account 3001 (Accounts Payable) not found in COA');
+    const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
+    if (!payableAccId) throw new Error('Accounts Payable account role not found in COA');
 
     // JE: Dr category FA account / Cr AP — unchanged from before
     const je = await journalEngine.createEntry({
@@ -423,10 +420,10 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
     }
 
     if (proceeds > 0) {
-      const cashId = await getAccountId('1001', client);
+      const cashId = await getAccountByRole('CASH_MAIN', client);
       if (!cashId) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Account 1001 (Cash) not found in COA' });
+        return res.status(400).json({ error: 'Cash account role not found in COA' });
       }
       jeLines.push({ accountId: cashId, debit: proceeds, credit: 0,
                      narration: `Disposal proceeds — ${asset.asset_code}` });
@@ -440,18 +437,18 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
 
     if (Math.abs(gainOrLoss) >= 0.01) {
       if (gainOrLoss < 0) {
-        const lossId = await getAccountId('5010', client);
+        const lossId = await getAccountByRole('LOSS_ON_DISPOSAL', client);
         if (!lossId) {
           await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Account 5010 not found' });
+          return res.status(400).json({ error: 'Loss on disposal account role not found' });
         }
         jeLines.push({ accountId: lossId, debit: Math.abs(gainOrLoss), credit: 0,
                        narration: `Loss on disposal — ${asset.asset_code}` });
       } else {
-        const gainId = await getAccountId('4099', client);
+        const gainId = await getAccountByRole('GAIN_ON_DISPOSAL', client);
         if (!gainId) {
           await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Account 4099 not found' });
+          return res.status(400).json({ error: 'Gain on disposal account role not found' });
         }
         jeLines.push({ accountId: gainId, debit: 0, credit: gainOrLoss,
                        narration: `Gain on disposal — ${asset.asset_code}` });

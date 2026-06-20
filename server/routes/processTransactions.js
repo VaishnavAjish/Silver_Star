@@ -6,10 +6,7 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
 
-async function getAccountId(code) {
-  const r = await pool.query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id;
-}
+const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/process-transactions/seeds-in-process
 router.get('/seeds-in-process', authenticate, async (req, res) => {
@@ -108,8 +105,8 @@ router.post('/_send_legacy', authenticate, authorize('admin', 'operator'), async
     }
 
     // JE: Dr WIP, Cr Raw Material
-    const wipAccId = await getAccountId('2005');
-    const rawAccId = await getAccountId('2001');
+    const wipAccId = await getAccountByRole('INVENTORY_GROWTH_RUN', client);
+    const rawAccId = await getAccountByRole('INVENTORY_SEED', client);
     if (wipAccId && rawAccId && totalWt > 0) {
       // Calculate value from inventory records
       let totalValue = 0;
