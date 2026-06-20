@@ -133,6 +133,14 @@ export default function FixedAssetDetail() {
           backLabel="Assets"
           actions={
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Barcode value={asset.asset_code} width={1.2} height={36} fontSize={9} />
+              <button
+                className="btn btn-sm"
+                title="Print barcode label"
+                onClick={() => window.open(`/labels/print?ids=${asset.id}&type=fixed_asset`, '_blank')}
+              >
+                <Printer size={12} /> Label
+              </button>
               {canEditAsset && (
                 <button
                   className="btn btn-sm btn-primary"
@@ -142,14 +150,6 @@ export default function FixedAssetDetail() {
                   Edit
                 </button>
               )}
-              <Barcode value={asset.asset_code} width={1.2} height={36} fontSize={9} />
-              <button
-                className="btn btn-sm"
-                title="Print barcode label"
-                onClick={() => window.open(`/labels/print?ids=${asset.id}&type=fixed_asset`, '_blank')}
-              >
-                <Printer size={12} /> Label
-              </button>
             </div>
           }
           auditMeta={headerAudit || undefined}
