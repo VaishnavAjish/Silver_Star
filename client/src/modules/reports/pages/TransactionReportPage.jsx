@@ -121,7 +121,8 @@ export default function TransactionReportPage() {
                 <th style={{ width: 90 }}>Date</th>
                 <th style={{ width: 85 }}>JE No</th>
                 <th style={{ width: 80 }}>Type</th>
-                <th>Description</th>
+                <th style={{ width: 180 }}>Description</th>
+                <th>Posting Ledger</th>
                 <th style={{ width: 115, textAlign: 'right' }}>Debit (₹)</th>
                 <th style={{ width: 115, textAlign: 'right' }}>Credit (₹)</th>
                 <th style={{ width: 125, textAlign: 'right' }}>Balance (₹)</th>
@@ -130,7 +131,7 @@ export default function TransactionReportPage() {
             <tbody>
               {/* Opening balance row */}
               <tr style={{ background: 'var(--brand-50)', fontWeight: 600 }}>
-                <td colSpan={4} style={{ color: 'var(--brand-dark)' }}>Opening Balance</td>
+                <td colSpan={5} style={{ color: 'var(--brand-dark)' }}>Opening Balance</td>
                 <td /><td />
                 <td className="num" style={{ fontWeight: 700, color: 'var(--brand-dark)', fontFamily: 'var(--mono)' }}>
                   {fmtSign(data.openingBalance)}
@@ -174,7 +175,18 @@ export default function TransactionReportPage() {
                       t.source_type || '—'
                     )}
                   </td>
-                  <td style={{ color: 'var(--g700)' }}>{t.description || '—'}</td>
+                  {(() => {
+                    const desc = t.description || '—';
+                    const parts = desc.split(' - ');
+                    const first = parts[0];
+                    const second = parts.length > 1 ? parts.slice(1).join(' - ') : '—';
+                    return (
+                      <>
+                        <td style={{ color: 'var(--g700)' }}>{first}</td>
+                        <td style={{ color: 'var(--g700)' }}>{second}</td>
+                      </>
+                    );
+                  })()}
                   <td className="num" style={{ color: t.debit > 0 ? 'var(--green)' : 'var(--g300)', fontWeight: t.debit > 0 ? 600 : 400 }}>
                     {t.debit > 0 ? fmt2(t.debit) : ''}
                   </td>
@@ -190,7 +202,7 @@ export default function TransactionReportPage() {
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700, borderTop: '2px solid var(--g300)' }}>
-                <td colSpan={4} style={{ textAlign: 'right', color: 'var(--g700)' }}>Period Totals</td>
+                <td colSpan={5} style={{ textAlign: 'right', color: 'var(--g700)' }}>Period Totals</td>
                 <td className="num" style={{ color: 'var(--green)', fontFamily: 'var(--mono)' }}>{fmt2(data.totalDebit)}</td>
                 <td className="num" style={{ color: 'var(--red)',   fontFamily: 'var(--mono)' }}>{fmt2(data.totalCredit)}</td>
                 <td className="num" style={{ color: 'var(--brand-dark)', fontSize: 13, fontFamily: 'var(--mono)' }}>
