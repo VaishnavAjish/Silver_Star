@@ -11,6 +11,7 @@ export default [
   { path: 'assets',                        Component: FixedAssetsList },
   { path: 'assets/new',                    Component: ManualFixedAssetEntry },
   { path: 'assets/:id',                    Component: FixedAssetDetail },
+  { path: 'assets/:id/edit',               Component: ManualFixedAssetEntry },
   { path: 'asset-templates',               Component: AssetTemplateMaster },
   { path: 'reports/fixed-asset-register',  Component: FixedAssetRegister },
   { path: 'reports/depreciation-schedule', Component: DepreciationSchedule },

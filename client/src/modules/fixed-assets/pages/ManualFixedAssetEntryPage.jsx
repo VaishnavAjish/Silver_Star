@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
 import {
@@ -294,7 +294,9 @@ function TemplateTypeahead({ templates, cats, uoms, selected, assetName, onSelec
 // MAIN FORM
 // ══════════════════════════════════════════════════════════════════════════════
 export default function ManualFixedAssetEntry() {
-  const { get, post } = useApi();
+  const { id }        = useParams();
+  const isEditing     = !!id;
+  const { get, post, patch } = useApi();
   const navigate      = useNavigate();
   const { user }      = useAuth();
 
@@ -306,6 +308,8 @@ export default function ManualFixedAssetEntry() {
   const [uoms,        setUoms]        = useState([]);
   const [costCenters, setCostCenters] = useState([]);
   const [saving,      setSaving]      = useState(false);
+  const [loadingAsset,setLoadingAsset]= useState(isEditing);
+  const [costLocked,  setCostLocked]  = useState(false);
   const [selectedTpl, setSelectedTpl] = useState(null);
 
   const today = new Date().toISOString().split('T')[0];
@@ -344,8 +348,58 @@ export default function ManualFixedAssetEntry() {
       setDepts(d.data || []);
       setUoms(u.data || []);
       setCostCenters(cc.data || []);
+      
+      if (isEditing) {
+        get(`/api/fixed-assets/${id}`).then(asset => {
+          setForm({
+            template_id: asset.template_id || '',
+            asset_name: asset.asset_name || '',
+            category_id: String(asset.category_id || ''),
+            serial_no: asset.serial_no || '',
+            model_no: asset.model_no || '',
+            brand: asset.brand || '',
+            manufacturer: asset.manufacturer || '',
+            asset_tag: asset.asset_tag || '',
+            condition: asset.condition || 'new',
+            qty: String(asset.qty || '1'),
+            uom_id: String(asset.uom_id || ''),
+            vendor_id: String(asset.vendor_id || ''),
+            invoice_no: asset.invoice_no || '',
+            purchase_date: (asset.purchase_date || '').split('T')[0] || today,
+            in_service_date: (asset.in_service_date || '').split('T')[0] || today,
+            invoice_date: (asset.invoice_date || '').split('T')[0] || today,
+            installation_date: (asset.installation_date || '').split('T')[0] || '',
+            warranty_expiry: (asset.warranty_expiry || '').split('T')[0] || '',
+            taxable_value: String(asset.taxable_value || ''),
+            gst_rate: String(asset.gst_rate || '18'),
+            gst_type: asset.igst_amount > 0 ? 'inter' : 'intra',
+            cgst_amount: String(asset.cgst_amount || '0'),
+            sgst_amount: String(asset.sgst_amount || '0'),
+            igst_amount: String(asset.igst_amount || '0'),
+            gst_treatment: asset.gst_treatment || 'non_claimable',
+            gst_claimable_amount: String(asset.gst_claimable_amount || '0'),
+            gst_non_claimable_amount: String(asset.gst_non_claimable_amount || '0'),
+            total_invoice_value: String(asset.total_invoice_value || ''),
+            purchase_cost: String(asset.purchase_cost || ''),
+            salvage_value: String(asset.salvage_value || '0'),
+            accumulated_depreciation: String(asset.accumulated_depreciation || '0'),
+            location_id: String(asset.location_id || ''),
+            department_id: String(asset.department_id || ''),
+            custodian: asset.custodian || '',
+            remarks: asset.remarks || '',
+            cost_center_id: String(asset.cost_center_id || ''),
+          });
+          if (asset.template_id) {
+            const tpl = (t.data || []).find(x => String(x.id) === String(asset.template_id));
+            if (tpl) setSelectedTpl(tpl);
+          }
+          // Check if depreciation has been posted
+          setCostLocked(asset.depreciation_history && asset.depreciation_history.length > 0);
+        }).catch(() => toast.error('Failed to load asset details'))
+          .finally(() => setLoadingAsset(false));
+      }
     }).catch(() => toast.error('Failed to load form data'));
-  }, []);
+  }, [id, isEditing, get]);
 
   if (!['admin', 'super_admin'].includes(user?.role)) {
     return (
@@ -426,11 +480,17 @@ export default function ManualFixedAssetEntry() {
 
     setSaving(true);
     try {
-      const r = await post('/api/fixed-assets', form);
-      toast.success(`Asset ${r.asset_code} created — JE ${r.je_number} posted`);
-      navigate('/assets');
+      if (isEditing) {
+        const r = await patch(`/api/fixed-assets/${id}`, form);
+        toast.success(`Asset ${r.asset_code} updated`);
+        navigate(`/assets/${id}`);
+      } else {
+        const r = await post('/api/fixed-assets', form);
+        toast.success(`Asset ${r.asset_code} created — JE ${r.je_number} posted`);
+        navigate('/assets');
+      }
     } catch (err) {
-      toast.error(err.message || 'Failed to create asset');
+      toast.error(err.message || (isEditing ? 'Failed to update asset' : 'Failed to create asset'));
     } finally {
       setSaving(false);
     }
@@ -439,6 +499,10 @@ export default function ManualFixedAssetEntry() {
   // ── Shared row style ──
   const row = { display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' };
   const fg  = { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 120 };
+
+  if (loadingAsset) {
+    return <div className="empty-state"><div className="spinner" /></div>;
+  }
 
   return (
     <div className="grid-page animate-in">
@@ -494,7 +558,7 @@ export default function ManualFixedAssetEntry() {
             <div style={row}>
               <div style={{ ...fg, flex: 2 }}>
                 <label>Category</label>
-                <SelectDropdown value={form.category_id} onChange={e => set('category_id', e.target.value)}>
+                <SelectDropdown value={form.category_id} onChange={e => set('category_id', e.target.value)} disabled={costLocked}>
                   <option value="">— Select Category —</option>
                   {cats.map(c => (
                     <option key={c.id} value={c.id}>
@@ -600,7 +664,7 @@ export default function ManualFixedAssetEntry() {
                 />
               </div>
               <div style={{ fontSize: 11, color: 'var(--g500)', marginTop: 4 }}>
-                Leave 0 for new assets. Enter existing balance only for opening-balance migration.
+                Leave 0 for new assets. Enter existing balance only for opening-balance migration. {isEditing && costLocked && <span style={{color: 'var(--red)'}}>(Locked)</span>}
               </div>
             </div>
           </FormSectionCard>
@@ -617,7 +681,7 @@ export default function ManualFixedAssetEntry() {
             <div style={row}>
               <div style={{ ...fg, flex: 2 }}>
                 <label>Vendor</label>
-                <SelectDropdown value={form.vendor_id} onChange={e => set('vendor_id', e.target.value)}>
+                <SelectDropdown value={form.vendor_id} onChange={e => set('vendor_id', e.target.value)} disabled={isEditing}>
                   <option value="">— Select Vendor —</option>
                   {vendors.map(v => <option key={v.id} value={v.id}>{v.name} ({v.code})</option>)}
                 </SelectDropdown>
@@ -645,11 +709,11 @@ export default function ManualFixedAssetEntry() {
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 100 }}>
                 <label>Purchase Date</label>
-                <DatePicker value={form.purchase_date} onChange={v => set('purchase_date', v)} />
+                <DatePicker value={form.purchase_date} onChange={v => set('purchase_date', v)} disabled={isEditing} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 100 }}>
                 <label>In Service Date</label>
-                <DatePicker value={form.in_service_date} onChange={v => set('in_service_date', v)} />
+                <DatePicker value={form.in_service_date} onChange={v => set('in_service_date', v)} disabled={costLocked} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 100 }}>
                 <label>Invoice Date</label>
@@ -678,6 +742,7 @@ export default function ManualFixedAssetEntry() {
                                  fontSize: 12, color: 'var(--g500)', pointerEvents: 'none' }}>₹</span>
                   <input type="number" value={form.taxable_value}
                     onChange={e => recalcGst({ taxable_value: e.target.value })}
+                    disabled={isEditing}
                     placeholder="0.00" style={{ paddingLeft: 22 }} />
                 </div>
               </div>
@@ -731,18 +796,20 @@ export default function ManualFixedAssetEntry() {
             <div style={row}>
               <div style={fg}>
                 <label>Total Invoice Value (₹)</label>
-                <input type="number" value={form.total_invoice_value} readOnly
+                <input type="number" value={form.total_invoice_value} readOnly disabled={isEditing}
                   style={{ background: 'var(--g100)', fontFamily: 'var(--mono)' }} />
               </div>
               <div style={fg}>
                 <label>Capitalized Cost (₹) *</label>
                 <input type="number" value={form.purchase_cost}
                   onChange={e => set('purchase_cost', e.target.value)}
+                  disabled={costLocked}
                   style={{ fontWeight: 700, background: 'var(--brand-50,#eff6ff)', fontFamily: 'var(--mono)' }} />
               </div>
               <div style={fg}>
                 <label>Salvage Value (₹)</label>
                 <input type="number" value={form.salvage_value}
+                  disabled={costLocked}
                   onChange={e => set('salvage_value', e.target.value)} />
               </div>
             </div>
@@ -752,7 +819,7 @@ export default function ManualFixedAssetEntry() {
             </div>
 
             {/* Accounting Preview — shown inline when category + cost filled */}
-            {form.category_id && num(form.purchase_cost) > 0 && jePreviewLines && (
+            {!isEditing && form.category_id && num(form.purchase_cost) > 0 && jePreviewLines && (
               <div style={{ marginTop: 14, border: '1px solid var(--g200)', borderRadius: 6, overflow: 'hidden' }}>
                 <div style={{ padding: '5px 12px', background: 'var(--g100)',
                               fontSize: 10, fontWeight: 700, color: 'var(--g600)',
@@ -806,9 +873,9 @@ export default function ManualFixedAssetEntry() {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         flexShrink: 0,
       }}>
-        <button className="btn" onClick={() => navigate('/assets')}>Cancel</button>
+        <button className="btn" onClick={() => navigate(isEditing ? `/assets/${id}` : '/assets')}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          <Save size={13} /> {saving ? 'Saving…' : 'Save Changes'}
+          <Save size={13} /> {saving ? 'Saving…' : (isEditing ? 'Update Asset' : 'Save Changes')}
         </button>
       </div>
     </div>

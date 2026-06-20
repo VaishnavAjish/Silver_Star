@@ -46,6 +46,11 @@ export default function FixedAssetDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin  = ['admin', 'super_admin'].includes(user?.role);
+  
+  const isSuperAdmin = user?.role === 'super_admin';
+  const explicitAssetEdit = user?.permissions?.find(p => p.module === 'assets' && p.permission_key === 'edit')?.allowed ||
+                            user?.rbac_permissions?.some(p => p.module === 'assets' && (parseInt(p.mask) & 4) === 4);
+  const canEditAsset = isSuperAdmin || (user?.role === 'admin' && explicitAssetEdit);
 
   const [asset,     setAsset]     = useState(null);
   const [schedule,  setSchedule]  = useState(null);
@@ -124,6 +129,15 @@ export default function FixedAssetDetail() {
           backLabel="Assets"
           actions={
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {canEditAsset && (
+                <button
+                  className="btn btn-sm btn-primary"
+                  title="Edit Asset"
+                  onClick={() => navigate(`/assets/${asset.id}/edit`)}
+                >
+                  Edit
+                </button>
+              )}
               <Barcode value={asset.asset_code} width={1.2} height={36} fontSize={9} />
               <button
                 className="btn btn-sm"
