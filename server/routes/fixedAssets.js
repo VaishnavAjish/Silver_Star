@@ -312,6 +312,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     res.status(201).json({ ...asset, purchase_note_id: pn.id, je_id: je.id, je_number: je.je_number });
     dispatchEvent('asset.created', asset).catch(() => {});
   } catch (err) {
+    console.error('[POST /api/fixed-assets] ERROR:', err);
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: err.message });
   } finally {
