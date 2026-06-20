@@ -118,12 +118,8 @@ export default function FixedAssetDetail() {
   ].filter(Boolean).join(' · ');
 
   return (
-    <>
-      <div style={{ background: 'red', color: 'white', padding: 10, textAlign: 'center', fontWeight: 'bold' }}>
-        DEBUG INFO: role={user?.role} | isSuperAdmin={String(isSuperAdmin)} | canEditAsset={String(canEditAsset)} | explicit={String(explicitAssetEdit)}
-      </div>
-      <TransactionPageLayout
-        header={
+    <TransactionPageLayout
+      header={
         <TransactionHeader
           title={`${asset.asset_code} — ${asset.asset_name}`}
           icon={<Landmark size={18} />}
@@ -513,6 +509,5 @@ export default function FixedAssetDetail() {
         </FormSectionCard>
       )}
     </TransactionPageLayout>
-    </>
   );
 }
