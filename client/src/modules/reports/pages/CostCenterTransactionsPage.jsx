@@ -23,10 +23,10 @@ export default function CostCenterTransactionsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const costCenterId = searchParams.get('cost_center_id');
-  const fromDate     = searchParams.get('from_date') || '';
-  const toDate       = searchParams.get('to_date')   || '';
-  const ccName       = searchParams.get('name') || '';
+  const [costCenterId] = useState(() => searchParams.get('cost_center_id'));
+  const [fromDate]     = useState(() => searchParams.get('from_date') || '');
+  const [toDate]       = useState(() => searchParams.get('to_date')   || '');
+  const [ccName]       = useState(() => searchParams.get('name') || '');
 
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(false);

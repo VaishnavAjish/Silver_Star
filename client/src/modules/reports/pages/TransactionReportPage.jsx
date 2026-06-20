@@ -27,10 +27,10 @@ export default function TransactionReportPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const accountId   = searchParams.get('account_id');
-  const fromDate    = searchParams.get('from') || '1900-01-01';
-  const toDate      = searchParams.get('to')   || new Date().toISOString().split('T')[0];
-  const accountName = searchParams.get('account_name') || '';
+  const [accountId]   = useState(() => searchParams.get('account_id'));
+  const [fromDate]    = useState(() => searchParams.get('from') || '1900-01-01');
+  const [toDate]      = useState(() => searchParams.get('to')   || new Date().toISOString().split('T')[0]);
+  const [accountName] = useState(() => searchParams.get('account_name') || '');
 
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(false);
