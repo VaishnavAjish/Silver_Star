@@ -103,7 +103,7 @@ router.get('/report', authenticate, async (req, res) => {
       query = `
         SELECT je.date, je.je_number, je.source_type,
                a.code AS account_code, a.name AS account_name,
-               jl.remarks,
+               jl.narration AS remarks,
                COALESCE(jl.debit - jl.credit, 0)::numeric AS net,
                cc.code AS cost_center_code, cc.name AS cost_center_name
           FROM je_lines jl
