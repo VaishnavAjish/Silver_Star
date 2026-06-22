@@ -57,13 +57,13 @@ export default function CostCenterReportsPage() {
 
   return (
     <div className="grid-page" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         {VIEWS.map(v => (
           <button key={v.key}
             className={`btn ${view === v.key ? 'btn-primary' : ''}`}
             onClick={() => { setView(v.key); setRows([]); }}>{v.label}</button>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
           {view === 'report' && (
             <>
               <div className="filter-field" style={{ width: 150 }}>
@@ -96,7 +96,7 @@ export default function CostCenterReportsPage() {
             <label className="filter-label">To</label>
             <DatePicker value={to} onChange={v => setTo(v || '')} />
           </div>
-          <button className="btn" onClick={load} style={{ marginTop: 18 }}>Apply</button>
+          <button className="btn" onClick={load}>Apply</button>
         </div>
       </div>
 
