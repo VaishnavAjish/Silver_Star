@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import toast from 'react-hot-toast';
 import DatePicker from '../../../shared/components/DatePicker';
@@ -247,7 +248,7 @@ function CostCentreReportDetailedTable({ rows }) {
                   return (
                     <tr key={i}>
                       <td style={td}>{new Date(r.date).toLocaleDateString('en-GB')}</td>
-                      <td style={td}><a href={`/journal/${r.je_number}`} target="_blank" rel="noreferrer">{r.je_number}</a></td>
+                      <td style={td}><Link to={`/journal-entries/${r.id}`} style={{ color: 'var(--brand)', textDecoration: 'none', fontWeight: 500 }}>{r.je_number}</Link></td>
                       <td style={td}>{r.source_type}</td>
                       <td style={td}>{r.account_code} {r.account_name}</td>
                       <td style={td}>{r.remarks || '-'}</td>

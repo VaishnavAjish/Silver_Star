@@ -101,7 +101,7 @@ router.get('/report', authenticate, async (req, res) => {
 
     if (mode === 'detailed') {
       query = `
-        SELECT je.date, je.je_number, je.source_type,
+        SELECT je.id, je.date, je.je_number, je.source_type,
                a.code AS account_code, a.name AS account_name,
                jl.narration AS remarks,
                COALESCE(jl.debit - jl.credit, 0)::numeric AS net,
