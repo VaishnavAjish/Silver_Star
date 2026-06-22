@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
 import toast from 'react-hot-toast';
 import DatePicker from '../../../shared/components/DatePicker';
+import SearchableSelect from '../../../shared/components/SearchableSelect';
 
 const money = v => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -65,18 +66,25 @@ export default function CostCenterReportsPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {view === 'report' && (
             <>
-              <div className="filter-field" style={{ width: 180 }}>
+              <div className="filter-field" style={{ width: 150 }}>
                 <label className="filter-label">Cost Centre</label>
-                <select className="input" value={ccId} onChange={e => setCcId(e.target.value)}>
-                  <option value="">-- ALL --</option>
-                  {costCenters.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
-                </select>
+                <SearchableSelect
+                  dropdownSearch
+                  placeholder="-- ALL --"
+                  value={ccId ? { id: ccId, name: costCenters.find(c => c.id === ccId)?.name, code: costCenters.find(c => c.id === ccId)?.code } : null}
+                  onChange={v => setCcId(v ? v.id : '')}
+                  options={costCenters.map(c => ({ id: c.id, name: c.name, code: c.code }))}
+                />
               </div>
               <div className="filter-field" style={{ width: 150 }}>
                 <label className="filter-label">View Mode</label>
-                <select className="input" value={mode} onChange={e => setMode(e.target.value)}>
-                  {MODES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-                </select>
+                <SearchableSelect
+                  dropdownSearch
+                  placeholder="Category View"
+                  value={MODES.find(m => m.key === mode) ? { id: mode, name: MODES.find(m => m.key === mode).label } : null}
+                  onChange={v => setMode(v ? v.id : 'category')}
+                  options={MODES.map(m => ({ id: m.key, name: m.label }))}
+                />
               </div>
             </>
           )}
