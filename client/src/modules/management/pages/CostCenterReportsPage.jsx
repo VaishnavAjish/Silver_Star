@@ -4,6 +4,7 @@ import { useApi } from '../../../shared/hooks/useApi';
 import toast from 'react-hot-toast';
 import DatePicker from '../../../shared/components/DatePicker';
 import SearchableSelect from '../../../shared/components/SearchableSelect';
+import Modal from '../../../shared/components/Modal';
 
 const money = v => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -33,6 +34,26 @@ export default function CostCenterReportsPage() {
   const [costCenters, setCostCenters] = useState([]);
   const [rows, setRows]   = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Journal Entry Modal State
+  const [selectedJEId, setSelectedJEId] = useState(null);
+  const [jeDetail, setJeDetail] = useState(null);
+  const [jeLoading, setJeLoading] = useState(false);
+
+  const handleJEClick = async (jeId) => {
+    if (!jeId) return;
+    setSelectedJEId(jeId);
+    setJeLoading(true);
+    try {
+      const data = await api.get(`/api/journal-entries/${jeId}`);
+      setJeDetail(data);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load journal entry');
+    } finally {
+      setJeLoading(false);
+    }
+  };
 
   useEffect(() => {
     api.get('/api/cost-centers').then(r => setCostCenters(r.data || [])).catch(() => {});
@@ -108,9 +129,56 @@ export default function CostCenterReportsPage() {
         view === 'dashboard'     ? <DashboardTable rows={rows} /> :
         view === 'trial-balance' ? <TrialBalanceTable rows={rows} /> :
         view === 'report' && mode === 'summary'  ? <CostCentreReportSummaryTable rows={rows} /> :
-        view === 'report' && mode === 'detailed' ? <CostCentreReportDetailedTable rows={rows} /> :
+        view === 'report' && mode === 'detailed' ? <CostCentreReportDetailedTable rows={rows} onJEClick={handleJEClick} /> :
         view === 'report' && mode === 'category' ? <CostCentreReportCategoryTable rows={rows} /> : null
       )}
+
+      {/* JE Detail Modal */}
+      <Modal open={!!selectedJEId} onClose={() => { setSelectedJEId(null); setJeDetail(null); }} title={jeDetail ? `Journal Entry: ${jeDetail.je_number}` : 'Loading...'} large>
+        {jeLoading && <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" /></div>}
+        {jeDetail && !jeLoading && (
+          <div>
+            <div style={{ display: 'flex', gap: 20, marginBottom: 16, fontSize: 12, background: 'var(--g50)', padding: '12px 16px', borderRadius: 8, border: '1px solid var(--g200)' }}>
+              <div><strong>Date:</strong> {new Date(jeDetail.date).toLocaleDateString('en-IN')}</div>
+              <div><strong>Status:</strong> <span className={`badge ${jeDetail.status === 'posted' ? 'b-active' : 'b-draft'}`}>{jeDetail.status}</span></div>
+              <div><strong>Source:</strong> {jeDetail.source_type} {jeDetail.source_id && `(#${jeDetail.source_id})`}</div>
+              <div><strong>Description:</strong> {jeDetail.description || '—'}</div>
+            </div>
+            <table className="dgrid">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th style={{ width: 120 }}>Debit (₹)</th>
+                  <th style={{ width: 120 }}>Credit (₹)</th>
+                  <th>Narration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jeDetail.lines?.map(l => (
+                  <tr key={l.id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{l.account_name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--g500)' }}>{l.account_code}</div>
+                    </td>
+                    <td className="num" style={{ color: Number(l.debit) > 0 ? 'var(--green)' : '' }}>{Number(l.debit) > 0 ? money(l.debit) : ''}</td>
+                    <td className="num" style={{ color: Number(l.credit) > 0 ? 'var(--red)' : '' }}>{Number(l.credit) > 0 ? money(l.credit) : ''}</td>
+                    <td style={{ fontSize: 11, color: 'var(--g600)' }}>{l.narration || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'var(--g50)', fontWeight: 700 }}>
+                  <td style={{ textAlign: 'right' }}>Totals</td>
+                  <td className="num" style={{ color: 'var(--green)' }}>{money(jeDetail.lines?.reduce((sum, l) => sum + Number(l.debit), 0))}</td>
+                  <td className="num" style={{ color: 'var(--red)' }}>{money(jeDetail.lines?.reduce((sum, l) => sum + Number(l.credit), 0))}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </Modal>
+
     </div>
   );
 }
@@ -213,7 +281,7 @@ function CostCentreReportSummaryTable({ rows }) {
   );
 }
 
-function CostCentreReportDetailedTable({ rows }) {
+function CostCentreReportDetailedTable({ rows, onJEClick }) {
   if (!rows.length) return <Empty />;
   
   // Group by cost centre
@@ -248,7 +316,7 @@ function CostCentreReportDetailedTable({ rows }) {
                   return (
                     <tr key={i}>
                       <td style={td}>{new Date(r.date).toLocaleDateString('en-GB')}</td>
-                      <td style={td}><Link to={`/journal-entries/${r.id}`} style={{ color: 'var(--brand)', textDecoration: 'none', fontWeight: 500 }}>{r.je_number}</Link></td>
+                      <td style={td}><span className="cell-link" onClick={() => onJEClick(r.id)} style={{ cursor: 'pointer', color: 'var(--brand)', textDecoration: 'none', fontWeight: 500 }}>{r.je_number}</span></td>
                       <td style={td}>{r.source_type}</td>
                       <td style={td}>{r.account_code} {r.account_name}</td>
                       <td style={td}>{r.remarks || '-'}</td>
