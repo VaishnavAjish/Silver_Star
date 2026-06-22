@@ -26,12 +26,11 @@ router.get('/search-transactions', authenticate, async (req, res) => {
     }
     if (doc_no) {
       params.push(`%${doc_no}%`);
-      // Matches both standard JE code or operational codes (which will be fetched in the CTE/join)
-      where.push(`je.code ILIKE $${params.length}`);
+      where.push(`je.je_number ILIKE $${params.length}`);
     }
     if (module_type) {
       params.push(module_type);
-      where.push(`je.entity_type = $${params.length}`);
+      where.push(`je.source_type = $${params.length}`);
     }
 
     // CTE to get the base JEs matching criteria, then we fetch the lines
@@ -51,20 +50,21 @@ router.get('/search-transactions', authenticate, async (req, res) => {
            ${account_id ? `AND jl.account_id = ${pool.escapeLiteral(account_id)}` : ''}
       ),
       matching_jes AS (
-        SELECT je.id AS je_id, je.date AS document_date, je.entity_type AS document_type, je.code AS default_doc_no,
+        SELECT je.id AS je_id, je.date AS document_date, je.source_type AS document_type, je.je_number AS default_doc_no,
                -- Dynamically fetch vendor names and doc numbers if operational
                CASE 
-                 WHEN je.entity_type = 'expense_voucher' THEN (SELECT v.name FROM expense_vouchers ev JOIN vendors v ON v.id = ev.vendor_id WHERE ev.id = je.entity_id)
-                 WHEN je.entity_type = 'purchase_invoice' THEN (SELECT v.name FROM purchase_invoices pi JOIN vendors v ON v.id = pi.vendor_id WHERE pi.id = je.entity_id)
-                 WHEN je.entity_type = 'payment' THEN (SELECT v.name FROM payments p JOIN vendors v ON v.id = p.vendor_id WHERE p.id = je.entity_id)
+                 WHEN je.source_type = 'expense' THEN (SELECT v.name FROM expenses ev JOIN vendors v ON v.id = ev.vendor_id WHERE ev.id = je.source_id)
+                 WHEN je.source_type = 'purchase' THEN (SELECT v.name FROM purchase_notes pi JOIN vendors v ON v.id = pi.vendor_id WHERE pi.id = je.source_id)
+                 WHEN je.source_type = 'payment' THEN (SELECT v.name FROM payments p JOIN vendors v ON v.id = p.vendor_id WHERE p.id = je.source_id)
                  ELSE NULL
                END AS vendor_name,
                CASE
-                 WHEN je.entity_type = 'expense_voucher' THEN (SELECT code FROM expense_vouchers WHERE id = je.entity_id)
-                 WHEN je.entity_type = 'purchase_invoice' THEN (SELECT code FROM purchase_invoices WHERE id = je.entity_id)
-                 WHEN je.entity_type = 'payment' THEN (SELECT code FROM payments WHERE id = je.entity_id)
-                 WHEN je.entity_type = 'receipt' THEN (SELECT code FROM receipts WHERE id = je.entity_id)
-                 ELSE je.code
+                 WHEN je.source_type = 'expense' THEN (SELECT code FROM expenses WHERE id = je.source_id)
+                 WHEN je.source_type = 'purchase' THEN (SELECT doc_number::text FROM purchase_notes WHERE id = je.source_id)
+                 WHEN je.source_type = 'sales' THEN (SELECT doc_number::text FROM invoices WHERE id = je.source_id)
+                 WHEN je.source_type = 'payment' THEN (SELECT doc_number::text FROM payments WHERE id = je.source_id)
+                 WHEN je.source_type = 'receipt' THEN (SELECT doc_number::text FROM receipts WHERE id = je.source_id)
+                 ELSE je.je_number
                END AS document_number
           FROM journal_entries je
          WHERE ${where.join(' AND ')}
@@ -130,7 +130,7 @@ router.get('/audit-history', authenticate, async (req, res) => {
               a.old_cost_center_id, cc_old.name AS old_cost_center_name,
               a.new_cost_center_id, cc_new.name AS new_cost_center_name,
               a.reason,
-              je.code AS document_number
+              je.je_number AS document_number
          FROM cost_center_audit a
          LEFT JOIN users u ON u.id = a.user_id
          LEFT JOIN cost_centers cc_old ON cc_old.id = a.old_cost_center_id
