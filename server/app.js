@@ -318,10 +318,21 @@ app.post('/api/cache/flush', authenticate, async (req, res) => {
 if (process.env.SERVE_STATIC === 'true') {
   const path = require('path');
   const staticDir = path.join(__dirname, 'public');
-  app.use(express.static(staticDir, { maxAge: '1y', immutable: true }));
+  app.use(express.static(staticDir, { 
+    maxAge: '1y', 
+    immutable: true,
+    setHeaders: (res, path) => {
+      if (path.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+    }
+  }));
   // SPA fallback — all non-API routes serve index.html
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }
