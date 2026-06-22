@@ -284,6 +284,7 @@ app.use('/api/manufacturing', manufacturingRoutes);
 app.use('/api/cost-centers', costCenterRoutes);
 app.use('/api/cost-center-bulk', costCenterBulkRoutes);
 app.use('/api/cost-center-reports', costCenterReportRoutes);
+app.use('/api/cost-center-corrections', require('./routes/costCenterCorrections'));
 app.use('/api/asset-templates', assetTemplateRoutes);
 app.use('/api/bank-recon', bankReconRoutes);
 app.use('/api/lot-movements', lotMovementRoutes);
