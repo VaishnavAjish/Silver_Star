@@ -33,6 +33,7 @@ function buildWhere(f, startIdx) {
   if (f.reference)    { cl.push(`(je.reference_no ILIKE $${i} OR jl.reference_no ILIKE $${i})`); i++; vals.push(`%${f.reference}%`); }
   if (f.remarks)      { cl.push(`jl.narration ILIKE $${i++}`);                      vals.push(`%${f.remarks}%`); }
   if (f.existing_cost_center_id) { cl.push(`jl.cost_center_id = $${i++}`);          vals.push(parseInt(f.existing_cost_center_id)); }
+  if (f.selected_line_ids && f.selected_line_ids.length > 0) { cl.push(`jl.id = ANY($${i++})`); vals.push(f.selected_line_ids); }
 
   return { sql: cl.length ? cl.join(' AND ') : 'TRUE', vals };
 }
@@ -69,8 +70,20 @@ async function runBulk({ res, filters, target, reason, dryRun, userId }) {
     const affected = countR.rows[0].n;
 
     if (dryRun) {
+      // Fetch lines to display in preview table
+      const linesR = await client.query(
+        `SELECT jl.id, je.je_number, je.date, je.source_type, a.name AS account_name, a.code AS account_code, cc.name AS current_cc_name, jl.debit, jl.credit
+           FROM je_lines jl
+           JOIN journal_entries je ON je.id = jl.je_id
+           JOIN accounts a ON a.id = jl.account_id
+           LEFT JOIN cost_centers cc ON cc.id = jl.cost_center_id
+          WHERE (${wCount.sql}) AND jl.cost_center_id IS DISTINCT FROM $1
+          ORDER BY je.date DESC, je.je_number DESC
+          LIMIT 500`,
+        [target, ...wCount.vals]
+      );
       await client.query('ROLLBACK');
-      return res.json({ dryRun: true, affected });
+      return res.json({ dryRun: true, affected, lines: linesR.rows });
     }
 
     // 2. Audit BEFORE update so old_cost_center_id is captured (params: $1 user,
@@ -112,13 +125,13 @@ async function runBulk({ res, filters, target, reason, dryRun, userId }) {
 router.post('/assign', authenticate, authorize('admin'), async (req, res) => {
   const { cost_center_id, reason, dryRun,
           date_from, date_to, voucher_from, voucher_to,
-          account_id, source_type, reference, remarks } = req.body;
+          account_id, source_type, reference, remarks, selected_line_ids } = req.body;
 
   if (!cost_center_id) return res.status(400).json({ error: 'cost_center_id is required' });
 
   return runBulk({
     res,
-    filters: { date_from, date_to, voucher_from, voucher_to, account_id, source_type, reference, remarks },
+    filters: { date_from, date_to, voucher_from, voucher_to, account_id, source_type, reference, remarks, selected_line_ids },
     target: parseInt(cost_center_id),
     reason,
     dryRun: Boolean(dryRun),
@@ -132,7 +145,8 @@ router.post('/assign', authenticate, authorize('admin'), async (req, res) => {
 // preserving all accounting values.
 router.post('/replace', authenticate, authorize('admin'), async (req, res) => {
   const { existing_cost_center_id, new_cost_center_id, reason, dryRun,
-          date_from, date_to, voucher_from, voucher_to } = req.body;
+          date_from, date_to, voucher_from, voucher_to, selected_line_ids,
+          account_id, source_type } = req.body;
 
   if (!existing_cost_center_id || !new_cost_center_id) {
     return res.status(400).json({ error: 'existing_cost_center_id and new_cost_center_id are required' });
@@ -143,7 +157,7 @@ router.post('/replace', authenticate, authorize('admin'), async (req, res) => {
 
   return runBulk({
     res,
-    filters: { existing_cost_center_id, date_from, date_to, voucher_from, voucher_to },
+    filters: { existing_cost_center_id, date_from, date_to, voucher_from, voucher_to, selected_line_ids, account_id, source_type },
     target: parseInt(new_cost_center_id),
     reason,
     dryRun: Boolean(dryRun),
