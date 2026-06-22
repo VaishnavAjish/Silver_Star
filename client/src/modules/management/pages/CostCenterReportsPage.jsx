@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
 import toast from 'react-hot-toast';
 import DatePicker from '../../../shared/components/DatePicker';
@@ -188,7 +188,7 @@ function ProjectCostTable({ rows }) {
       </tr></thead>
       <tbody>
         {Object.entries(grouped).map(([category, items]) => (
-          <React.Fragment key={category}>
+          <Fragment key={category}>
             <tr>
               <td colSpan={4} style={{ padding: '12px 10px 4px', fontSize: 14, fontWeight: 700, color: 'var(--brand)', borderBottom: '1px solid var(--g200)' }}>
                 {category}
@@ -206,7 +206,7 @@ function ProjectCostTable({ rows }) {
               <td colSpan={3} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
               <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
             </tr>
-          </React.Fragment>
+          </Fragment>
         ))}
         <tr>
           <td colSpan={3} style={{ padding: '16px 10px', fontWeight: 800, fontSize: 16, textAlign: 'right' }}>Grand Total Project Cost</td>

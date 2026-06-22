@@ -10,6 +10,7 @@ const router = express.Router();
 // They never write and never alter balances.
 // ===========================================================================
 
+const STARTUP_CODES = ['CC001', 'CC002', 'CC003'];
 
 // Optional date-range filter on je.date. Returns SQL + params starting at idx.
 function dateFilter(q, startIdx) {
@@ -77,7 +78,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
 // Spend breakdown by account for the startup cost centres (CC001–CC003).
 router.get('/startup', authenticate, async (req, res) => {
   try {
-    const d = dateFilter(req.query, 1);
+    const d = dateFilter(req.query, 2);
     const r = await pool.query(
       `SELECT cc.code AS cost_center_code, cc.name AS cost_center_name,
               a.code  AS account_code, a.name AS account_name, a.type,
@@ -86,10 +87,10 @@ router.get('/startup', authenticate, async (req, res) => {
          JOIN journal_entries je ON je.id = jl.je_id AND je.status = 'posted'
          JOIN cost_centers    cc ON cc.id = jl.cost_center_id
          JOIN accounts        a  ON a.id  = jl.account_id
-        WHERE cc.report_type = 'STARTUP'${d.sql}
+        WHERE cc.code = ANY($1)${d.sql}
         GROUP BY cc.code, cc.name, a.code, a.name, a.type
         ORDER BY cc.code, a.code`,
-      d.vals
+      [STARTUP_CODES, ...d.vals]
     );
     res.json({ data: r.rows, total: r.rows.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -108,7 +109,7 @@ router.get('/project', authenticate, async (req, res) => {
          JOIN journal_entries je ON je.id = jl.je_id AND je.status = 'posted'
          JOIN cost_centers    cc ON cc.id = jl.cost_center_id
          JOIN accounts        a  ON a.id  = jl.account_id
-        WHERE cc.report_type = 'PROJECT'
+        WHERE cc.status = 'active'
           AND a.type IN ('asset', 'expense')
           AND COALESCE(a.sub_type, '') NOT IN ('bank', 'cash', 'receivable', 'payable', 'loan')
           AND a.name NOT ILIKE '%advance%'
