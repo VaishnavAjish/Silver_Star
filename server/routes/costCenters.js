@@ -227,7 +227,87 @@ router.get('/:id/usage', authenticate, async (req, res) => {
   }
 });
 
-// NOTE: No DELETE endpoint is exposed by design. Cost centres are never hard
-// deleted (rule 6). Use PATCH /:id/status with status='inactive' instead.
+// POST /api/cost-centers/bulk-reassign
+// Safe bulk correction capability so wrongly tagged entries can be corrected
+// without affecting accounting balances.
+router.post('/bulk-reassign', authenticate, authorize('admin', 'operator'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { je_line_ids, new_cost_center_id, reason, preview } = req.body;
+    if (!Array.isArray(je_line_ids) || je_line_ids.length === 0) {
+      return res.status(400).json({ error: 'je_line_ids array is required' });
+    }
+
+    // Fetch current state
+    const linesRes = await client.query(
+      `SELECT jl.id AS je_line_id, jl.je_id, jl.cost_center_id AS old_cost_center_id, 
+              cc_old.code AS old_cc_code, cc_old.name AS old_cc_name,
+              jl.debit, jl.credit, jl.narration, a.name AS account_name
+         FROM je_lines jl
+         LEFT JOIN cost_centers cc_old ON cc_old.id = jl.cost_center_id
+         JOIN accounts a ON a.id = jl.account_id
+        WHERE jl.id = ANY($1)`,
+      [je_line_ids]
+    );
+
+    let newCcInfo = { code: null, name: 'None' };
+    if (new_cost_center_id) {
+      const ccRes = await client.query('SELECT code, name FROM cost_centers WHERE id = $1', [new_cost_center_id]);
+      if (ccRes.rows.length) newCcInfo = ccRes.rows[0];
+    }
+
+    const snapshot = linesRes.rows.map(row => ({
+      ...row,
+      new_cost_center_id: new_cost_center_id || null,
+      new_cc_code: newCcInfo.code,
+      new_cc_name: newCcInfo.name
+    }));
+
+    if (preview) {
+      return res.json({ preview: true, lines: snapshot });
+    }
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason is required for bulk reassignment' });
+    }
+
+    await client.query('BEGIN');
+    
+    // Update je_lines
+    await client.query(
+      `UPDATE je_lines SET cost_center_id = $1 WHERE id = ANY($2)`,
+      [new_cost_center_id || null, je_line_ids]
+    );
+
+    // Audit trailing for each line
+    for (const line of linesRes.rows) {
+      if (line.old_cost_center_id === (new_cost_center_id || null)) continue;
+      
+      await client.query('SAVEPOINT bulk_audit');
+      try {
+        await client.query(
+          `INSERT INTO cost_center_audit
+             (user_id, entity_type, entity_id, old_cost_center_id, new_cost_center_id, reason)
+           VALUES ($1, 'je_line', $2, $3, $4, $5)`,
+          [req.user?.id || null, line.je_line_id, line.old_cost_center_id, new_cost_center_id || null, reason.trim()]
+        );
+        await client.query('RELEASE SAVEPOINT bulk_audit');
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT bulk_audit').catch(() => {});
+        // Silently swallow audit failures as per requirements
+        console.error('[costCenters bulk-reassign] audit write failed:', err.message);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, updated_count: je_line_ids.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 
 module.exports = router;

@@ -9,6 +9,7 @@ const VIEWS = [
   { key: 'dashboard',     label: 'Dashboard' },
   { key: 'trial-balance', label: 'Trial Balance' },
   { key: 'startup',       label: 'Startup Cost Report' },
+  { key: 'project',       label: 'Project Cost Report' },
 ];
 
 const th = { textAlign: 'left', padding: '6px 10px', borderBottom: '2px solid var(--g200)', fontSize: 12, color: 'var(--g600)' };
@@ -61,7 +62,8 @@ export default function CostCenterReportsPage() {
       {loading ? <p style={{ padding: 24 }}>Loading…</p> : (
         view === 'dashboard'     ? <DashboardTable rows={rows} /> :
         view === 'trial-balance' ? <TrialBalanceTable rows={rows} /> :
-                                   <StartupTable rows={rows} />
+        view === 'startup'       ? <StartupTable rows={rows} /> :
+                                   <ProjectCostTable rows={rows} />
       )}
     </div>
   );
@@ -153,4 +155,66 @@ function StartupTable({ rows }) {
 
 function Empty() {
   return <p style={{ padding: 24, color: 'var(--g500)' }}>No data for the selected period.</p>;
+}
+
+function ProjectCostTable({ rows }) {
+  if (!rows.length) return <Empty />;
+
+  // Group rows logically by hierarchical category.
+  // The query returns `a.path` which corresponds to the account hierarchy (e.g. 1000/2000A/2007)
+  const grouped = {};
+  let totalNet = 0;
+
+  rows.forEach(r => {
+    let category = 'Other Assets / Expenses';
+    const p = r.path || '';
+    if (p.includes('/2000A')) category = 'Fixed Assets';
+    else if (p.includes('/2000')) category = 'Inventory';
+    else if (p.includes('/1000C') || r.type === 'asset') category = 'Other Assets';
+    else if (r.type === 'expense') category = 'Pre-operative Expenses';
+    
+    if (!grouped[category]) grouped[category] = [];
+    grouped[category].push(r);
+    totalNet += Number(r.net || 0);
+  });
+
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+      <thead><tr>
+        <th style={th}>Account</th>
+        <th style={th}>Type</th>
+        <th style={th}>Cost Centre</th>
+        <th style={{ ...th, textAlign: 'right' }}>Addition (Net)</th>
+      </tr></thead>
+      <tbody>
+        {Object.entries(grouped).map(([category, items]) => (
+          <React.Fragment key={category}>
+            <tr>
+              <td colSpan={4} style={{ padding: '12px 10px 4px', fontSize: 14, fontWeight: 700, color: 'var(--brand)', borderBottom: '1px solid var(--g200)' }}>
+                {category}
+              </td>
+            </tr>
+            {items.map((r, i) => (
+              <tr key={i}>
+                <td style={td}>{r.account_code} {r.account_name}</td>
+                <td style={td}>{r.type}</td>
+                <td style={td}>{r.cost_center_code} — {r.cost_center_name}</td>
+                <td style={tdNum}>{money(r.net)}</td>
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={3} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
+              <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
+            </tr>
+          </React.Fragment>
+        ))}
+        <tr>
+          <td colSpan={3} style={{ padding: '16px 10px', fontWeight: 800, fontSize: 16, textAlign: 'right' }}>Grand Total Project Cost</td>
+          <td style={{ padding: '16px 10px', fontWeight: 800, fontSize: 16, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--green)' }}>
+            {money(totalNet)}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
 }
