@@ -57,12 +57,15 @@ export default function CostCenterReportsPage() {
 
   return (
     <div className="grid-page" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         {VIEWS.map(v => (
           <button key={v.key}
             className={`btn ${view === v.key ? 'btn-primary' : ''}`}
             onClick={() => { setView(v.key); setRows([]); }}>{v.label}</button>
         ))}
+        
+        <div style={{ flex: 1 }} />
+        
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
           {view === 'report' && (
             <>
