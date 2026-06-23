@@ -34,9 +34,9 @@ router.get('/', async (req, res) => {
       SELECT t.*, u.first_name, u.last_name 
       FROM inventory_templates t
       LEFT JOIN users u ON t.created_by = u.id
-      LEFT JOIN template_shares ts ON t.id = ts.template_id
-      WHERE t.created_by = $1 OR ts.user_id = $1 OR t.is_global = true
-      GROUP BY t.id, u.first_name, u.last_name
+      WHERE t.created_by = $1 
+         OR t.is_global = true
+         OR t.id IN (SELECT template_id FROM template_shares WHERE user_id = $1)
       ORDER BY t.created_at DESC
     `;
     const result = await pool.query(q, [userId]);
