@@ -4,11 +4,11 @@ import { useNavigate, Link, useParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import DataGrid from '../../../shared/components/DataGrid';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
-import { Plus, Receipt, Trash2, Save } from 'lucide-react';
+import { Plus, Receipt, X, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
-  FormSectionCard, SideSummaryPanel
+  FormSectionCard, NotesAttachmentsPanel
 } from '../../../core/layout';
 import DatePicker from '../../../shared/components/DatePicker';
 
@@ -222,194 +222,208 @@ export const VendorBillForm = () => {
           ]}
           backTo="/bills"
           backLabel="Vendor Bills"
-          auditMeta={isEdit ? `Dated: ${fmtDate(form.doc_date)}` : undefined}
+          auditMeta={isEdit ? `Dated: ${fmtDate(form.doc_date)}` : (grandTotal > 0 ? `Total: ₹${fmt(grandTotal)}` : undefined)}
         />
       }
       footer={!isEdit && (
         <StickyActionFooter
           left={<button className="btn" onClick={() => navigate('/bills')}>Cancel</button>}
+          hint={grandTotal > 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--g600)' }}>
+              Vendor Bill &nbsp;·&nbsp; Total: <strong style={{ color: 'var(--brand-dark)', fontFamily: 'var(--mono)' }}>₹{fmt(grandTotal)}</strong>
+            </span>
+          ) : undefined}
           right={
             <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
-              <Save size={14} /> {loading ? 'Saving...' : 'Save Bill'}
+              <Save size={13} /> {loading ? 'Posting...' : 'Save & Post JE'}
             </button>
           }
         />
       )}
     >
-      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          <FormSectionCard title="Bill Details">
-            <div className="grid col-2">
-              <div className="form-group">
-                <label>Vendor <span>*</span></label>
-                <SelectDropdown 
-                  value={String(form.vendor_id || '')} 
-                  onChange={e => setForm({ ...form, vendor_id: e.target.value })} 
-                  disabled={isEdit} 
-                >
-                  <option value="">- Select Vendor -</option>
-                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </SelectDropdown>
-              </div>
-              <div className="form-group">
-                <label>Date <span>*</span></label>
-                <DatePicker 
-                  value={form.doc_date} 
-                  onChange={v => setForm({ ...form, doc_date: v })} 
-                  disabled={isEdit} 
-                />
-              </div>
-              <div className="form-group">
-                <label>Reference No</label>
-                <input 
-                  value={form.reference_no} 
-                  onChange={e => setForm({ ...form, reference_no: e.target.value })} 
-                  disabled={isEdit} 
-                />
-              </div>
-              <div className="form-group">
-                <label>Department</label>
-                <SelectDropdown 
-                  value={String(form.department_id || '')} 
-                  onChange={e => setForm({ ...form, department_id: e.target.value })} 
-                  disabled={isEdit} 
-                >
-                  <option value="">-- None --</option>
-                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </SelectDropdown>
-              </div>
-              <div className="form-group">
-                <label>Cost Center</label>
-                <SelectDropdown 
-                  value={String(form.cost_center_id || '')} 
-                  onChange={e => setForm({ ...form, cost_center_id: e.target.value })} 
-                  disabled={isEdit} 
-                >
-                  <option value="">-- None --</option>
-                  {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </SelectDropdown>
-              </div>
-              <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label>Memo / Remark</label>
-                <input 
-                  value={form.remark} 
-                  onChange={e => setForm({ ...form, remark: e.target.value })} 
-                  disabled={isEdit} 
-                />
-              </div>
-            </div>
-          </FormSectionCard>
-
-          <FormSectionCard title="Expense Lines">
-            <div className="table-wrapper">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 40, textAlign: 'center' }}>#</th>
-                    <th>Category (Account) *</th>
-                    <th>Description</th>
-                    <th style={{ width: 140 }}>Department</th>
-                    <th style={{ width: 140 }}>Cost Center</th>
-                    <th style={{ width: 120, textAlign: 'right' }}>Amount *</th>
-                    {!isEdit && <th style={{ width: 40 }}></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line, idx) => (
-                    <tr key={idx}>
-                      <td style={{ textAlign: 'center', color: 'var(--g500)' }}>{idx + 1}</td>
-                      <td>
-                        <SelectDropdown 
-                          value={String(line.expense_account_id || '')} 
-                          onChange={e => updateLine(idx, 'expense_account_id', e.target.value)} 
-                          disabled={isEdit} 
-                        >
-                          <option value="">- Select Category -</option>
-                          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </SelectDropdown>
-                      </td>
-                      <td>
-                        <input 
-                          value={line.description} 
-                          onChange={e => updateLine(idx, 'description', e.target.value)} 
-                          disabled={isEdit} 
-                        />
-                      </td>
-                      <td>
-                        <SelectDropdown 
-                          value={String(line.department_id || '')} 
-                          onChange={e => updateLine(idx, 'department_id', e.target.value)} 
-                          disabled={isEdit} 
-                        >
-                          <option value="">Default</option>
-                          {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                        </SelectDropdown>
-                      </td>
-                      <td>
-                        <SelectDropdown 
-                          value={String(line.cost_center_id || '')} 
-                          onChange={e => updateLine(idx, 'cost_center_id', e.target.value)} 
-                          disabled={isEdit} 
-                        >
-                          <option value="">Default</option>
-                          {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </SelectDropdown>
-                      </td>
-                      <td>
-                        <input 
-                          type="number" 
-                          value={line.amount} 
-                          onChange={e => updateLine(idx, 'amount', e.target.value)} 
-                          style={{ textAlign: 'right' }} 
-                          disabled={isEdit} 
-                        />
-                      </td>
-                      {!isEdit && (
-                        <td style={{ textAlign: 'center' }}>
-                          <button className="btn-icon" onClick={() => removeLine(idx)} style={{ color: 'var(--red)' }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                  {!isEdit && (
-                    <tr>
-                      <td colSpan={7} style={{ background: '#fafafa', padding: '8px 12px' }}>
-                        <button className="btn btn-sm" onClick={() => setLines([...lines, newLine()])}>
-                          <Plus size={14} /> Add Line
-                        </button>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </FormSectionCard>
-          
+      <FormSectionCard title="Payment Details" icon={<Receipt size={13} />}>
+        <div className="form-row">
+          <div className="fg w" style={{ minWidth: 240 }}>
+            <label>Vendor *</label>
+            <SelectDropdown 
+              value={String(form.vendor_id || '')} 
+              onChange={e => setForm({ ...form, vendor_id: e.target.value })} 
+              disabled={isEdit} 
+            >
+              <option value="">- Select Vendor -</option>
+              {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </SelectDropdown>
+          </div>
+          <div className="fg w" style={{ minWidth: 220 }}>
+            <label>Department</label>
+            <SelectDropdown 
+              value={String(form.department_id || '')} 
+              onChange={e => setForm({ ...form, department_id: e.target.value })} 
+              disabled={isEdit} 
+            >
+              <option value="">-- None --</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </SelectDropdown>
+          </div>
+          <div className="fg w" style={{ minWidth: 220 }}>
+            <label>Cost Center</label>
+            <SelectDropdown 
+              value={String(form.cost_center_id || '')} 
+              onChange={e => setForm({ ...form, cost_center_id: e.target.value })} 
+              disabled={isEdit} 
+            >
+              <option value="">-- None --</option>
+              {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </SelectDropdown>
+          </div>
         </div>
+        <div className="form-row">
+          <div className="fg">
+            <label>Date *</label>
+            <DatePicker 
+              value={form.doc_date} 
+              onChange={v => setForm({ ...form, doc_date: v })} 
+              disabled={isEdit} 
+            />
+          </div>
+          <div className="fg" style={{ minWidth: 180 }}>
+            <label>Reference No</label>
+            <input 
+              value={form.reference_no} 
+              onChange={e => setForm({ ...form, reference_no: e.target.value })} 
+              disabled={isEdit} 
+            />
+          </div>
+        </div>
+      </FormSectionCard>
 
-        <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <SideSummaryPanel
-            title="Bill Summary"
-            items={[
-              { label: 'Total Amount', value: `₹${fmt(grandTotal)}`, isTotal: true },
-            ]}
-          />
-          {isEdit && detailData?.status !== 'cancelled' && (
-            <div className="card" style={{ padding: 16 }}>
-              <button 
-                className="btn btn-block" 
-                style={{ color: 'var(--red)', borderColor: 'var(--red)', justifyContent: 'center' }}
-                onClick={handleCancelBill}
-              >
-                Cancel Bill
+      <FormSectionCard
+        title="Expense Lines"
+        icon={<Receipt size={13} />}
+        noPad
+        actions={
+          !isEdit && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {grandTotal > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--g600)', fontFamily: 'var(--mono)' }}>
+                  ₹{fmt(grandTotal)}
+                </span>
+              )}
+              <button className="btn btn-sm btn-primary" onClick={() => setLines([...lines, newLine()])}>
+                <Plus size={11} /> Add Line
               </button>
             </div>
+          )
+        }
+      >
+        <table className="je-lines-table">
+          <thead>
+            <tr>
+              <th style={{ width: 32 }}>#</th>
+              <th style={{ minWidth: 160 }}>Category *</th>
+              <th>Description</th>
+              <th style={{ width: 110 }}>Department</th>
+              <th style={{ width: 140 }}>Cost Center</th>
+              <th style={{ width: 130, textAlign: 'right' }}>Amount (₹) *</th>
+              <th style={{ width: 36 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line, idx) => (
+              <tr key={idx}>
+                <td style={{ textAlign: 'center', color: 'var(--g500)', fontSize: 11 }}>{idx + 1}</td>
+                <td>
+                  <SelectDropdown 
+                    value={String(line.expense_account_id || '')} 
+                    onChange={e => updateLine(idx, 'expense_account_id', e.target.value)} 
+                    disabled={isEdit} 
+                  >
+                    <option value="">- Select Category -</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </SelectDropdown>
+                </td>
+                <td>
+                  <input 
+                    value={line.description} 
+                    onChange={e => updateLine(idx, 'description', e.target.value)} 
+                    placeholder="What is this for?"
+                    disabled={isEdit} 
+                  />
+                </td>
+                <td>
+                  <SelectDropdown 
+                    value={String(line.department_id || '')} 
+                    onChange={e => updateLine(idx, 'department_id', e.target.value)} 
+                    disabled={isEdit} 
+                  >
+                    <option value="">Default</option>
+                    {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </SelectDropdown>
+                </td>
+                <td>
+                  <SelectDropdown 
+                    value={String(line.cost_center_id || '')} 
+                    onChange={e => updateLine(idx, 'cost_center_id', e.target.value)} 
+                    disabled={isEdit} 
+                  >
+                    <option value="">Default</option>
+                    {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </SelectDropdown>
+                </td>
+                <td>
+                  <input 
+                    type="number" 
+                    value={line.amount} 
+                    onChange={e => updateLine(idx, 'amount', e.target.value)} 
+                    placeholder="0.00"
+                    min="0"
+                    step="0.01"
+                    style={{ textAlign: 'right' }} 
+                    disabled={isEdit} 
+                  />
+                </td>
+                <td>
+                  {!isEdit && lines.length > 1 && (
+                    <button className="icon-btn" onClick={() => removeLine(idx)} title="Remove line">
+                      <X size={12} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {lines.length > 1 && (
+            <tfoot>
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12 }}>
+                  Expense Total
+                </td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13 }}>
+                  ₹{fmt(grandTotal)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
           )}
+        </table>
+      </FormSectionCard>
+
+      <NotesAttachmentsPanel
+        value={form.remark}
+        onChange={e => setForm({ ...form, remark: e.target.value })}
+      />
+
+      {isEdit && detailData?.status !== 'cancelled' && (
+        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+          <button 
+            className="btn" 
+            style={{ color: 'var(--red)', borderColor: 'var(--red)' }}
+            onClick={handleCancelBill}
+          >
+            Cancel Bill
+          </button>
         </div>
-      </div>
+      )}
     </TransactionPageLayout>
   );
 };
