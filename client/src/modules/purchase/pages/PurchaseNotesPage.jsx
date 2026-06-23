@@ -285,6 +285,7 @@ export function PurchaseNoteForm() {
           dim_depth: l.dim_depth ?? '',
           dim_height: l.dim_height ?? '',
           dim_unit: l.dim_unit ?? 'mm',
+          lot_number: l.lot_number ?? '',
         })));
       }).catch((err) => {
         if (!ignore) {
