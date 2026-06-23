@@ -11,7 +11,13 @@ const { logger } = require('../middleware/logger');
 const router = express.Router();
 
 // Auto-migrate missing column if it doesn't exist
-pool.query('ALTER TABLE purchase_notes ADD COLUMN cost_center_id INT').catch(() => {});
+pool.query('ALTER TABLE purchase_notes ADD COLUMN cost_center_id INT').catch(() => {}).finally(() => {
+  pool.query(`
+    UPDATE purchase_notes 
+    SET cost_center_id = (SELECT id FROM cost_centers WHERE name ILIKE '%CC01%' LIMIT 1) 
+    WHERE cost_center_id IS NULL
+  `).catch(() => {});
+});
 
 
 const { getAccountByRole } = require('../services/accountResolver');
