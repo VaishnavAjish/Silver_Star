@@ -148,10 +148,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     // Accounts Payable
     const apAccount = await accountResolver.getAccountByRole('ACCOUNTS_PAYABLE', client);
-    if (!apAccount) throw new Error('Accounts Payable role not mapped in Chart of Accounts');
+    if (!apAccount) throw new Error('Accounts Payable role not configured');
 
     jeLines.push({
-      accountId: apAccount.id,
+      accountId: apAccount,
       debit: 0,
       credit: grandTotal,
       narration: `Vendor Bill ${docNumber}`
