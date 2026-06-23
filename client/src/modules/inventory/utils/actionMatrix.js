@@ -167,7 +167,7 @@ function noFlags() {
  */
 export function getAllowedActions(lot) {
   if (!lot) return toFlags([]); // floor: a missing lot still permits read-only intent
-  const category = normalizeCategory(lot.category);
+  const category = normalizeCategory(lot.category || lot.item_category);
   const status = normalizeStatus(lot.status);
   const granted = (MATRIX[category] && MATRIX[category][status]) || [];
   return toFlags(granted);

@@ -610,10 +610,12 @@ export default function InventoryPage() {
         return row.root_lot_name
           ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--g600)' }}>{row.root_lot_name}</span>
           : '—';
-      case 'category':
-        return row.category
-          ? <span className={`badge ${catBadge[row.category] || 'b-draft'}`}>{row.category}</span>
+      case 'category': {
+        const cat = row.category || row.item_category;
+        return cat
+          ? <span className={`badge ${catBadge[cat] || 'b-draft'}`}>{cat}</span>
           : '—';
+      }
       case 'current_process_name':
         return row.status === 'IN PROCESS' && row.current_process_name
           ? <span className="badge" style={{ background: '#E0F2FE', color: '#0369A1', borderColor: '#BAE6FD' }}>{row.current_process_name}</span>
