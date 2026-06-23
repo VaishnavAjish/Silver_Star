@@ -296,6 +296,7 @@ app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
 app.use('/api/vendor-advances', require('./routes/vendorAdvances'));
+app.use('/api/inventory-templates', require('./routes/inventoryTemplates'));
 
 
 // ── Metrics (admin only) ──────────────────────────────────────────────────

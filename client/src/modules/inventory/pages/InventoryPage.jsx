@@ -126,8 +126,27 @@ export default function InventoryPage() {
   const [userTemplates, setUserTemplates] = useState(loadUserTemplates);
   const [colOverrides, setColOverrides] = useState(loadColOverrides);
   const [defaultTemplateId, setDefaultTemplateId] = useState(
-    () => localStorage.getItem('inv_default_template') || 'basic'
-  );
+  const [dbTemplates, setDbTemplates] = useState([]);
+
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await api.get('/api/inventory-templates');
+      if (Array.isArray(res)) {
+        setDbTemplates(res);
+        setUserTemplates(res.map(t => ({
+          id: t.id.toString(),
+          label: t.name,
+          cols: t.columns_config,
+          filters: t.filters_config,
+          isSystem: false,
+          isGlobal: t.is_global,
+          author: t.first_name ? `${t.first_name} ${t.last_name || ''}`.trim() : null
+        })));
+      }
+    } catch (err) { console.error(err); }
+  }, [api]);
+
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
   const [showLayoutPanel, setShowLayoutPanel] = useState(false);
   const [mixSelected, setMixSelected] = useState(new Set());
@@ -432,54 +451,89 @@ export default function InventoryPage() {
   const handleTemplateSelect = id => {
     setActiveTemplateId(id);
     localStorage.setItem('inv_active_template_v2', id);
+    const tmpl = allTemplates.find(t => t.id === id);
+    if (tmpl && tmpl.filters) {
+      const f = tmpl.filters;
+      setSearch(f.search || ''); setSearchInput(f.search || '');
+      setCatFilter(f.catFilter || ''); setStatusFilt(f.statusFilt || '');
+      setOpType(f.opType || ''); setProcessFilter(f.processFilter || '');
+      setSortBy(f.sortBy || 'lot_op_id'); setSortDir(f.sortDir || 'desc');
+      setDateFrom(f.dateFrom || ''); setDateTo(f.dateTo || '');
+      setMixOnly(!!f.mixOnly); setSplitOnly(!!f.splitOnly);
+      setVendorFilter(f.vendorFilter || ''); setLocationFilter(f.locationFilter || '');
+      setAccountBaseFilter(f.accountBaseFilter || '');
+      setQtyMin(f.qtyMin || ''); setQtyMax(f.qtyMax || '');
+      setWeightMin(f.weightMin || ''); setWeightMax(f.weightMax || '');
+    }
   };
 
-  const handleSaveAsNew = name => {
-    const id = `user_${Date.now()}`;
-    const newTmpl = { id, label: name, cols: activeColKeys, isSystem: false };
-    const next = [...userTemplates, newTmpl];
-    setUserTemplates(next);
-    localStorage.setItem('inv_user_templates_v2', JSON.stringify(next));
-    handleTemplateSelect(id);
+  const getCurrentFilters = () => ({
+    search, catFilter, statusFilt, opType, processFilter, sortBy, sortDir, 
+    dateFrom, dateTo, mixOnly, splitOnly, vendorFilter, locationFilter, 
+    accountBaseFilter, qtyMin, qtyMax, weightMin, weightMax
+  });
+
+  const handleSaveAsNew = async name => {
+    const res = await toast.promise(api.post('/api/inventory-templates', {
+      name,
+      columns_config: activeColKeys,
+      filters_config: getCurrentFilters(),
+      is_global: false
+    }), { loading: 'Saving template...', success: 'Template saved', error: 'Failed to save' });
+    if (res) {
+      await fetchTemplates();
+      handleTemplateSelect(res.id.toString());
+    }
   };
 
-  const handleUpdateTemplate = id => {
+  const handleUpdateTemplate = async id => {
     const isUser = userTemplates.find(t => t.id === id);
     if (!isUser) return;
-    const next = userTemplates.map(t => t.id === id ? { ...t, cols: activeColKeys } : t);
-    setUserTemplates(next);
-    localStorage.setItem('inv_user_templates_v2', JSON.stringify(next));
-    const nextOverrides = { ...colOverrides };
-    delete nextOverrides[id];
-    setColOverrides(nextOverrides);
-    localStorage.setItem('inv_col_overrides_v2', JSON.stringify(nextOverrides));
+    const res = await toast.promise(api.put(`/api/inventory-templates/${id}`, {
+      columns_config: activeColKeys,
+      filters_config: getCurrentFilters()
+    }), { loading: 'Updating...', success: 'Template updated', error: 'Failed to update' });
+    if (res) {
+      const nextOverrides = { ...colOverrides };
+      delete nextOverrides[id];
+      setColOverrides(nextOverrides);
+      localStorage.setItem('inv_col_overrides_v2', JSON.stringify(nextOverrides));
+      fetchTemplates();
+    }
   };
 
-  const handleDeleteTemplate = id => {
+  const handleDeleteTemplate = async id => {
     if (SYSTEM_TEMPLATES[id]) return;
-    const next = userTemplates.filter(t => t.id !== id);
-    setUserTemplates(next);
-    localStorage.setItem('inv_user_templates_v2', JSON.stringify(next));
+    await toast.promise(api.delete(`/api/inventory-templates/${id}`), {
+      loading: 'Deleting...', success: 'Template deleted', error: 'Failed to delete'
+    });
+    await fetchTemplates();
     if (activeTemplateId === id) handleTemplateSelect(defaultTemplateId || 'basic');
   };
 
-  const handleDuplicateTemplate = id => {
+  const handleDuplicateTemplate = async id => {
     const tmpl = allTemplates.find(t => t.id === id);
     if (!tmpl) return;
-    const newId = `user_${Date.now()}`;
     const cols = colOverrides[id] || tmpl.cols || SYSTEM_TEMPLATES.basic.cols;
-    const newTmpl = { id: newId, label: `${tmpl.label} (copy)`, cols, isSystem: false };
-    const next = [...userTemplates, newTmpl];
-    setUserTemplates(next);
-    localStorage.setItem('inv_user_templates_v2', JSON.stringify(next));
-    handleTemplateSelect(newId);
+    const filters = tmpl.filters || getCurrentFilters();
+    const res = await toast.promise(api.post('/api/inventory-templates', {
+      name: `${tmpl.label} (copy)`,
+      columns_config: cols,
+      filters_config: filters,
+      is_global: false
+    }), { loading: 'Duplicating...', success: 'Template duplicated', error: 'Failed to duplicate' });
+    if (res) {
+      await fetchTemplates();
+      handleTemplateSelect(res.id.toString());
+    }
   };
 
-  const handleRenameTemplate = (id, newName) => {
+  const handleRenameTemplate = async (id, newName) => {
     if (SYSTEM_TEMPLATES[id]) return;
-    const next = userTemplates.map(t => t.id === id ? { ...t, label: newName } : t);
-    setUserTemplates(next);
-    localStorage.setItem('inv_user_templates_v2', JSON.stringify(next));
+    await toast.promise(api.put(`/api/inventory-templates/${id}`, { name: newName }), {
+      loading: 'Renaming...', success: 'Template renamed', error: 'Failed to rename'
+    });
+    fetchTemplates();
   };
 
   const handleSetDefault = id => {

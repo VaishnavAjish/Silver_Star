@@ -147,6 +147,9 @@ export default function UserDrawer({ user, onClose, onSaved }) {
   const [departments, setDepartments] = useState([]);
   const [allRoles, setAllRoles] = useState([]);
   const [assignedRoleIds, setAssignedRoleIds] = useState([]);
+  const [myTemplates, setMyTemplates] = useState([]);
+  const [selectedTemplateToShare, setSelectedTemplateToShare] = useState('');
+  const [sharingTemplate, setSharingTemplate] = useState(false);
 
   // Submodule permission matrix (effective from roles, editable)
   const [effectivePerms, setEffectivePerms] = useState({}); // { 'module:submodule': bitmask }
@@ -172,9 +175,11 @@ export default function UserDrawer({ user, onClose, onSaved }) {
       apiRef.current.get(`/api/admin/users/${user.id}/preferences`),
       apiRef.current.get('/api/departments', { limit: 500, offset: 0 }).then(r => Array.isArray(r) ? r : (r?.data || [])).catch(() => []),
       apiRef.current.get('/api/roles').then(r => (r?.data || [])).catch(() => []),
-    ]).then(async ([prefRows, deptData, rolesData]) => {
+      apiRef.current.get('/api/inventory-templates').catch(() => []),
+    ]).then(async ([prefRows, deptData, rolesData, myTmplData]) => {
       setDepartments(deptData || []);
       setAllRoles(rolesData || []);
+      setMyTemplates(Array.isArray(myTmplData) ? myTmplData : []);
       const p = { ...PREF_DEFAULTS };
       prefRows.forEach(r => { p[r.pref_key] = r.pref_value; });
       setPrefs(p);
@@ -278,6 +283,22 @@ export default function UserDrawer({ user, onClose, onSaved }) {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleShareTemplate = async () => {
+    if (!selectedTemplateToShare) return toast.error('Select a template to share');
+    setSharingTemplate(true);
+    try {
+      await apiRef.current.post(`/api/inventory-templates/${selectedTemplateToShare}/share`, {
+        target_user_id: user.id
+      });
+      toast.success('Template shared successfully');
+      setSelectedTemplateToShare('');
+    } catch (err) {
+      toast.error(err.message || 'Failed to share template');
+    } finally {
+      setSharingTemplate(false);
     }
   };
 
@@ -424,6 +445,35 @@ export default function UserDrawer({ user, onClose, onSaved }) {
                       </SelectDropdown>
                     </div>
                   </div>
+                  
+                  {/* Share Template UI */}
+                  {['admin', 'super_admin'].includes(me?.role) && !isSelf && (
+                    <div style={{ marginTop: 24, padding: '16px', background: 'var(--g50)', borderRadius: 8, border: '1px solid var(--g200)' }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--g800)' }}>Share Inventory Template</h4>
+                      <p style={{ fontSize: 11, color: 'var(--g500)', marginBottom: 12 }}>
+                        Share one of your inventory templates with this user.
+                      </p>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <SelectDropdown 
+                          value={selectedTemplateToShare} 
+                          onChange={e => setSelectedTemplateToShare(e.target.value)}
+                          style={{ flex: 1 }}
+                        >
+                          <option value="">— Select Template —</option>
+                          {myTemplates.filter(t => !t.is_global).map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </SelectDropdown>
+                        <button 
+                          className="btn btn-primary" 
+                          onClick={handleShareTemplate}
+                          disabled={!selectedTemplateToShare || sharingTemplate}
+                        >
+                          {sharingTemplate ? 'Sharing...' : 'Share Template'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
