@@ -213,6 +213,7 @@ app.use(['/api/rough', '/api/rough-growth'], roughRoutes);
 app.use('/api/growth-runs', growthRunRoutes);
 app.use('/api/fixed-assets', fixedAssetRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/expense-bills', require('./routes/expenseBills'));
 app.use('/api/payments', paymentRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/bank-deposits', bankDepositRoutes);

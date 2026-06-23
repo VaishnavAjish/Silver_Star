@@ -23,8 +23,9 @@ router.get('/', authenticate, async (req, res) => {
     let idx = 1;
 
     if (category) {
-      conditions.push(`ec.name ILIKE $${idx++}`);
+      conditions.push(`(ec.name ILIKE $${idx} OR a_cat.name ILIKE $${idx})`);
       params.push(category);
+      idx++;
     }
     if (method) {
       conditions.push(`e.payment_mode = $${idx++}`);
@@ -52,9 +53,10 @@ router.get('/', authenticate, async (req, res) => {
     params.push(limit, offset);
     const [dataR, countR] = await Promise.all([
       pool.query(
-        `SELECT e.*, ec.name as category_name, d.name as dept_name,
+        `SELECT e.*, COALESCE(a_cat.name, ec.name) as category_name, d.name as dept_name,
                 a.name as payment_account_name, v.name as vendor_name
          FROM expenses e
+         LEFT JOIN accounts a_cat ON e.category_id = a_cat.id AND a_cat.type = 'expense'
          LEFT JOIN expense_categories ec ON e.category_id = ec.id
          LEFT JOIN departments d ON e.department_id = d.id
          LEFT JOIN accounts a ON e.payment_account_id = a.id
@@ -66,6 +68,7 @@ router.get('/', authenticate, async (req, res) => {
       ),
       pool.query(
         `SELECT COUNT(*) FROM expenses e
+         LEFT JOIN accounts a_cat ON e.category_id = a_cat.id AND a_cat.type = 'expense'
          LEFT JOIN expense_categories ec ON e.category_id = ec.id
          LEFT JOIN departments d ON e.department_id = d.id
          ${where}`,
@@ -192,11 +195,19 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     for (const line of lines) {
       if (!line.category_id) throw new Error('Each expense line must have a category');
       if (catGlMap[line.category_id] === undefined) {
-        const catR = await client.query(
-          'SELECT gl_account_id FROM expense_categories WHERE id = $1',
-          [parseInt(line.category_id)]
+        const accR = await client.query(
+          'SELECT id FROM accounts WHERE id = $1 AND type = $2',
+          [parseInt(line.category_id), 'expense']
         );
-        catGlMap[line.category_id] = catR.rows[0]?.gl_account_id || null;
+        if (accR.rows.length) {
+          catGlMap[line.category_id] = accR.rows[0].id;
+        } else {
+          const catR = await client.query(
+            'SELECT gl_account_id FROM expense_categories WHERE id = $1',
+            [parseInt(line.category_id)]
+          );
+          catGlMap[line.category_id] = catR.rows[0]?.gl_account_id || null;
+        }
       }
       const expAccId = catGlMap[line.category_id];
       if (!expAccId) throw new Error(`Expense category ${line.category_id} has no GL account mapped`);
@@ -334,13 +345,14 @@ router.get('/:id', authenticate, async (req, res) => {
     const [expR, linesR, allocR] = await Promise.all([
       pool.query(
         `SELECT e.*,
-                ec.name  AS category_name,
+                COALESCE(a_cat.name, ec.name)  AS category_name,
                 d.name   AS dept_name,
                 a.name   AS payment_account_name,
                 a.code   AS payment_account_code,
                 v.name   AS vendor_name, v.code AS vendor_code,
                 je.je_number
          FROM   expenses e
+         LEFT JOIN accounts a_cat ON e.category_id = a_cat.id AND a_cat.type = 'expense'
          LEFT JOIN expense_categories ec ON e.category_id = ec.id
          LEFT JOIN departments        d  ON e.department_id = d.id
          LEFT JOIN accounts           a  ON e.payment_account_id = a.id
@@ -350,10 +362,11 @@ router.get('/:id', authenticate, async (req, res) => {
       ),
       pool.query(
         `SELECT el.*,
-                ec.name AS category_name,
+                COALESCE(a_cat.name, ec.name) AS category_name,
                 d.name  AS dept_name,
                 cc.name AS cost_center_name
          FROM   expense_lines     el
+         LEFT JOIN accounts a_cat ON el.category_id = a_cat.id AND a_cat.type = 'expense'
          LEFT JOIN expense_categories ec ON el.category_id = ec.id
          LEFT JOIN departments        d  ON el.department_id = d.id
          LEFT JOIN cost_centers       cc ON el.cost_center_id = cc.id

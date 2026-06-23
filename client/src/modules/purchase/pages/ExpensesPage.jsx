@@ -223,7 +223,9 @@ export default function ExpensesPage() {
   const [detailId, setDetailId] = useState(null);
 
   useEffect(() => {
-    api.get('/api/expense-categories?limit=100').then(r => setCategories(r.data || [])).catch(() => {});
+    api.get('/api/accounts?status=ACTIVE&type=expense&is_group=false')
+       .then(r => setCategories((r || []).filter(a => a.is_posting)))
+       .catch(() => {});
     api.get('/api/departments?limit=100').then(r => setDepartments(r.data || [])).catch(() => {});
   }, []);
 
@@ -361,7 +363,9 @@ export function ExpenseForm() {
 
   // ── Load master data ──────────────────────────────────────────────────────
   useEffect(() => {
-    api.get('/api/expense-categories?limit=100').then(r => setCategories(r.data || [])).catch(() => {});
+    api.get('/api/accounts?status=ACTIVE&type=expense&is_group=false')
+       .then(r => setCategories((r || []).filter(a => a.is_posting)))
+       .catch(() => {});
     api.get('/api/accounts?is_group=false&status=active').then(r => setAccounts(Array.isArray(r) ? r : (r.data || []))).catch(() => {});
     api.get('/api/vendors?limit=300').then(r => setVendors(r.data || [])).catch(() => {});
     api.get('/api/departments?limit=100').then(r => setDepts(r.data || [])).catch(() => {});

@@ -46,6 +46,7 @@ export const NAV = [
   {
     label: 'Purchase', icon: ShoppingCart, module: 'purchase', children: [
       { label: 'Vendors', path: '/vendors' },
+      { label: 'Vendor Bills', path: '/bills' },
       { label: 'Purchase Notes', path: '/purchase-notes' },
       { label: 'New Purchase Note', path: '/purchase-notes/new', editorOnly: true },
       { label: 'Expenses', path: '/expenses' },
@@ -222,6 +223,7 @@ function LayoutInner() {
     '/inventory/process-issues': 'Process Issues',
     '/inventory/stock-transfer': 'Stock Transfer',
     '/inventory/process-issues/new': 'Start Process',
+    '/bills': 'Vendor Bills', '/bills/new': 'New Vendor Bill',
     '/purchase-notes': 'Purchase Notes', '/purchase-notes/new': 'New Purchase Note',
     '/expenses': 'Expenses', '/expenses/new': 'New Expense', '/rough-growth': 'Rough Growth',
     '/growth-runs': 'Growth Runs', '/manufacturing/growth-output': 'Growth Output',
