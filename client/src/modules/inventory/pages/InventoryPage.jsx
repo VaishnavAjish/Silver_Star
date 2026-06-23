@@ -527,7 +527,7 @@ export default function InventoryPage() {
 
   const handleDeleteTemplate = async id => {
     if (SYSTEM_TEMPLATES[id]) return;
-    await toast.promise(api.delete(`/api/inventory-templates/${id}`), {
+    await toast.promise(api.del(`/api/inventory-templates/${id}`), {
       loading: 'Deleting...', success: 'Template deleted', error: 'Failed to delete'
     });
     if (api.flushCache) api.flushCache();
