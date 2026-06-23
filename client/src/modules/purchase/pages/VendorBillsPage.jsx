@@ -93,9 +93,7 @@ export const VendorBillsPage = () => {
         filterFields={filterFields}
         onFilterChange={handleFilterChange}
         loading={loading}
-        title="Vendor Bills"
-        icon={<Receipt size={18} />}
-        actions={<button className="btn btn-primary" onClick={() => navigate('/purchase/bills/new')}><Plus size={14} /> New Bill</button>}
+        toolbarActions={<button className="btn btn-sm btn-primary" onClick={() => navigate('/purchase/bills/new')}><Plus size={13} /> New Bill</button>}
       />
     </div>
   );
