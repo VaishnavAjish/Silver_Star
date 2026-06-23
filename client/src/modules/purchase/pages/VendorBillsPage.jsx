@@ -66,7 +66,7 @@ export const VendorBillsPage = () => {
   ], []);
 
   const actions = useMemo(() => (
-    <button className="btn btn-sm btn-primary" onClick={() => navigate('new')}>
+    <button type="button" className="btn btn-primary" onClick={() => navigate('/bills/new')}>
       <Plus size={13} /> New Bill
     </button>
   ), [navigate]);
@@ -99,6 +99,7 @@ export const VendorBillsPage = () => {
         filterFields={filterFields}
         onFilterChange={handleFilterChange}
         loading={loading}
+        onRefresh={() => loadBills.current(page, filters)}
         toolbarActions={actions}
       />
     </div>

@@ -211,7 +211,7 @@ export default function DataGrid({
         )}
         {toolbarActions}
         {!hideRefresh && (
-          <button className="icon-btn" title="Refresh table" onClick={handleRefresh}
+          <button type="button" className="icon-btn" title="Refresh table" onClick={handleRefresh}
             style={spinning ? { animation: 'spin 0.7s linear infinite' } : undefined}>
             <RefreshCw size={14} />
           </button>
