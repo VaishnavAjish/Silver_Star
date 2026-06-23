@@ -143,7 +143,7 @@ export const VendorBillForm = () => {
   useEffect(() => {
     Promise.all([
       api.get('/api/vendors?limit=1000').then(res => setVendors(res.data)),
-      api.get('/api/accounts?type=expense&is_group=false').then(res => setAccounts(res.data)),
+      api.get('/api/accounts?status=active&is_group=false').then(res => setAccounts((Array.isArray(res) ? res : (res?.data || [])).filter(a => a.is_posting && a.type?.toLowerCase() === 'expense'))),
       api.get('/api/departments?limit=1000').then(res => setDepartments(res.data)),
       api.get('/api/cost-centers?limit=1000').then(res => setCostCenters(res.data))
     ]);
