@@ -246,6 +246,7 @@ export function PurchaseNoteForm() {
           currency: data.currency ?? 'INR',
           reference_no: data.reference_no ?? '',
           remark: data.remark ?? '',
+          cost_center_id: data.cost_center_id ?? '',
         });
         setVendors(prev => {
           if (data.vendor_id && !prev.find(v => v.id === data.vendor_id)) {
@@ -302,6 +303,9 @@ export function PurchaseNoteForm() {
   const totalTax    = (isView && lines.length === 0) ? (parseFloat(viewData?.tax_amount)   || 0) : calcTotalTax;
   const grandTotal  = (isView && lines.length === 0) ? (parseFloat(viewData?.grand_total)  || 0) : calcGrandTotal;
   const totalWeight = calcTotalWeight;
+
+  const calcTotalQty = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+  const totalQty = (isView && lines.length === 0) ? (parseFloat(viewData?.total_qty) || 0) : calcTotalQty;
 
   const filteredItems = items.filter(i => i.is_capital_asset || !form.item_type || i.category === form.item_type);
 
@@ -455,8 +459,8 @@ export function PurchaseNoteForm() {
               <th style={{ minWidth: 80 }}>Avg Wt</th>
               <th style={{ minWidth: 110 }}>Rate (₹)</th>
               <th style={{ minWidth: 120 }}>Amount</th>
-              <th style={{ minWidth: 70 }}>Tax %</th>
-              <th style={{ minWidth: 185 }}>Dimensions (seed)</th>
+              <th style={{ minWidth: 90 }}>Tax %</th>
+              <th style={{ minWidth: 230 }}>Dimensions (seed)</th>
               {!isView && <th style={{ width: 36 }}></th>}
             </tr>
           </thead>
@@ -541,24 +545,24 @@ export function PurchaseNoteForm() {
                   </td>
                   <td><input type="number" value={line.rate || ''} onChange={e => updateLine(idx, 'rate', e.target.value)} style={{ textAlign: 'right' }} disabled={isView} /></td>
                   <td className="num" style={{ fontWeight: 600 }}>₹{amt.toLocaleString('en-IN')}</td>
-                  <td><input type="number" value={line.tax_pct || 0} onChange={e => updateLine(idx, 'tax_pct', e.target.value)} style={{ textAlign: 'right', width: 50 }} disabled={isView} /></td>
+                  <td><input type="number" value={line.tax_pct || 0} onChange={e => updateLine(idx, 'tax_pct', e.target.value)} style={{ textAlign: 'right', width: 70, padding: '4px 6px' }} disabled={isView} /></td>
                   <td>
                     {selItem?.category === 'seed' ? (
                       <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                         <input type="number" placeholder="L" value={line.dim_length || ''} min="0"
                           onChange={e => updateLine(idx, 'dim_length', e.target.value)}
                           disabled={isView}
-                          style={{ width: 40, textAlign: 'right', padding: '2px 4px', fontSize: 11 }} />
+                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
                         <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
                         <input type="number" placeholder="D" value={line.dim_depth || ''} min="0"
                           onChange={e => updateLine(idx, 'dim_depth', e.target.value)}
                           disabled={isView}
-                          style={{ width: 40, textAlign: 'right', padding: '2px 4px', fontSize: 11 }} />
+                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
                         <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
                         <input type="number" placeholder="H" value={line.dim_height || ''} min="0"
                           onChange={e => updateLine(idx, 'dim_height', e.target.value)}
                           disabled={isView}
-                          style={{ width: 40, textAlign: 'right', padding: '2px 4px', fontSize: 11 }} />
+                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
                         <SelectDropdown value={line.dim_unit || 'mm'}
                           onChange={e => updateLine(idx, 'dim_unit', e.target.value)}
                           disabled={isView}
@@ -600,6 +604,7 @@ export function PurchaseNoteForm() {
             </div>
           )}
           {[
+            { label: 'Total Qty',   value: totalQty.toLocaleString('en-IN') },
             { label: 'Amount',      value: `₹${totalAmt.toLocaleString('en-IN')}` },
             { label: 'Tax',         value: `₹${Math.round(totalTax).toLocaleString('en-IN')}` },
             { label: 'Grand Total', value: `₹${Math.round(grandTotal).toLocaleString('en-IN')}`, bold: true },

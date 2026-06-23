@@ -79,8 +79,11 @@ router.get('/:id', authenticate, async (req, res) => {
     const header = pn.rows[0];
 
     let linesResult = await pool.query(
-      `SELECT pnl.*, i.name as item_name, i.code as item_code
-       FROM purchase_note_lines pnl LEFT JOIN items i ON pnl.item_id = i.id
+      `SELECT pnl.*, i.name as item_name, i.code as item_code,
+              inv.weight, inv.dim_length, inv.dim_depth, inv.dim_height, inv.dim_unit
+       FROM purchase_note_lines pnl 
+       LEFT JOIN items i ON pnl.item_id = i.id
+       LEFT JOIN inventory inv ON pnl.inventory_id = inv.id
        WHERE pnl.purchase_note_id = $1 ORDER BY pnl.line_no`,
       [req.params.id]
     );
