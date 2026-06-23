@@ -133,8 +133,8 @@ export default function InventoryPage() {
   const fetchTemplates = useCallback(async () => {
     try {
       // Migrate old localStorage templates
-      const oldLocalStr = localStorage.getItem('inv_templates');
-      const migrated = localStorage.getItem('inv_templates_migrated');
+      const oldLocalStr = localStorage.getItem('inv_user_templates_v2');
+      const migrated = localStorage.getItem('inv_templates_migrated_v2');
       if (oldLocalStr && !migrated) {
         try {
           const oldTemplates = JSON.parse(oldLocalStr);
@@ -147,7 +147,7 @@ export default function InventoryPage() {
               }).catch(() => {});
             }
           }
-          localStorage.setItem('inv_templates_migrated', 'true');
+          localStorage.setItem('inv_templates_migrated_v2', 'true');
         } catch (e) { console.error('Migration failed', e); }
       }
 
