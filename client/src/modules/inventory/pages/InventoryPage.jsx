@@ -126,8 +126,10 @@ export default function InventoryPage() {
   const [userTemplates, setUserTemplates] = useState(loadUserTemplates);
   const [colOverrides, setColOverrides] = useState(loadColOverrides);
   const [defaultTemplateId, setDefaultTemplateId] = useState(
-  const [dbTemplates, setDbTemplates] = useState([]);
+    () => localStorage.getItem('inv_default_template') || 'basic'
+  );
 
+  const [dbTemplates, setDbTemplates] = useState([]);
   const fetchTemplates = useCallback(async () => {
     try {
       const res = await api.get('/api/inventory-templates');
