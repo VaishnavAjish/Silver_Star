@@ -81,7 +81,7 @@ router.get('/', authenticate, async (req, res) => {
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const pn = await pool.query(
-      `SELECT pn.*, v.name as vendor_name, d.name as dept_name, cc.name as cost_center_name
+      `SELECT pn.*, v.name as vendor_name, d.name as dept_name, cc.name as cost_center_name, cc.code as cost_center_code
        FROM purchase_notes pn
        LEFT JOIN vendors v ON pn.vendor_id = v.id
        LEFT JOIN departments d ON pn.department_id = d.id

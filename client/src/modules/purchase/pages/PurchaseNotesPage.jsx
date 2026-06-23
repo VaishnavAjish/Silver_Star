@@ -253,7 +253,7 @@ export function PurchaseNoteForm() {
           reference_no: data.reference_no ?? '',
           remark: data.remark ?? '',
           cost_center_id: data.cost_center_id ?? '',
-          cost_center_name: data.cost_center_name ?? '',
+          cost_center_name: data.cost_center_name ? (data.cost_center_code ? `${data.cost_center_code} — ${data.cost_center_name}` : data.cost_center_name) : '',
         });
         setVendors(prev => {
           if (data.vendor_id && !prev.find(v => v.id === data.vendor_id)) {
@@ -428,7 +428,10 @@ export function PurchaseNoteForm() {
               <label>Cost Centre</label>
               {isView ? (
                 <input
-                  value={form.cost_center_name || costCenters.find(c => String(c.id) === String(form.cost_center_id))?.name || (form.cost_center_id ? `Cost Centre #${form.cost_center_id}` : '')}
+                  value={form.cost_center_name || (() => {
+                    const c = costCenters.find(cc => String(cc.id) === String(form.cost_center_id));
+                    return c ? (c.code ? `${c.code} — ${c.name}` : c.name) : (form.cost_center_id ? `Cost Centre #${form.cost_center_id}` : '');
+                  })()}
                   disabled
                 />
               ) : (
