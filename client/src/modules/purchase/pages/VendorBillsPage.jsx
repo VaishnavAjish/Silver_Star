@@ -218,7 +218,7 @@ export const VendorBillForm = () => {
           breadcrumbs={[
             { label: 'Purchase', href: '/bills' },
             { label: 'Vendor Bills', href: '/bills' },
-            { label: isEdit ? form.doc_number : 'New Bill' },
+            { label: isEdit ? form.doc_number : 'New Vendor Bill' },
           ]}
           backTo="/bills"
           backLabel="Vendor Bills"
