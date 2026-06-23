@@ -132,6 +132,25 @@ export default function InventoryPage() {
   const [dbTemplates, setDbTemplates] = useState([]);
   const fetchTemplates = useCallback(async () => {
     try {
+      // Migrate old localStorage templates
+      const oldLocalStr = localStorage.getItem('inv_templates');
+      const migrated = localStorage.getItem('inv_templates_migrated');
+      if (oldLocalStr && !migrated) {
+        try {
+          const oldTemplates = JSON.parse(oldLocalStr);
+          if (Array.isArray(oldTemplates)) {
+            for (const t of oldTemplates) {
+              await api.post('/api/inventory-templates', {
+                name: t.label || 'Migrated Template',
+                columns_config: t.cols || [],
+                filters_config: t.filters || {}
+              }).catch(() => {});
+            }
+          }
+          localStorage.setItem('inv_templates_migrated', 'true');
+        } catch (e) { console.error('Migration failed', e); }
+      }
+
       const res = await api.get('/api/inventory-templates');
       if (Array.isArray(res)) {
         setDbTemplates(res);
