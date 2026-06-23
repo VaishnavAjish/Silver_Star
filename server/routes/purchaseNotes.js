@@ -14,9 +14,13 @@ const router = express.Router();
 pool.query('ALTER TABLE purchase_notes ADD COLUMN cost_center_id INT').catch(() => {}).finally(() => {
   pool.query(`
     UPDATE purchase_notes 
-    SET cost_center_id = (SELECT id FROM cost_centers WHERE name ILIKE '%CC01%' LIMIT 1) 
+    SET cost_center_id = (
+      SELECT id FROM cost_centers 
+      WHERE code ILIKE '%CC01%' OR name ILIKE '%CC01%' OR name ILIKE '%Project Cost%' 
+      LIMIT 1
+    ) 
     WHERE cost_center_id IS NULL
-  `).catch(() => {});
+  `).catch(e => console.error('[Migration] Failed to assign CC01:', e));
 });
 
 
