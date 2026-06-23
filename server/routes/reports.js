@@ -13,51 +13,27 @@ router.get('/pnl', authenticate, async (req, res) => {
     if (!from_date) from_date = '1970-01-01';
     if (!to_date) to_date = new Date().toISOString().split('T')[0];
 
-    // Run all independent queries concurrently to speed up load time
-    // Use materialized view if available, fallback to direct query
-    const [ledgerR, purchasesR, closingInventory] = await Promise.all([
-      pool.query(`
-        SELECT a.id, a.code, a.name, a.type,
-               COALESCE(mv.total_credit, 0) as total_credit,
-               COALESCE(mv.total_debit, 0) as total_debit
-        FROM accounts a
-        LEFT JOIN mv_dashboard_financial mv ON mv.account_id = a.id
-          AND mv.month BETWEEN DATE_TRUNC('month', $1::date) AND DATE_TRUNC('month', $2::date)
-        WHERE a.type IN ('revenue', 'expense') AND a.is_group = false
-        GROUP BY a.id, a.code, a.name, a.type, mv.total_credit, mv.total_debit
-        ORDER BY a.code
-      `, [from_date, to_date]).catch(async () => {
-        // Fallback: materialized view not available
-        const result = await pool.query(`
-          WITH ledger AS (
-            SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
-            FROM je_lines jl
-            JOIN journal_entries je ON je.id = jl.je_id
-            WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
-            GROUP BY jl.account_id
-          )
-          SELECT a.id, a.code, a.name, a.type,
-                 COALESCE(l.total_credit, 0) as total_credit,
-                 COALESCE(l.total_debit, 0) as total_debit
-          FROM accounts a LEFT JOIN ledger l ON l.account_id = a.id
-          WHERE a.type IN ('revenue', 'expense') AND a.is_group = false
-          ORDER BY a.code
-        `, [from_date, to_date]);
-        return result;
-      }),
-      pool.query(
-        `SELECT COALESCE(SUM(pnl.amount), 0) AS value
-         FROM purchase_note_lines pnl
-         JOIN purchase_notes pn ON pn.id = pnl.purchase_note_id
-         WHERE pn.status != 'cancelled'
-           AND pn.doc_date BETWEEN $1 AND $2
-           AND COALESCE(pnl.is_capital, false) = false`,
-        [from_date, to_date]
-      ),
+    // Fetch GL balances via Trial Balance hierarchy and inventory valuations concurrently
+    const [roots, closingInventory] = await Promise.all([
+      buildTrialBalanceHierarchy(from_date, to_date),
       getInventoryValuation(to_date)
     ]);
 
-    // inventory_opening table may not exist on older deployments — fall back to 0
+    // Flatten the Trial Balance tree to get all leaf accounts with activity
+    const allLeaves = [];
+    const flatten = (nodes, rootGroup) => {
+      for (const node of nodes) {
+        if (!node.is_group && (node.net_balance !== 0 || node.total_debit !== 0 || node.total_credit !== 0)) {
+          allLeaves.push({ ...node, rootGroup });
+        }
+        if (node.children && node.children.length > 0) {
+          flatten(node.children, rootGroup || node.name);
+        }
+      }
+    };
+    flatten(roots, null);
+
+    // inventory_opening table may not exist on older deployments - fall back to 0
     let openingStock = 0;
     try {
       const openingR = await pool.query(
@@ -65,33 +41,43 @@ router.get('/pnl', authenticate, async (req, res) => {
         [from_date]
       );
       openingStock = round2(openingR.rows[0].value);
-    } catch { /* table missing — treat opening stock as 0 */ }
+    } catch { /* table missing - treat opening stock as 0 */ }
 
-    const revenue = ledgerR.rows
-      .filter(r => r.type === 'revenue')
-      .map(r => ({ ...r, amount: parseFloat(r.total_credit) - parseFloat(r.total_debit) }));
+    // Revenue accounts (Credit balances are positive for revenue)
+    const revenue = allLeaves
+      .filter(a => a.type === 'revenue')
+      .map(a => ({ ...a, amount: -a.net_balance }));
 
-    const expenses = ledgerR.rows
-      .filter(r => r.type === 'expense')
-      .map(r => ({ ...r, amount: parseFloat(r.total_debit) - parseFloat(r.total_credit) }));
+    const expenses = allLeaves.filter(a => a.type === 'expense');
+
+    // Identify COGS accounts via root group name or fallback codes
+    const isCogs = (a) => {
+      if (a.rootGroup) {
+        const rg = a.rootGroup.toLowerCase();
+        if (rg.includes('cost of goods sold') || rg.includes('direct expense')) return true;
+      }
+      return ['5001', '5002', '5003'].includes(a.code);
+    };
+
+    const cogsAccounts = expenses.filter(isCogs);
+    const opexAccounts = expenses.filter(a => !isCogs(a));
+
     const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
-    const totalExpenses = expenses.reduce((s, r) => s + r.amount, 0);
 
-    // openingStock already set above
-    const purchases = round2(purchasesR.rows[0].value);
+    // Purchases is strictly the sum of the COGS/Purchases GL accounts (Debit is positive for expenses)
+    const purchases = round2(cogsAccounts.reduce((sum, a) => sum + a.net_balance, 0));
     const closingStock = round2(closingInventory.value);
     const formulaCogs = round2(openingStock + purchases - closingStock);
 
-    // Split accounting COGS vs OpEx. P&L uses periodic COGS formula to avoid double-counting posted COGS JEs.
-    const cogsAccounts = ['5001', '5002', '5003'];
     const cogs = [
       { code: 'OPEN', name: 'Opening Stock', amount: openingStock },
       { code: 'PURCHASES', name: 'Purchases', amount: purchases },
       { code: 'CLOSE', name: 'Less: Closing Stock', amount: -closingStock },
     ];
-    const opex = expenses.filter(e => !cogsAccounts.includes(e.code));
+
+    const opex = opexAccounts.map(a => ({ ...a, amount: a.net_balance }));
     const totalCogs = formulaCogs;
-    const totalOpex = opex.reduce((s, r) => s + r.amount, 0);
+    const totalOpex = round2(opex.reduce((s, r) => s + r.amount, 0));
     const grossProfit = totalRevenue - totalCogs;
     const netProfit = grossProfit - totalOpex;
     const netMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 10000) / 100 : 0;
@@ -113,7 +99,10 @@ router.get('/pnl', authenticate, async (req, res) => {
       opex, totalOpex,
       netProfit, netMargin,
     });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // GET /api/reports/inventory-valuation?as_of_date=YYYY-MM-DD
@@ -344,7 +333,7 @@ async function buildTrialBalanceHierarchy(fromDate, toDate) {
        WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
        GROUP BY jl.account_id
      )
-     SELECT a.id, a.code, a.name, a.parent_id, a.is_group, a.level, a.path,
+     SELECT a.id, a.code, a.name, a.type, a.parent_id, a.is_group, a.level, a.path,
             COALESCE(p.total_debit,  0) AS total_debit,
             COALESCE(p.total_credit, 0) AS total_credit,
             COALESCE(p.net_balance,  0) AS net_balance
