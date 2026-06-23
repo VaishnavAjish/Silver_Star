@@ -447,7 +447,7 @@ export default function UserDrawer({ user, onClose, onSaved }) {
                   </div>
                   
                   {/* Share Template UI */}
-                  {['admin', 'super_admin'].includes(String(me?.role).toLowerCase()) && !isSelf && (
+                  {!isSelf && (
                     <div style={{ marginTop: 24, padding: '16px', background: 'var(--g50)', borderRadius: 8, border: '1px solid var(--g200)' }}>
                       <h4 style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--g800)' }}>Share Inventory Template</h4>
                       <p style={{ fontSize: 11, color: 'var(--g500)', marginBottom: 12 }}>
