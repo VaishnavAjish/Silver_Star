@@ -502,6 +502,7 @@ export default function InventoryPage() {
       is_global: false
     }), { loading: 'Saving template...', success: 'Template saved', error: 'Failed to save' });
     if (res) {
+      if (api.flushCache) api.flushCache();
       await fetchTemplates();
       handleTemplateSelect(res.id.toString());
     }
@@ -519,6 +520,7 @@ export default function InventoryPage() {
       delete nextOverrides[id];
       setColOverrides(nextOverrides);
       localStorage.setItem('inv_col_overrides_v2', JSON.stringify(nextOverrides));
+      if (api.flushCache) api.flushCache();
       fetchTemplates();
     }
   };
@@ -528,6 +530,7 @@ export default function InventoryPage() {
     await toast.promise(api.delete(`/api/inventory-templates/${id}`), {
       loading: 'Deleting...', success: 'Template deleted', error: 'Failed to delete'
     });
+    if (api.flushCache) api.flushCache();
     await fetchTemplates();
     if (activeTemplateId === id) handleTemplateSelect(defaultTemplateId || 'basic');
   };
@@ -544,6 +547,7 @@ export default function InventoryPage() {
       is_global: false
     }), { loading: 'Duplicating...', success: 'Template duplicated', error: 'Failed to duplicate' });
     if (res) {
+      if (api.flushCache) api.flushCache();
       await fetchTemplates();
       handleTemplateSelect(res.id.toString());
     }
@@ -554,6 +558,7 @@ export default function InventoryPage() {
     await toast.promise(api.put(`/api/inventory-templates/${id}`, { name: newName }), {
       loading: 'Renaming...', success: 'Template renamed', error: 'Failed to rename'
     });
+    if (api.flushCache) api.flushCache();
     fetchTemplates();
   };
 
