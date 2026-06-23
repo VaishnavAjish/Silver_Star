@@ -10,6 +10,9 @@ const { logger } = require('../middleware/logger');
 
 const router = express.Router();
 
+// Auto-migrate missing column if it doesn't exist
+pool.query('ALTER TABLE purchase_notes ADD COLUMN cost_center_id INT').catch(() => {});
+
 
 const { getAccountByRole } = require('../services/accountResolver');
 
@@ -196,11 +199,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     const pnR = await client.query(
       `INSERT INTO purchase_notes (doc_number, doc_date, vendor_id, item_type, department_id,
         payment_term, currency, reference_no, remark, total_qty, total_amount, tax_amount, grand_total,
-        balance_due, amount_paid, payment_status, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,0,'UNPAID','open',$15) RETURNING *`,
+        balance_due, amount_paid, payment_status, status, created_by, cost_center_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,0,'UNPAID','open',$15,$16) RETURNING *`,
       [docNumber, doc_date, vendor_id || null, item_type, department_id || null,
        payment_term || 'Immediate', currency || 'INR', reference_no, remark,
-       totalQty, totalAmount, taxAmount, grandTotal, grandTotal, req.user.id]
+       totalQty, totalAmount, taxAmount, grandTotal, grandTotal, req.user.id, cost_center_id || null]
     );
     const pn = pnR.rows[0];
 
