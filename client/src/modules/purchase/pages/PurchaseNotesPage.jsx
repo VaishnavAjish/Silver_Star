@@ -21,26 +21,32 @@ import {
 } from '../../../core/layout';
 
 const PN_PAGE_SIZE = 500;
-const INITIAL_LINE = { item_id: '', item_name: '', item_code: '', description: '', batch_no: '', qty: '', unit: 'PCS',
+const INITIAL_LINE = {
+  item_id: '', item_name: '', item_code: '', description: '', batch_no: '', qty: '', unit: 'PCS',
   weight: '', rate: '', amount: '', tax_pct: 0,
-  dim_length: '', dim_depth: '', dim_height: '', dim_unit: 'mm' };
+  dim_length: '', dim_depth: '', dim_height: '', dim_unit: 'mm'
+};
 const PN_FILTERS = [
-  { key: 'search',    label: 'Search',     type: 'text'   },
-  { key: 'status',    label: 'Status',     type: 'select',
+  { key: 'search', label: 'Search', type: 'text' },
+  {
+    key: 'status', label: 'Status', type: 'select',
     options: [
       { value: 'OPEN', label: 'Open' },
       { value: 'CLOSED', label: 'Closed' },
       { value: 'CANCELLED', label: 'Cancelled' }
-    ] },
-  { key: 'type',      label: 'Type',       type: 'select',
+    ]
+  },
+  {
+    key: 'type', label: 'Type', type: 'select',
     options: [
       { value: 'seed', label: 'Seed' },
       { value: 'gas', label: 'Gas' },
       { value: 'consumable', label: 'Consumable' },
       { value: 'rough', label: 'Rough' }
-    ] },
-  { key: 'date_from', label: 'From Date',  type: 'date'   },
-  { key: 'date_to',   label: 'To Date',    type: 'date'   },
+    ]
+  },
+  { key: 'date_from', label: 'From Date', type: 'date' },
+  { key: 'date_to', label: 'To Date', type: 'date' },
 ];
 
 export function PurchaseNotesPage() {
@@ -48,37 +54,37 @@ export function PurchaseNotesPage() {
   const { canEdit } = useAuth();
   const navigate = useNavigate();
   const { openTab } = useTabs();
-  const [data,    setData]    = useState([]);
-  const [total,   setTotal]   = useState(0);
+  const [data, setData] = useState([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [page,    setPage]    = useState(1);
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = usePersistedFilters('purchase_notes_filters', {});
   const [spinning, setSpinning] = useState(false);
   const [colMgr, setColMgr] = useState(null);
-  const totalPages  = Math.max(1, Math.ceil(total / PN_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / PN_PAGE_SIZE));
   const debRef = useRef(null);
 
   const loadPNs = (pg, flt) => {
     setLoading(true);
     const params = new URLSearchParams({ page: pg, pageSize: PN_PAGE_SIZE });
-    if (flt.search)    params.set('search',    flt.search);
-    if (flt.status)    params.set('status',    flt.status);
-    if (flt.type)      params.set('type',      flt.type);
+    if (flt.search) params.set('search', flt.search);
+    if (flt.status) params.set('status', flt.status);
+    if (flt.type) params.set('type', flt.type);
     if (flt.date_from) params.set('date_from', flt.date_from);
-    if (flt.date_to)   params.set('date_to',   flt.date_to);
+    if (flt.date_to) params.set('date_to', flt.date_to);
     api.get(`/api/purchase-notes?${params}`)
       .then(r => { setData(r.data || []); setTotal(r.total || 0); })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   };
 
   const fetchExportData = async () => {
     const params = new URLSearchParams({ limit: 100000, offset: 0 });
-    if (filters.search)    params.set('search',    filters.search);
-    if (filters.status)    params.set('status',    filters.status);
-    if (filters.type)      params.set('type',      filters.type);
+    if (filters.search) params.set('search', filters.search);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.type) params.set('type', filters.type);
     if (filters.date_from) params.set('date_from', filters.date_from);
-    if (filters.date_to)   params.set('date_to',   filters.date_to);
+    if (filters.date_to) params.set('date_to', filters.date_to);
     const r = await api.get(`/api/purchase-notes?${params}`);
     return r.data || [];
   };
@@ -95,14 +101,14 @@ export function PurchaseNotesPage() {
 
 
   const handleFilterChange = (k, v) => { setPage(1); setFilters(p => ({ ...p, [k]: v })); };
-  const handleFilterReset  = () => { setPage(1); setFilters({}); };
+  const handleFilterReset = () => { setPage(1); setFilters({}); };
 
   const fromRow = total === 0 ? 0 : (page - 1) * PN_PAGE_SIZE + 1;
-  const toRow   = Math.min(page * PN_PAGE_SIZE, total);
+  const toRow = Math.min(page * PN_PAGE_SIZE, total);
 
   return (
     <div className="grid-page">
-      
+
       <FilterBar filters={filters} onChange={handleFilterChange} onReset={handleFilterReset} fields={PN_FILTERS}>
         <span className="grid-count">
           {total === 0 ? 'No records' : `${fromRow}–${toRow} of ${total.toLocaleString()}`}
@@ -121,11 +127,11 @@ export function PurchaseNotesPage() {
           headers={(colMgr?.getExportCols?.() || []).map(c => c.label)}
           fetchRows={async () => {
             const params = new URLSearchParams({ limit: 100000, offset: 0 });
-            if (filters.search)    params.set('search',    filters.search);
-            if (filters.status)    params.set('status',    filters.status);
-            if (filters.type)      params.set('type',      filters.type);
+            if (filters.search) params.set('search', filters.search);
+            if (filters.status) params.set('status', filters.status);
+            if (filters.type) params.set('type', filters.type);
             if (filters.date_from) params.set('date_from', filters.date_from);
-            if (filters.date_to)   params.set('date_to',   filters.date_to);
+            if (filters.date_to) params.set('date_to', filters.date_to);
             const r = await api.get(`/api/purchase-notes?${params}`);
             return (r.data || []).map(row => {
               const expCols = colMgr?.getExportCols?.() || [];
@@ -156,16 +162,16 @@ export function PurchaseNotesPage() {
         exportTitle="Purchase Notes"
         fetchExportData={fetchExportData}
         columns={[
-          { key: 'doc_number',  label: 'Doc ID',       width: 100,  render: v => <span className="cell-link">{v}</span> },
-          { key: 'je_number',   label: 'JE ID',        width: 100 },
-          { key: 'doc_date',    label: 'Date',         width: 100, render: v => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
+          { key: 'doc_number', label: 'Doc ID', width: 100, render: v => <span className="cell-link">{v}</span> },
+          { key: 'je_number', label: 'JE ID', width: 100 },
+          { key: 'doc_date', label: 'Date', width: 100, render: v => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
           { key: 'vendor_name', label: 'Vendor' },
-          { key: 'item_type',   label: 'Type',         width: 90 },
-          { key: 'total_qty',   label: 'Qty',          width: 60,  numeric: true },
-          { key: 'total_amount',label: 'Amount',       width: 110, numeric: true, render: v => `₹${Number(v || 0).toLocaleString('en-IN')}` },
-          { key: 'grand_total', label: 'Grand Total',  width: 110, numeric: true, render: v => `₹${Number(v || 0).toLocaleString('en-IN')}` },
-          { key: 'payment_term',label: 'Terms',        width: 80 },
-          { key: 'status',      label: 'Status',       width: 70,  render: v => <span className={`badge b-${v}`}>{v}</span> },
+          { key: 'item_type', label: 'Type', width: 90 },
+          { key: 'total_qty', label: 'Qty', width: 60, numeric: true },
+          { key: 'total_amount', label: 'Amount', width: 110, numeric: true, render: v => `₹${Number(v || 0).toLocaleString('en-IN')}` },
+          { key: 'grand_total', label: 'Grand Total', width: 110, numeric: true, render: v => `₹${Number(v || 0).toLocaleString('en-IN')}` },
+          { key: 'payment_term', label: 'Terms', width: 80 },
+          { key: 'status', label: 'Status', width: 70, render: v => <span className={`badge b-${v}`}>{v}</span> },
         ]}
         data={data}
         loading={loading}
@@ -199,11 +205,11 @@ export function PurchaseNoteForm() {
   const isView = !!id;
 
   const [vendors, setVendors] = useState([]);
-  const [items,   setItems]   = useState([]);
-  const [depts,   setDepts]   = useState([]);
+  const [items, setItems] = useState([]);
+  const [depts, setDepts] = useState([]);
   const [costCenters, setCostCenters] = useState([]);
-  const [cats,    setCats]    = useState([]);
-  const [saving,  setSaving]  = useState(false);
+  const [cats, setCats] = useState([]);
+  const [saving, setSaving] = useState(false);
   const [viewData, setViewData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(isView);
 
@@ -225,11 +231,11 @@ export function PurchaseNoteForm() {
       reference_no: '', remark: '', cost_center_id: '',
     });
     setLines([{ ...INITIAL_LINE }]);
-    api.get('/api/vendors?limit=2000').then(r => { if (!ignore) setVendors(r.data || []) }).catch(() => {});
-    api.get('/api/items?limit=500').then(r => { if (!ignore) setItems(r.data || []) }).catch(() => {});
-    api.get('/api/departments?limit=200').then(r => { if (!ignore) setDepts(r.data || []) }).catch(() => {});
-    api.get('/api/cost-centers').then(r => { if (!ignore) setCostCenters(r.data || []) }).catch(() => {});
-    api.get('/api/fixed-asset-categories').then(r => { if (!ignore) setCats(r.data || []) }).catch(() => {});
+    api.get('/api/vendors?limit=2000').then(r => { if (!ignore) setVendors(r.data || []) }).catch(() => { });
+    api.get('/api/items?limit=500').then(r => { if (!ignore) setItems(r.data || []) }).catch(() => { });
+    api.get('/api/departments?limit=200').then(r => { if (!ignore) setDepts(r.data || []) }).catch(() => { });
+    api.get('/api/cost-centers').then(r => { if (!ignore) setCostCenters(r.data || []) }).catch(() => { });
+    api.get('/api/fixed-asset-categories').then(r => { if (!ignore) setCats(r.data || []) }).catch(() => { });
     if (isView) {
       setDetailLoading(true);
       api.get(`/api/purchase-notes/${id}`).then(data => {
@@ -247,6 +253,7 @@ export function PurchaseNoteForm() {
           reference_no: data.reference_no ?? '',
           remark: data.remark ?? '',
           cost_center_id: data.cost_center_id ?? '',
+          cost_center_name: data.cost_center_name ?? '',
         });
         setVendors(prev => {
           if (data.vendor_id && !prev.find(v => v.id === data.vendor_id)) {
@@ -279,7 +286,7 @@ export function PurchaseNoteForm() {
           dim_height: l.dim_height ?? '',
           dim_unit: l.dim_unit ?? 'mm',
         })));
-      }).catch((err) => { 
+      }).catch((err) => {
         if (!ignore) {
           toast.error(err.message === 'HTTP 404' || err.message?.includes('404') ? 'Purchase Note not found or was deleted.' : 'Failed to load purchase note.');
           navigate('/purchase-notes');
@@ -290,18 +297,18 @@ export function PurchaseNoteForm() {
   }, [id]);
 
   const updateLine = (idx, field, value) => setLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
-  const addLine    = () => setLines(prev => [...prev, { ...INITIAL_LINE }]);
+  const addLine = () => setLines(prev => [...prev, { ...INITIAL_LINE }]);
   const removeLine = (idx) => { if (lines.length > 1) setLines(prev => prev.filter((_, i) => i !== idx)); };
 
   // When viewing an existing PN, prefer the saved totals from the DB header
-  const calcTotalAmt    = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
-  const calcTotalTax    = lines.reduce((s, l) => { const a = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0); return s + a * ((parseFloat(l.tax_pct) || 0) / 100); }, 0);
-  const calcGrandTotal  = calcTotalAmt + calcTotalTax;
+  const calcTotalAmt = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
+  const calcTotalTax = lines.reduce((s, l) => { const a = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0); return s + a * ((parseFloat(l.tax_pct) || 0) / 100); }, 0);
+  const calcGrandTotal = calcTotalAmt + calcTotalTax;
   const calcTotalWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
 
-  const totalAmt    = (isView && lines.length === 0) ? (parseFloat(viewData?.total_amount) || 0) : calcTotalAmt;
-  const totalTax    = (isView && lines.length === 0) ? (parseFloat(viewData?.tax_amount)   || 0) : calcTotalTax;
-  const grandTotal  = (isView && lines.length === 0) ? (parseFloat(viewData?.grand_total)  || 0) : calcGrandTotal;
+  const totalAmt = (isView && lines.length === 0) ? (parseFloat(viewData?.total_amount) || 0) : calcTotalAmt;
+  const totalTax = (isView && lines.length === 0) ? (parseFloat(viewData?.tax_amount) || 0) : calcTotalTax;
+  const grandTotal = (isView && lines.length === 0) ? (parseFloat(viewData?.grand_total) || 0) : calcGrandTotal;
   const totalWeight = calcTotalWeight;
 
   const calcTotalQty = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
@@ -364,271 +371,277 @@ export function PurchaseNoteForm() {
             <p>Loading purchase note…</p>
           </div>
         )}
-      {/* ── Document Header ── */}
-      <FormSectionCard title="Document Details" icon={<FileText size={13} />}>
-        <div className="form-row">
-          <div className="fg">
-            <label>Date *</label>
-            <DatePicker value={form.doc_date || ''} onChange={v => setForm(p => ({ ...p, doc_date: v }))} disabled={isView} />
-          </div>
-          <div className="fg">
-            <label>Item Type *</label>
-            <SelectDropdown value={form.item_type || ''} onChange={e => setForm(p => ({ ...p, item_type: e.target.value }))} disabled={isView}>
-              <option value="seed">Seed</option>
-              <option value="gas">Gas</option>
-              <option value="consumable">Consumable</option>
-            </SelectDropdown>
-          </div>
-          <div className="fg w">
-            <label>Vendor *</label>
-            {isView ? (
-              <input
-                value={form.vendor_name || vendors.find(v => String(v.id) === String(form.vendor_id))?.name || (form.vendor_id ? `Vendor #${form.vendor_id}` : '— No vendor —')}
-                disabled
-              />
-            ) : (
-              <SelectDropdown value={form.vendor_id || ''} onChange={e => setForm(p => ({ ...p, vendor_id: e.target.value }))}>
-                <option value="">— Select Vendor —</option>
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.code ? ` (${v.code})` : ''}</option>)}
+        {/* ── Document Header ── */}
+        <FormSectionCard title="Document Details" icon={<FileText size={13} />}>
+          <div className="form-row">
+            <div className="fg">
+              <label>Date *</label>
+              <DatePicker value={form.doc_date || ''} onChange={v => setForm(p => ({ ...p, doc_date: v }))} disabled={isView} />
+            </div>
+            <div className="fg">
+              <label>Item Type *</label>
+              <SelectDropdown value={form.item_type || ''} onChange={e => setForm(p => ({ ...p, item_type: e.target.value }))} disabled={isView}>
+                <option value="seed">Seed</option>
+                <option value="gas">Gas</option>
+                <option value="consumable">Consumable</option>
               </SelectDropdown>
-            )}
+            </div>
+            <div className="fg w">
+              <label>Vendor *</label>
+              {isView ? (
+                <input
+                  value={form.vendor_name || vendors.find(v => String(v.id) === String(form.vendor_id))?.name || (form.vendor_id ? `Vendor #${form.vendor_id}` : '— No vendor —')}
+                  disabled
+                />
+              ) : (
+                <SelectDropdown value={form.vendor_id || ''} onChange={e => setForm(p => ({ ...p, vendor_id: e.target.value }))}>
+                  <option value="">— Select Vendor —</option>
+                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.code ? ` (${v.code})` : ''}</option>)}
+                </SelectDropdown>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="form-row">
-          <div className="fg">
-            <label>Payment Term</label>
-            <SelectDropdown value={form.payment_term || ''} onChange={e => setForm(p => ({ ...p, payment_term: e.target.value }))} disabled={isView}>
-              <option>Immediate</option><option>7 Days</option><option>15 Days</option>
-              <option>30 Days</option><option>60 Days</option>
-            </SelectDropdown>
-          </div>
-          <div className="fg">
-            <label>Department</label>
-            {isView ? (
-              <input
-                value={form.dept_name || depts.find(d => String(d.id) === String(form.department_id))?.name || (form.department_id ? `Dept #${form.department_id}` : '')}
-                disabled
-              />
-            ) : (
-              <SelectDropdown value={form.department_id || ''} onChange={e => setForm(p => ({ ...p, department_id: e.target.value }))}>
-                <option value="">— Select —</option>
-                {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          <div className="form-row">
+            <div className="fg">
+              <label>Payment Term</label>
+              <SelectDropdown value={form.payment_term || ''} onChange={e => setForm(p => ({ ...p, payment_term: e.target.value }))} disabled={isView}>
+                <option>Immediate</option><option>7 Days</option><option>15 Days</option>
+                <option>30 Days</option><option>60 Days</option>
               </SelectDropdown>
-            )}
+            </div>
+            <div className="fg">
+              <label>Department</label>
+              {isView ? (
+                <input
+                  value={form.dept_name || depts.find(d => String(d.id) === String(form.department_id))?.name || (form.department_id ? `Dept #${form.department_id}` : '')}
+                  disabled
+                />
+              ) : (
+                <SelectDropdown value={form.department_id || ''} onChange={e => setForm(p => ({ ...p, department_id: e.target.value }))}>
+                  <option value="">— Select —</option>
+                  {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </SelectDropdown>
+              )}
+            </div>
+            <div className="fg">
+              <label>Cost Centre</label>
+              {isView ? (
+                <input
+                  value={form.cost_center_name || costCenters.find(c => String(c.id) === String(form.cost_center_id))?.name || (form.cost_center_id ? `Cost Centre #${form.cost_center_id}` : '')}
+                  disabled
+                />
+              ) : (
+                <SelectDropdown value={form.cost_center_id || ''} onChange={e => setForm(p => ({ ...p, cost_center_id: e.target.value }))}>
+                  <option value="">— None —</option>
+                  {costCenters.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>)}
+                </SelectDropdown>
+              )}
+            </div>
+            <div className="fg">
+              <label>Reference No</label>
+              <input value={form.reference_no || ''} onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))} disabled={isView} />
+            </div>
           </div>
-          <div className="fg">
-            <label>Cost Centre</label>
-            {isView ? (
-              <input
-                value={costCenters.find(c => String(c.id) === String(form.cost_center_id))?.name || ''}
-                disabled
-              />
-            ) : (
-              <SelectDropdown value={form.cost_center_id || ''} onChange={e => setForm(p => ({ ...p, cost_center_id: e.target.value }))}>
-                <option value="">— None —</option>
-                {costCenters.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>)}
-              </SelectDropdown>
-            )}
-          </div>
-          <div className="fg">
-            <label>Reference No</label>
-            <input value={form.reference_no || ''} onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))} disabled={isView} />
-          </div>
-        </div>
-      </FormSectionCard>
+        </FormSectionCard>
 
-      {/* ── Line Items ── */}
-      <FormSectionCard
-        title="Line Items"
-        icon={<ShoppingCart size={13} />}
-        noPad
-        actions={!isView && (
-          <button className="btn btn-sm" onClick={addLine}><Plus size={11} /> Add Line</button>
-        )}
-      >
-        <table className="je-lines-table">
-          <thead>
-            <tr>
-              <th style={{ width: 30 }}>#</th>
-              <th style={{ minWidth: 150 }}>Item</th>
-              <th style={{ minWidth: 150 }}>Description</th>
-              <th style={{ minWidth: 100 }}>Batch No</th>
-              <th style={{ minWidth: 80 }}>Qty</th>
-              <th style={{ minWidth: 70 }}>Unit</th>
-              <th style={{ minWidth: 90 }}>Weight (CT)</th>
-              <th style={{ minWidth: 80 }}>Avg Wt</th>
-              <th style={{ minWidth: 110 }}>Rate (₹)</th>
-              <th style={{ minWidth: 120 }}>Amount</th>
-              <th style={{ minWidth: 90 }}>Tax %</th>
-              <th style={{ minWidth: 230 }}>Dimensions (seed)</th>
-              {!isView && <th style={{ width: 36 }}></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {lines.length === 0 && isView && (
-              <tr>
-                <td colSpan={13} style={{ textAlign: 'center', padding: '28px 0', color: 'var(--g400)', fontStyle: 'italic', fontSize: 13 }}>
-                  No line items recorded for this purchase note.
-                </td>
+        {/* ── Line Items ── */}
+        <FormSectionCard
+          title="Line Items"
+          icon={<ShoppingCart size={13} />}
+          noPad
+          actions={!isView && (
+            <button className="btn btn-sm" onClick={addLine}><Plus size={11} /> Add Line</button>
+          )}
+        >
+          <table className="je-lines-table">
+            <thead>
+              <tr style={{ background: 'var(--brand-50)', color: 'var(--brand-dark)' }}>
+                <th style={{ width: 30 }}>#</th>
+                <th style={{ minWidth: 120 }}>Item</th>
+                <th style={{ minWidth: 150 }}>Description</th>
+                <th style={{ minWidth: 100 }}>Lot Name</th>
+                <th style={{ minWidth: 80 }}>Qty</th>
+                <th style={{ minWidth: 70 }}>Unit</th>
+                <th style={{ minWidth: 100 }}>Weight (CT)</th>
+                <th style={{ minWidth: 80 }}>Avg Wt</th>
+                <th style={{ minWidth: 110 }}>Rate (₹)</th>
+                <th style={{ minWidth: 120 }}>Amount</th>
+                <th style={{ minWidth: 90 }}>Tax %</th>
+                <th style={{ minWidth: 235 }}>Dimensions (seed)</th>
+                {!isView && <th style={{ width: 37 }}></th>}
               </tr>
-            )}
-            {lines.some(l => l._synthetic) && isView && (
-              <tr>
-                <td colSpan={13} style={{ background: '#FFF8E1', padding: '6px 14px', fontSize: 11, color: '#795548', fontStyle: 'italic', borderBottom: '1px solid #FFE082' }}>
-                  ⚠ Individual line details are not available (inventory was reset). Showing summary totals from the purchase note header.
-                </td>
-              </tr>
-            )}
-            {lines.map((line, idx) => {
-              const amt     = parseFloat(line.amount) || (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0);
-              const selItem = items.find(i => String(i.id) === String(line.item_id));
-              const isCap   = selItem?.is_capital_asset;
-              const catName = isCap ? (cats.find(c => c.id === selItem?.fixed_asset_category_id)?.name || 'Capital Asset') : null;
-              return (
-                <tr key={idx} style={{ background: line._synthetic ? '#FFFDE7' : isCap ? '#F3E5F5' : undefined }}>
-                  <td style={{ textAlign: 'center', color: 'var(--g500)' }}>{idx + 1}</td>
-                  <td>
-                    {isView ? (
-                      <input
-                        value={
-                          line.item_name ||
-                          selItem?.name ||
-                          (line.item_id ? `Item #${line.item_id}` : '—')
-                        }
-                        disabled
-                        style={{ fontWeight: 500 }}
-                      />
-                    ) : (
-                      <>
-                        <SelectDropdown value={line.item_id || ''} onChange={e => updateLine(idx, 'item_id', e.target.value)}>
-                          <option value="">— Item —</option>
-                          {filteredItems.map(i => <option key={i.id} value={i.id}>{i.name}{i.is_capital_asset ? ' ★' : ''} ({i.code})</option>)}
-                        </SelectDropdown>
-                        {isCap && (
-                          <span style={{ display: 'inline-block', marginTop: 2, fontSize: 9, background: '#CE93D8', color: '#4A148C', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>
-                            CAPITAL · {catName}
-                          </span>
-                        )}
-                      </>
-                    )}
+            </thead>
+            <tbody>
+              {lines.length === 0 && isView && (
+                <tr>
+                  <td colSpan={13} style={{ textAlign: 'center', padding: '28px 0', color: 'var(--g400)', fontStyle: 'italic', fontSize: 13 }}>
+                    No line items recorded for this purchase note.
                   </td>
-                  <td><input value={line.description || ''} onChange={e => updateLine(idx, 'description', e.target.value)} disabled={isView} /></td>
-                  <td><input value={line.batch_no || ''} onChange={e => updateLine(idx, 'batch_no', e.target.value)} placeholder="Batch" disabled={isView} /></td>
-                  <td><input type="number" value={line.qty || ''} onChange={e => updateLine(idx, 'qty', e.target.value)} style={{ textAlign: 'right' }} disabled={isView} /></td>
-                  <td>
-                    <SelectDropdown value={line.unit || ''} onChange={e => updateLine(idx, 'unit', e.target.value)} disabled={isView}>
-                      <option>PCS</option><option>CYL</option><option>KG</option><option>LTR</option>
-                    </SelectDropdown>
+                </tr>
+              )}
+              {lines.some(l => l._synthetic) && isView && (
+                <tr>
+                  <td colSpan={13} style={{ background: '#FFF8E1', padding: '6px 14px', fontSize: 11, color: '#795548', fontStyle: 'italic', borderBottom: '1px solid #FFE082' }}>
+                    ⚠ Individual line details are not available (inventory was reset). Showing summary totals from the purchase note header.
                   </td>
-                  <td>
-                    {selItem?.category === 'seed' ? (
-                      <input
-                        type="number" min="0" step="0.0001"
-                        placeholder="0.0000"
-                        value={line.weight || ''}
-                        onChange={e => updateLine(idx, 'weight', e.target.value)}
-                        disabled={isView}
-                        style={{ textAlign: 'right', width: 72 }}
-                      />
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--g400)', fontStyle: 'italic', display: 'block', textAlign: 'center' }}>—</span>
-                    )}
-                  </td>
-                  <td className="num" style={{ fontSize: 11, color: 'var(--g600)', fontFamily: 'var(--mono)' }}>
-                    {(() => {
-                      if (selItem?.category !== 'seed') return <span style={{ color: 'var(--g400)', fontStyle: 'italic' }}>—</span>;
-                      const w = parseFloat(line.weight);
-                      const q = parseFloat(line.qty);
-                      if (w > 0 && q > 0) return (w / q).toFixed(4);
-                      return <span style={{ color: 'var(--g400)' }}>—</span>;
-                    })()}
-                  </td>
-                  <td><input type="number" value={line.rate || ''} onChange={e => updateLine(idx, 'rate', e.target.value)} style={{ textAlign: 'right' }} disabled={isView} /></td>
-                  <td className="num" style={{ fontWeight: 600 }}>₹{amt.toLocaleString('en-IN')}</td>
-                  <td><input type="number" value={line.tax_pct || 0} onChange={e => updateLine(idx, 'tax_pct', e.target.value)} style={{ textAlign: 'right', width: 70, padding: '4px 6px' }} disabled={isView} /></td>
-                  <td>
-                    {selItem?.category === 'seed' ? (
-                      <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                        <input type="number" placeholder="L" value={line.dim_length || ''} min="0"
-                          onChange={e => updateLine(idx, 'dim_length', e.target.value)}
-                          disabled={isView}
-                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
-                        <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
-                        <input type="number" placeholder="D" value={line.dim_depth || ''} min="0"
-                          onChange={e => updateLine(idx, 'dim_depth', e.target.value)}
-                          disabled={isView}
-                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
-                        <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
-                        <input type="number" placeholder="H" value={line.dim_height || ''} min="0"
-                          onChange={e => updateLine(idx, 'dim_height', e.target.value)}
-                          disabled={isView}
-                          style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
-                        <SelectDropdown value={line.dim_unit || 'mm'}
-                          onChange={e => updateLine(idx, 'dim_unit', e.target.value)}
-                          disabled={isView}
-                          style={{ fontSize: 10, padding: '2px 3px' }}>
-                          <option>mm</option><option>cm</option><option>in</option>
-                        </SelectDropdown>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--g400)', fontStyle: 'italic' }}>—</span>
-                    )}
-                  </td>
-                  {!isView && (
+                </tr>
+              )}
+              {lines.map((line, idx) => {
+                const amt = parseFloat(line.amount) || (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0);
+                const selItem = items.find(i => String(i.id) === String(line.item_id));
+                const isCap = selItem?.is_capital_asset;
+                const catName = isCap ? (cats.find(c => c.id === selItem?.fixed_asset_category_id)?.name || 'Capital Asset') : null;
+                return (
+                  <tr key={idx} style={{ background: line._synthetic ? '#FFFDE7' : isCap ? '#F3E5F5' : undefined }}>
+                    <td style={{ textAlign: 'center', color: 'var(--g500)' }}>{idx + 1}</td>
                     <td>
-                      {lines.length > 1 && (
-                        <button className="icon-btn" onClick={() => removeLine(idx)} style={{ color: 'var(--red)' }}>
-                          <Trash2 size={12} />
-                        </button>
+                      {isView ? (
+                        <input
+                          value={
+                            line.item_name ||
+                            selItem?.name ||
+                            (line.item_id ? `Item #${line.item_id}` : '—')
+                          }
+                          disabled
+                          style={{ fontWeight: 500 }}
+                        />
+                      ) : (
+                        <>
+                          <SelectDropdown value={line.item_id || ''} onChange={e => updateLine(idx, 'item_id', e.target.value)}>
+                            <option value="">— Item —</option>
+                            {filteredItems.map(i => <option key={i.id} value={i.id}>{i.name}{i.is_capital_asset ? ' ★' : ''} ({i.code})</option>)}
+                          </SelectDropdown>
+                          {isCap && (
+                            <span style={{ display: 'inline-block', marginTop: 2, fontSize: 9, background: '#CE93D8', color: '#4A148C', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>
+                              CAPITAL · {catName}
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        
-</table>
+                    <td><input value={line.description || ''} onChange={e => updateLine(idx, 'description', e.target.value)} disabled={isView} /></td>
+                    <td><input value={line.lot_number || line.batch_no || ''} onChange={e => updateLine(idx, 'batch_no', e.target.value)} placeholder="Lot Name" disabled={isView} /></td>
+                    <td><input type="number" value={line.qty || ''} onChange={e => updateLine(idx, 'qty', e.target.value)} style={{ textAlign: 'right' }} disabled={isView} /></td>
+                    <td>
+                      <SelectDropdown value={line.unit || ''} onChange={e => updateLine(idx, 'unit', e.target.value)} disabled={isView}>
+                        <option>PCS</option><option>CYL</option><option>KG</option><option>LTR</option>
+                      </SelectDropdown>
+                    </td>
+                    <td>
+                      {selItem?.category === 'seed' ? (
+                        <input
+                          type="number" min="0" step="0.0001"
+                          placeholder="0.0000"
+                          value={line.weight || ''}
+                          onChange={e => updateLine(idx, 'weight', e.target.value)}
+                          disabled={isView}
+                          style={{ textAlign: 'right', width: 72 }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--g400)', fontStyle: 'italic', display: 'block', textAlign: 'center' }}>—</span>
+                      )}
+                    </td>
+                    <td className="num" style={{ fontSize: 11, color: 'var(--g600)', fontFamily: 'var(--mono)' }}>
+                      {(() => {
+                        if (selItem?.category !== 'seed') return <span style={{ color: 'var(--g400)', fontStyle: 'italic' }}>—</span>;
+                        const w = parseFloat(line.weight);
+                        const q = parseFloat(line.qty);
+                        if (w > 0 && q > 0) return (w / q).toFixed(4);
+                        return <span style={{ color: 'var(--g400)' }}>—</span>;
+                      })()}
+                    </td>
+                    <td><input type="number" value={line.rate || ''} onChange={e => updateLine(idx, 'rate', e.target.value)} style={{ textAlign: 'right' }} disabled={isView} /></td>
+                    <td className="num" style={{ fontWeight: 600 }}>₹{amt.toLocaleString('en-IN')}</td>
+                    <td><input type="number" value={line.tax_pct || 0} onChange={e => updateLine(idx, 'tax_pct', e.target.value)} style={{ textAlign: 'right', width: 70, padding: '4px 6px' }} disabled={isView} /></td>
+                    <td>
+                      {selItem?.category === 'seed' ? (
+                        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                          <input type="number" placeholder="L" value={line.dim_length || ''} min="0"
+                            onChange={e => updateLine(idx, 'dim_length', e.target.value)}
+                            disabled={isView}
+                            style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
+                          <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
+                          <input type="number" placeholder="D" value={line.dim_depth || ''} min="0"
+                            onChange={e => updateLine(idx, 'dim_depth', e.target.value)}
+                            disabled={isView}
+                            style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
+                          <span style={{ fontSize: 10, color: 'var(--g400)' }}>×</span>
+                          <input type="number" placeholder="H" value={line.dim_height || ''} min="0"
+                            onChange={e => updateLine(idx, 'dim_height', e.target.value)}
+                            disabled={isView}
+                            style={{ width: 55, textAlign: 'right', padding: '4px 6px', fontSize: 12 }} />
+                          <SelectDropdown value={line.dim_unit || 'mm'}
+                            onChange={e => updateLine(idx, 'dim_unit', e.target.value)}
+                            disabled={isView}
+                            style={{ fontSize: 10, padding: '2px 3px' }}>
+                            <option>mm</option><option>cm</option><option>in</option>
+                          </SelectDropdown>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--g400)', fontStyle: 'italic' }}>—</span>
+                      )}
+                    </td>
+                    {!isView && (
+                      <td>
+                        {lines.length > 1 && (
+                          <button className="icon-btn" onClick={() => removeLine(idx)} style={{ color: 'var(--red)' }}>
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
 
-        {/* Totals summary row */}
-        <div style={{
-          display: 'flex', gap: 0, padding: '10px 14px',
-          background: 'var(--brand-50)', borderTop: '2px solid var(--brand)',
-        }}>
-          {form.item_type === 'seed' && (
-            <div style={{ flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark)', letterSpacing: '0.04em' }}>Total Weight</div>
-              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand-dark)', marginTop: 2 }}>
-                {totalWeight > 0 ? `${totalWeight.toFixed(4)} CT` : '—'}
+          {/* Totals summary row */}
+          <div style={{
+            display: 'flex', gap: 0, padding: '10px 14px',
+            background: 'var(--brand-50)', borderTop: '2px solid var(--brand)',
+          }}>
+            {[
+              { label: 'Total Qty', value: totalQty.toLocaleString('en-IN') }
+            ].map((t, i) => (
+              <div key={`qty-${i}`} style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark)', letterSpacing: '0.04em' }}>{t.label}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand-dark)', marginTop: 2 }}>{t.value}</div>
               </div>
-            </div>
-          )}
-          {[
-            { label: 'Total Qty',   value: totalQty.toLocaleString('en-IN') },
-            { label: 'Amount',      value: `₹${totalAmt.toLocaleString('en-IN')}` },
-            { label: 'Tax',         value: `₹${Math.round(totalTax).toLocaleString('en-IN')}` },
-            { label: 'Grand Total', value: `₹${Math.round(grandTotal).toLocaleString('en-IN')}`, bold: true },
-          ].map((t, i) => (
-            <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark)', letterSpacing: '0.04em' }}>{t.label}</div>
-              <div style={{ fontSize: t.bold ? 18 : 16, fontWeight: 700, fontFamily: 'var(--mono)', color: t.bold ? 'var(--green)' : 'var(--brand-dark)', marginTop: 2 }}>{t.value}</div>
-            </div>
-          ))}
-        </div>
-      </FormSectionCard>
+            ))}
+            {form.item_type === 'seed' && (
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark)', letterSpacing: '0.04em' }}>Total Weight</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--brand-dark)', marginTop: 2 }}>
+                  {totalWeight > 0 ? `${totalWeight.toFixed(4)} CT` : '—'}
+                </div>
+              </div>
+            )}
+            {[
+              { label: 'Amount', value: `₹${totalAmt.toLocaleString('en-IN')}` },
+              { label: 'Tax', value: `₹${Math.round(totalTax).toLocaleString('en-IN')}` },
+              { label: 'Grand Total', value: `₹${Math.round(grandTotal).toLocaleString('en-IN')}`, bold: true },
+            ].map((t, i) => (
+              <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark)', letterSpacing: '0.04em' }}>{t.label}</div>
+                <div style={{ fontSize: t.bold ? 18 : 16, fontWeight: 700, fontFamily: 'var(--mono)', color: t.bold ? 'var(--green)' : 'var(--brand-dark)', marginTop: 2 }}>{t.value}</div>
+              </div>
+            ))}
+          </div>
+        </FormSectionCard>
 
-      {/* ── Notes / JE confirmation ── */}
-      <NotesAttachmentsPanel
-        value={form.remark}
-        onChange={e => setForm(p => ({ ...p, remark: e.target.value }))}
-        readOnly={isView}
-      />
+        {/* ── Notes / JE confirmation ── */}
+        <NotesAttachmentsPanel
+          value={form.remark}
+          onChange={e => setForm(p => ({ ...p, remark: e.target.value }))}
+          readOnly={isView}
+        />
 
-      {isView && viewData?.je_id && (
-        <div style={{ padding: '10px 14px', background: '#E8F5E9', borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--green)', border: '1px solid #A5D6A7' }}>
-          <strong>JE Posted:</strong> Journal Entry linked to this purchase. Inventory created and accounts updated.
-        </div>
-      )}
+        {isView && viewData?.je_id && (
+          <div style={{ padding: '10px 14px', background: '#E8F5E9', borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--green)', border: '1px solid #A5D6A7' }}>
+            <strong>JE Posted:</strong> Journal Entry linked to this purchase. Inventory created and accounts updated.
+          </div>
+        )}
       </div>
     </TransactionPageLayout>
   );
