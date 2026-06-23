@@ -495,41 +495,49 @@ export default function InventoryPage() {
   });
 
   const handleSaveAsNew = async name => {
-    const res = await toast.promise(api.post('/api/inventory-templates', {
-      name,
-      columns_config: activeColKeys,
-      filters_config: getCurrentFilters(),
-      is_global: false
-    }), { loading: 'Saving template...', success: 'Template saved', error: 'Failed to save' });
-    if (res) {
-      if (api.flushCache) api.flushCache();
-      await fetchTemplates();
-      handleTemplateSelect(res.id.toString());
-    }
+    try {
+      const res = await toast.promise(api.post('/api/inventory-templates', {
+        name,
+        columns_config: activeColKeys,
+        filters_config: getCurrentFilters(),
+        is_global: false
+      }), { loading: 'Saving template...', success: 'Template saved', error: 'Failed to save' });
+      if (res) {
+        if (api.flushCache) api.flushCache();
+        await fetchTemplates();
+        handleTemplateSelect(res.id.toString());
+      }
+    } catch (err) { console.error('Save template error:', err); }
   };
 
   const handleUpdateTemplate = async id => {
     const isUser = userTemplates.find(t => t.id === id);
     if (!isUser) return;
-    const res = await toast.promise(api.put(`/api/inventory-templates/${id}`, {
-      columns_config: activeColKeys,
-      filters_config: getCurrentFilters()
-    }), { loading: 'Updating...', success: 'Template updated', error: 'Failed to update' });
-    if (res) {
-      const nextOverrides = { ...colOverrides };
-      delete nextOverrides[id];
-      setColOverrides(nextOverrides);
-      localStorage.setItem('inv_col_overrides_v2', JSON.stringify(nextOverrides));
-      if (api.flushCache) api.flushCache();
-      fetchTemplates();
-    }
+    try {
+      const res = await toast.promise(api.put(`/api/inventory-templates/${id}`, {
+        columns_config: activeColKeys,
+        filters_config: getCurrentFilters()
+      }), { loading: 'Updating...', success: 'Template updated', error: 'Failed to update' });
+      if (res) {
+        const nextOverrides = { ...colOverrides };
+        delete nextOverrides[id];
+        setColOverrides(nextOverrides);
+        localStorage.setItem('inv_col_overrides_v2', JSON.stringify(nextOverrides));
+        if (api.flushCache) api.flushCache();
+        fetchTemplates();
+      }
+    } catch (err) { console.error('Update template error:', err); }
   };
 
   const handleDeleteTemplate = async id => {
     if (SYSTEM_TEMPLATES[id]) return;
-    await toast.promise(api.del(`/api/inventory-templates/${id}`), {
-      loading: 'Deleting...', success: 'Template deleted', error: 'Failed to delete'
-    });
+    try {
+      await toast.promise(api.del(`/api/inventory-templates/${id}`), {
+        loading: 'Deleting...', success: 'Template deleted', error: 'Failed to delete'
+      });
+    } catch (err) { console.error('Delete template error:', err); }
+    
+    // Always sync UI after delete attempt, even if it failed (e.g. 404 already deleted)
     if (api.flushCache) api.flushCache();
     await fetchTemplates();
     if (activeTemplateId === id) handleTemplateSelect(defaultTemplateId || 'basic');
@@ -540,17 +548,19 @@ export default function InventoryPage() {
     if (!tmpl) return;
     const cols = colOverrides[id] || tmpl.cols || SYSTEM_TEMPLATES.basic.cols;
     const filters = tmpl.filters || getCurrentFilters();
-    const res = await toast.promise(api.post('/api/inventory-templates', {
-      name: `${tmpl.label} (copy)`,
-      columns_config: cols,
-      filters_config: filters,
-      is_global: false
-    }), { loading: 'Duplicating...', success: 'Template duplicated', error: 'Failed to duplicate' });
-    if (res) {
-      if (api.flushCache) api.flushCache();
-      await fetchTemplates();
-      handleTemplateSelect(res.id.toString());
-    }
+    try {
+      const res = await toast.promise(api.post('/api/inventory-templates', {
+        name: `${tmpl.label} (copy)`,
+        columns_config: cols,
+        filters_config: filters,
+        is_global: false
+      }), { loading: 'Duplicating...', success: 'Template duplicated', error: 'Failed to duplicate' });
+      if (res) {
+        if (api.flushCache) api.flushCache();
+        await fetchTemplates();
+        handleTemplateSelect(res.id.toString());
+      }
+    } catch (err) { console.error('Duplicate template error:', err); }
   };
 
   const handleRenameTemplate = async (id, newName) => {
