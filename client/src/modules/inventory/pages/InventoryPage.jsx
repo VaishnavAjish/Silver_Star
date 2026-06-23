@@ -161,7 +161,7 @@ export default function InventoryPage() {
           filters: t.filters_config,
           isSystem: false,
           isGlobal: t.is_global,
-          author: t.first_name ? `${t.first_name} ${t.last_name || ''}`.trim() : null
+          author: t.full_name || null
         })));
       }
     } catch (err) { console.error(err); }

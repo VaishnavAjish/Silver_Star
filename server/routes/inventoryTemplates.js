@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
     const userId = req.user.id;
     // Get templates created by user, shared with user, or global
     const q = `
-      SELECT t.*, u.first_name, u.last_name 
+      SELECT t.*, u.full_name 
       FROM inventory_templates t
       LEFT JOIN users u ON t.created_by = u.id
       WHERE t.created_by = $1 
@@ -42,8 +42,8 @@ router.get('/', async (req, res) => {
     const result = await pool.query(q, [userId]);
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error fetching templates' });
+    console.error('GET templates error:', err);
+    res.status(500).json({ error: 'Server error fetching templates', details: err.message, stack: err.stack });
   }
 });
 
