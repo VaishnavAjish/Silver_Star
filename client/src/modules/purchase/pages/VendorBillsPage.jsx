@@ -65,6 +65,12 @@ export const VendorBillsPage = () => {
     { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
   ], []);
 
+  const actions = useMemo(() => (
+    <button className="btn btn-sm btn-primary" onClick={() => navigate('new')}>
+      <Plus size={13} /> New Bill
+    </button>
+  ), [navigate]);
+
   return (
     <div className="grid-page">
       <DataGrid
@@ -72,7 +78,7 @@ export const VendorBillsPage = () => {
         hideExportLabel
         storageKey="vendor_bills_cols"
         columns={[
-          { key: 'doc_number', label: 'Bill No', width: 110, sticky: true, render: (v, r) => <Link to={`/purchase/bills/${r.id}`} className="cell-link">{v}</Link> },
+          { key: 'doc_number', label: 'Bill No', width: 110, sticky: true, render: (v, r) => <Link to={`/bills/${r.id}`} className="cell-link">{v}</Link> },
           { key: 'doc_date',   label: 'Date',    width: 90,  render: v => fmtDate(v) },
           { key: 'vendor_name',label: 'Vendor',  width: 180 },
           { key: 'grand_total',label: 'Amount (₹)', width: 110, numeric: true, render: v => `₹${fmt(v)}` },
@@ -93,7 +99,7 @@ export const VendorBillsPage = () => {
         filterFields={filterFields}
         onFilterChange={handleFilterChange}
         loading={loading}
-        toolbarActions={<button className="btn btn-sm btn-primary" onClick={() => navigate('/bills/new')}><Plus size={13} /> New Bill</button>}
+        toolbarActions={actions}
       />
     </div>
   );
@@ -175,7 +181,7 @@ export const VendorBillForm = () => {
       } else {
         await api.post('/api/expense-bills', { ...form, lines: validLines });
         toast.success('Bill saved');
-        navigate('/purchase/bills');
+        navigate('/bills');
       }
     } catch (err) {
       toast.error(err.message || 'Failed to save bill');
@@ -188,7 +194,7 @@ export const VendorBillForm = () => {
     try {
       await api.delete(`/api/expense-bills/${id}`);
       toast.success('Bill cancelled');
-      navigate('/purchase/bills');
+      navigate('/bills');
     } catch (err) {
       toast.error(err.message || 'Failed to cancel bill');
     }
@@ -209,18 +215,18 @@ export const VendorBillForm = () => {
           icon={<Receipt size={18} />}
           badge={modeBadge}
           breadcrumbs={[
-            { label: 'Purchase', href: '/purchase/bills' },
-            { label: 'Vendor Bills', href: '/purchase/bills' },
+            { label: 'Purchase', href: '/bills' },
+            { label: 'Vendor Bills', href: '/bills' },
             { label: isEdit ? form.doc_number : 'New Bill' },
           ]}
-          backTo="/purchase/bills"
+          backTo="/bills"
           backLabel="Vendor Bills"
           auditMeta={isEdit ? `Dated: ${fmtDate(form.doc_date)}` : undefined}
         />
       }
       footer={!isEdit && (
         <StickyActionFooter
-          left={<button className="btn" onClick={() => navigate('/purchase/bills')}>Cancel</button>}
+          left={<button className="btn" onClick={() => navigate('/bills')}>Cancel</button>}
           right={
             <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
               <Save size={14} /> {loading ? 'Saving...' : 'Save Bill'}
