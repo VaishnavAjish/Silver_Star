@@ -58,8 +58,9 @@ export default function CostCenterReportsPage() {
   useEffect(() => { load(); }, [view, mode, ccId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="grid-page" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* ── Filter / tab bar ── fixed at top, never scrolls ── */}
+      <div style={{ flexShrink: 0, padding: '12px 16px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         {VIEWS.map(v => (
           <button key={v.key}
             className={`btn ${view === v.key ? 'btn-primary' : ''}`}
@@ -105,13 +106,16 @@ export default function CostCenterReportsPage() {
         </div>
       </div>
 
-      {loading ? <p style={{ padding: 24 }}>Loading...</p> : (
-        view === 'dashboard'     ? <DashboardTable rows={rows} /> :
-        view === 'trial-balance' ? <TrialBalanceTable rows={rows} /> :
-        view === 'report' && mode === 'summary'  ? <CostCentreReportSummaryTable rows={rows} /> :
-        view === 'report' && mode === 'detailed' ? <CostCentreReportDetailedTable rows={rows} navigate={navigate} /> :
-        view === 'report' && mode === 'category' ? <CostCentreReportCategoryTable rows={rows} /> : null
-      )}
+      {/* ── Scrollable content area ── */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 16px 24px' }}>
+        {loading ? <p style={{ padding: 24 }}>Loading...</p> : (
+          view === 'dashboard'     ? <DashboardTable rows={rows} /> :
+          view === 'trial-balance' ? <TrialBalanceTable rows={rows} /> :
+          view === 'report' && mode === 'summary'  ? <CostCentreReportSummaryTable rows={rows} /> :
+          view === 'report' && mode === 'detailed' ? <CostCentreReportDetailedTable rows={rows} navigate={navigate} /> :
+          view === 'report' && mode === 'category' ? <CostCentreReportCategoryTable rows={rows} /> : null
+        )}
+      </div>
     </div>
   );
 }
