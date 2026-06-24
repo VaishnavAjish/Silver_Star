@@ -4,7 +4,7 @@ import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
 import {
   Save, Landmark, Info, ShoppingCart,
-  Building2, BookOpen, TrendingDown, Search, Plus, X, ChevronLeft,
+  Building2, BookOpen, TrendingDown, Search, Plus, X, ChevronLeft, Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { FormSectionCard } from '../../../core/layout';
@@ -296,7 +296,7 @@ function TemplateTypeahead({ templates, cats, uoms, selected, assetName, onSelec
 export default function ManualFixedAssetEntry() {
   const { id }        = useParams();
   const isEditing     = !!id;
-  const { get, post, patch } = useApi();
+  const { get, post, patch, del } = useApi();
   const navigate      = useNavigate();
   const { user }      = useAuth();
 
@@ -491,6 +491,22 @@ export default function ManualFixedAssetEntry() {
       }
     } catch (err) {
       toast.error(err.message || (isEditing ? 'Failed to update asset' : 'Failed to create asset'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(
+      `DELETE this asset permanently?\n\nThis will remove:\n- The fixed asset record\n- Its Journal Entry from the GL\n- The linked purchase note\n- GST ledger entries\n- Depreciation run lines\n\nThis action CANNOT be undone.`
+    )) return;
+    setSaving(true);
+    try {
+      await del(`/api/fixed-assets/${id}`);
+      toast.success('Asset deleted successfully');
+      navigate('/assets');
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete asset');
     } finally {
       setSaving(false);
     }
@@ -873,7 +889,19 @@ export default function ManualFixedAssetEntry() {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         flexShrink: 0,
       }}>
-        <button className="btn" onClick={() => navigate(isEditing ? `/assets/${id}` : '/assets')}>Cancel</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn" onClick={() => navigate(isEditing ? `/assets/${id}` : '/assets')}>Cancel</button>
+          {isEditing && (
+            <button
+              className="btn"
+              onClick={handleDelete}
+              disabled={saving}
+              style={{ color: 'var(--red)', borderColor: 'var(--red)', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Trash2 size={13} /> Delete Asset
+            </button>
+          )}
+        </div>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           <Save size={13} /> {saving ? 'Saving…' : (isEditing ? 'Update Asset' : 'Save Changes')}
         </button>

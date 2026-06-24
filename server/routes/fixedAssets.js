@@ -178,6 +178,23 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     if (!asset_name || !category_id || !purchase_date || !in_service_date || purchase_cost == null)
       return res.status(400).json({ error: 'Required: asset_name, category_id, purchase_date, in_service_date, purchase_cost' });
 
+    // ── Duplicate check ──────────────────────────────────────────────────────
+    const dupCheck = await pool.query(
+      `SELECT id, asset_code FROM fixed_assets
+       WHERE LOWER(TRIM(asset_name)) = LOWER(TRIM($1))
+         AND category_id = $2
+         AND purchase_date::date = $3::date`,
+      [asset_name, parseInt(category_id), purchase_date]
+    );
+    if (dupCheck.rows.length > 0) {
+      const dup = dupCheck.rows[0];
+      return res.status(409).json({
+        error: `A fixed asset with the same name, category, and purchase date already exists: ${dup.asset_code}. Please check before creating a duplicate.`,
+        duplicate_asset_code: dup.asset_code,
+        duplicate_id: dup.id,
+      });
+    }
+
     const taxable = money(taxable_value);
     const cgst = money(cgst_amount);
     const sgst = money(sgst_amount);
@@ -479,6 +496,64 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
     dispatchEvent('asset.deleted', { id: parseInt(req.params.id) }).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── DELETE (admin only — full cascade) ──────────────────────────────────────
+router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+    const assetId = parseInt(req.params.id);
+    if (!assetId || isNaN(assetId)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid asset id' });
+    }
+
+    // Load asset to get linked purchase_note_id
+    const faR = await client.query('SELECT * FROM fixed_assets WHERE id = $1', [assetId]);
+    if (!faR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+    const asset = faR.rows[0];
+
+    // 1. Delete depreciation run lines for this asset
+    await client.query('DELETE FROM depreciation_run_lines WHERE fixed_asset_id = $1', [assetId]);
+
+    // 2. Delete GST ledger entries
+    await client.query('DELETE FROM fixed_asset_gst_ledger WHERE fixed_asset_id = $1', [assetId]);
+
+    // 3. Delete JEs linked to this asset (fixed_asset_purchase + disposal)
+    //    First get JE ids, then delete je_lines, then delete journal_entries
+    const jeR = await client.query(
+      `SELECT id FROM journal_entries WHERE source_type IN ('fixed_asset_purchase','disposal') AND source_id = $1`,
+      [assetId]
+    );
+    const jeIds = jeR.rows.map(r => r.id);
+    if (jeIds.length > 0) {
+      await client.query(`DELETE FROM je_lines WHERE je_id = ANY($1::int[])`, [jeIds]);
+      await client.query(`DELETE FROM journal_entries WHERE id = ANY($1::int[])`, [jeIds]);
+    }
+
+    // 4. Delete the fixed asset itself
+    await client.query('DELETE FROM fixed_assets WHERE id = $1', [assetId]);
+
+    // 5. Delete purchase note lines + purchase note (if linked)
+    if (asset.purchase_note_id) {
+      await client.query('DELETE FROM purchase_note_lines WHERE purchase_note_id = $1', [asset.purchase_note_id]);
+      await client.query('DELETE FROM purchase_notes WHERE id = $1', [asset.purchase_note_id]);
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, deleted_asset_code: asset.asset_code });
+    dispatchEvent('asset.deleted', { id: assetId }).catch(() => {});
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('[DELETE /api/fixed-assets/:id]', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
