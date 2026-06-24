@@ -13,7 +13,7 @@ import ExportMenu from '../../../shared/components/ExportMenu';
 import { useTabs } from '../../../core/tabs';
 import DatePicker from '../../../shared/components/DatePicker';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
-import { Plus, Save, Trash2, FileText, ShoppingCart, RefreshCw } from 'lucide-react';
+import { Plus, Save, Trash2, FileText, ShoppingCart, RefreshCw, LucideEqual } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
@@ -23,7 +23,7 @@ import {
 const PN_PAGE_SIZE = 500;
 const INITIAL_LINE = {
   item_id: '', item_name: '', item_code: '', description: '', batch_no: '', qty: '', unit: 'PCS',
-  weight: '', rate: '', amount: '', tax_pct: 0,
+  weight: '', rate: '', amount: '', tax_pct: 0, LucideEqual,
   dim_length: '', dim_depth: '', dim_height: '', dim_unit: 'mm'
 };
 const PN_FILTERS = [
