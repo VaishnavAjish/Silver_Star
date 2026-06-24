@@ -267,7 +267,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
        RETURNING *`,
       [
         docNumber, date,
-        primaryLine.category_id   ? parseInt(primaryLine.category_id)   : null,
+        null, // category_id: legacy FK col pointing to expense_categories — GL account stored in expense_lines.gl_account_id
         primaryLine.description   || legacyDesc || '',
         totalAmount,
         paid_via || payment_mode  || 'Bank Transfer',
