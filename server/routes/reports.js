@@ -729,15 +729,11 @@ router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
        LEFT JOIN journal_entries je ON je.id = jl.je_id
          AND je.status = 'posted' AND je.date::date <= $1::date
        WHERE a.id IN (
-         SELECT DISTINCT gl_account_id FROM fixed_asset_categories WHERE gl_account_id IS NOT NULL
+         SELECT DISTINCT gl_asset_account_id FROM fixed_asset_categories WHERE gl_asset_account_id IS NOT NULL
          UNION
          SELECT DISTINCT gl_accum_depr_account_id FROM fixed_asset_categories WHERE gl_accum_depr_account_id IS NOT NULL
          UNION
          SELECT DISTINCT gl_depr_expense_account_id FROM fixed_asset_categories WHERE gl_depr_expense_account_id IS NOT NULL
-         UNION
-         SELECT DISTINCT gl_disposal_gain_account_id FROM fixed_asset_categories WHERE gl_disposal_gain_account_id IS NOT NULL
-         UNION
-         SELECT DISTINCT gl_disposal_loss_account_id FROM fixed_asset_categories WHERE gl_disposal_loss_account_id IS NOT NULL
        )
        GROUP BY a.id, a.code, a.name, a.account_type, a.sub_type
        ORDER BY a.code`,
@@ -752,7 +748,7 @@ router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
          a_depr.code  AS accum_depr_code,    a_depr.name  AS accum_depr_name,
          a_exp.code   AS depr_exp_code,      a_exp.name   AS depr_exp_name
        FROM fixed_asset_categories fac
-       LEFT JOIN accounts a_asset ON a_asset.id = fac.gl_account_id
+       LEFT JOIN accounts a_asset ON a_asset.id = fac.gl_asset_account_id
        LEFT JOIN accounts a_depr  ON a_depr.id  = fac.gl_accum_depr_account_id
        LEFT JOIN accounts a_exp   ON a_exp.id   = fac.gl_depr_expense_account_id
        ORDER BY fac.name`
