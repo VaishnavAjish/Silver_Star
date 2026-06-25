@@ -617,6 +617,171 @@ router.get('/fixed-asset-register', authenticate, async (req, res) => {
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
+// ── FIXED ASSET DASHBOARD ─────────────────────────────────────────────────────
+// GET /api/reports/fixed-asset-dashboard?asOfDate=YYYY-MM-DD
+router.get('/fixed-asset-dashboard', authenticate, async (req, res) => {
+  try {
+    const asOfDate = req.query.asOfDate || new Date().toISOString().split('T')[0];
+
+    // KPI summary + per-category breakdown
+    const r = await pool.query(
+      `SELECT
+         fac.name AS category_name,
+         COUNT(fa.id) AS asset_count,
+         SUM(fa.purchase_cost) AS total_cost,
+         SUM(fa.accumulated_depreciation - COALESCE((
+           SELECT SUM(drl.depreciation_amount)
+           FROM depreciation_run_lines drl
+           JOIN depreciation_runs dr ON drl.run_id = dr.id
+           WHERE drl.fixed_asset_id = fa.id AND dr.status = 'posted' AND dr.period_to > $1
+         ), 0)) AS total_accum_depr,
+         SUM(fa.purchase_cost - (fa.accumulated_depreciation - COALESCE((
+           SELECT SUM(drl.depreciation_amount)
+           FROM depreciation_run_lines drl
+           JOIN depreciation_runs dr ON drl.run_id = dr.id
+           WHERE drl.fixed_asset_id = fa.id AND dr.status = 'posted' AND dr.period_to > $1
+         ), 0))) AS total_wdv,
+         COUNT(CASE WHEN fa.status = 'active' THEN 1 END) AS active_count,
+         COUNT(CASE WHEN fa.status = 'disposed' THEN 1 END) AS disposed_count
+       FROM fixed_assets fa
+       JOIN fixed_asset_categories fac ON fa.category_id = fac.id
+       WHERE fa.purchase_date <= $1
+       GROUP BY fac.id, fac.name
+       ORDER BY total_cost DESC`,
+      [asOfDate]
+    );
+
+    // Depreciation posted by month (last 12 months)
+    const trendR = await pool.query(
+      `SELECT
+         TO_CHAR(dr.period_to, 'Mon YYYY') AS month_label,
+         DATE_TRUNC('month', dr.period_to) AS month_start,
+         SUM(drl.depreciation_amount) AS depreciation_amount
+       FROM depreciation_run_lines drl
+       JOIN depreciation_runs dr ON drl.run_id = dr.id
+       WHERE dr.status = 'posted'
+         AND dr.period_to >= ($1::date - INTERVAL '12 months')
+         AND dr.period_to <= $1::date
+       GROUP BY DATE_TRUNC('month', dr.period_to), TO_CHAR(dr.period_to, 'Mon YYYY')
+       ORDER BY month_start ASC`
+      , [asOfDate]
+    );
+
+    const categories = r.rows.map(row => ({
+      category_name:  row.category_name,
+      asset_count:    parseInt(row.asset_count),
+      active_count:   parseInt(row.active_count),
+      disposed_count: parseInt(row.disposed_count),
+      total_cost:     Math.round(parseFloat(row.total_cost || 0) * 100) / 100,
+      total_accum_depr: Math.round(parseFloat(row.total_accum_depr || 0) * 100) / 100,
+      total_wdv:      Math.round(parseFloat(row.total_wdv || 0) * 100) / 100,
+      depr_pct:       row.total_cost > 0
+        ? Math.round((parseFloat(row.total_accum_depr || 0) / parseFloat(row.total_cost)) * 100)
+        : 0,
+    }));
+
+    const grand = categories.reduce((a, c) => ({
+      total_cost:       a.total_cost + c.total_cost,
+      total_accum_depr: a.total_accum_depr + c.total_accum_depr,
+      total_wdv:        a.total_wdv + c.total_wdv,
+      asset_count:      a.asset_count + c.asset_count,
+      active_count:     a.active_count + c.active_count,
+      disposed_count:   a.disposed_count + c.disposed_count,
+    }), { total_cost: 0, total_accum_depr: 0, total_wdv: 0, asset_count: 0, active_count: 0, disposed_count: 0 });
+
+    res.json({
+      as_of_date: asOfDate,
+      kpi: {
+        total_assets:    grand.asset_count,
+        active_assets:   grand.active_count,
+        disposed_assets: grand.disposed_count,
+        total_cost:      Math.round(grand.total_cost * 100) / 100,
+        total_accum_depr:Math.round(grand.total_accum_depr * 100) / 100,
+        total_wdv:       Math.round(grand.total_wdv * 100) / 100,
+        overall_depr_pct: grand.total_cost > 0
+          ? Math.round((grand.total_accum_depr / grand.total_cost) * 100)
+          : 0,
+      },
+      categories,
+      depreciation_trend: trendR.rows.map(r => ({
+        month: r.month_label,
+        amount: Math.round(parseFloat(r.depreciation_amount || 0) * 100) / 100,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── FIXED ASSET TRIAL BALANCE ──────────────────────────────────────────────────
+// GET /api/reports/fixed-asset-trial-balance?asOfDate=YYYY-MM-DD
+router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
+  try {
+    const asOfDate = req.query.asOfDate || new Date().toISOString().split('T')[0];
+
+    // Get GL account balances for all accounts linked to fixed asset categories
+    const r = await pool.query(
+      `SELECT
+         a.id, a.code, a.name, a.account_type, a.sub_type,
+         COALESCE(SUM(CASE WHEN jl.type = 'debit'  THEN jl.amount ELSE 0 END), 0) AS total_debit,
+         COALESCE(SUM(CASE WHEN jl.type = 'credit' THEN jl.amount ELSE 0 END), 0) AS total_credit,
+         COALESCE(SUM(CASE WHEN jl.type = 'debit'  THEN jl.amount ELSE -jl.amount END), 0) AS net_balance
+       FROM accounts a
+       LEFT JOIN je_lines jl ON jl.account_id = a.id
+       LEFT JOIN journal_entries je ON je.id = jl.je_id
+         AND je.status = 'posted' AND je.date::date <= $1::date
+       WHERE a.id IN (
+         SELECT DISTINCT gl_account_id FROM fixed_asset_categories WHERE gl_account_id IS NOT NULL
+         UNION
+         SELECT DISTINCT gl_accum_depr_account_id FROM fixed_asset_categories WHERE gl_accum_depr_account_id IS NOT NULL
+         UNION
+         SELECT DISTINCT gl_depr_expense_account_id FROM fixed_asset_categories WHERE gl_depr_expense_account_id IS NOT NULL
+         UNION
+         SELECT DISTINCT gl_disposal_gain_account_id FROM fixed_asset_categories WHERE gl_disposal_gain_account_id IS NOT NULL
+         UNION
+         SELECT DISTINCT gl_disposal_loss_account_id FROM fixed_asset_categories WHERE gl_disposal_loss_account_id IS NOT NULL
+       )
+       GROUP BY a.id, a.code, a.name, a.account_type, a.sub_type
+       ORDER BY a.code`,
+      [asOfDate]
+    );
+
+    // Also get per-category account mapping
+    const catR = await pool.query(
+      `SELECT
+         fac.name AS category_name,
+         a_asset.code AS asset_account_code, a_asset.name AS asset_account_name,
+         a_depr.code  AS accum_depr_code,    a_depr.name  AS accum_depr_name,
+         a_exp.code   AS depr_exp_code,      a_exp.name   AS depr_exp_name
+       FROM fixed_asset_categories fac
+       LEFT JOIN accounts a_asset ON a_asset.id = fac.gl_account_id
+       LEFT JOIN accounts a_depr  ON a_depr.id  = fac.gl_accum_depr_account_id
+       LEFT JOIN accounts a_exp   ON a_exp.id   = fac.gl_depr_expense_account_id
+       ORDER BY fac.name`
+    );
+
+    const accounts = r.rows.map(row => ({
+      id:           row.id,
+      code:         row.code,
+      name:         row.name,
+      account_type: row.account_type,
+      sub_type:     row.sub_type,
+      total_debit:  Math.round(parseFloat(row.total_debit) * 100) / 100,
+      total_credit: Math.round(parseFloat(row.total_credit) * 100) / 100,
+      net_balance:  Math.round(parseFloat(row.net_balance) * 100) / 100,
+    }));
+
+    const grand_debit  = accounts.reduce((s, a) => s + a.total_debit, 0);
+    const grand_credit = accounts.reduce((s, a) => s + a.total_credit, 0);
+
+    res.json({
+      as_of_date: asOfDate,
+      accounts,
+      category_mapping: catR.rows,
+      grand_total_debit:  Math.round(grand_debit * 100) / 100,
+      grand_total_credit: Math.round(grand_credit * 100) / 100,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── DEPRECIATION SCHEDULE ─────────────────────────────────────────────────────
 // GET /api/reports/depreciation-schedule?fromDate=&toDate=
 router.get('/depreciation-schedule', authenticate, async (req, res) => {
