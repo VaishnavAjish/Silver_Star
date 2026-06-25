@@ -721,9 +721,9 @@ router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
     const r = await pool.query(
       `SELECT
          a.id, a.code, a.name, a.account_type, a.sub_type,
-         COALESCE(SUM(CASE WHEN jl.type = 'debit'  THEN jl.amount ELSE 0 END), 0) AS total_debit,
-         COALESCE(SUM(CASE WHEN jl.type = 'credit' THEN jl.amount ELSE 0 END), 0) AS total_credit,
-         COALESCE(SUM(CASE WHEN jl.type = 'debit'  THEN jl.amount ELSE -jl.amount END), 0) AS net_balance
+         COALESCE(SUM(jl.debit), 0) AS total_debit,
+         COALESCE(SUM(jl.credit), 0) AS total_credit,
+         COALESCE(SUM(jl.debit - jl.credit), 0) AS net_balance
        FROM accounts a
        LEFT JOIN je_lines jl ON jl.account_id = a.id
        LEFT JOIN journal_entries je ON je.id = jl.je_id
