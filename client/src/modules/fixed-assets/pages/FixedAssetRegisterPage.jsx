@@ -340,55 +340,65 @@ function AssetRegisterTable({ data, mode, onSelectAsset }) {
       )}
 
       {/* ── CATEGORY VIEW ── */}
-      {mode === 'category' && data.categories.map((cat, ci) => (
-        <div key={ci} style={{ marginBottom: 24 }}>
-          {/* Category heading — same style as CC reports "CC01 – Project Cost" */}
-          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--g800)', padding: '6px 0', marginBottom: 4, borderBottom: '2px solid var(--g200)' }}>
-            {cat.category_name}
-          </div>
+      {mode === 'category' && data.categories.map((cat, ci) => {
+        // Group assets by asset_name
+        const grouped = Object.values(cat.assets.reduce((acc, a) => {
+          if (!acc[a.asset_name]) {
+            acc[a.asset_name] = {
+              asset_name: a.asset_name,
+              count: 0,
+              purchase_cost: 0,
+              accumulated_depreciation: 0,
+              wdv_as_of: 0
+            };
+          }
+          acc[a.asset_name].count += 1;
+          acc[a.asset_name].purchase_cost += Number(a.purchase_cost || 0);
+          acc[a.asset_name].accumulated_depreciation += Number(a.accumulated_depreciation || 0);
+          acc[a.asset_name].wdv_as_of += Number(a.wdv_as_of || 0);
+          return acc;
+        }, {}));
 
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ ...th, width: 90 }}>Asset Code</th>
-                <th style={th}>Asset Name</th>
-                <th style={{ ...th, width: 105 }}>Purchase Date</th>
-                <th style={{ ...th, width: 105 }}>In Service</th>
-                <th style={{ ...th, textAlign: 'right', width: 130 }}>Cost (₹)</th>
-                <th style={{ ...th, textAlign: 'right', width: 140 }}>Accum Depr (₹)</th>
-                <th style={{ ...th, textAlign: 'right', width: 130 }}>WDV (₹)</th>
-                <th style={{ ...th, width: 70 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cat.assets.map((a, i) => (
-                <tr key={i}
-                  onDoubleClick={() => a.id && onSelectAsset(a.id)}
-                  style={{ cursor: a.id ? 'pointer' : 'default' }}
-                >
-                  <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--brand)' }}>{a.asset_code}</td>
-                  <td style={{ ...td, fontWeight: 500 }}>{a.asset_name}</td>
-                  <td style={td}>{fmtDate(a.purchase_date)}</td>
-                  <td style={td}>{fmtDate(a.in_service_date)}</td>
-                  <td style={{ ...tdNum, color: '#0D47A1' }}>{fmt(a.purchase_cost)}</td>
-                  <td style={{ ...tdNum, color: 'var(--red)' }}>{fmt(a.accumulated_depreciation)}</td>
-                  <td style={{ ...tdNum, fontWeight: 600 }}>{fmt(a.wdv_as_of)}</td>
-                  <td style={td}><span className={`badge b-${a.status === 'active' ? 'active' : 'draft'}`} style={{ fontSize: 10 }}>{a.status}</span></td>
+        return (
+          <div key={ci} style={{ marginBottom: 24 }}>
+            {/* Category heading — same style as CC reports "CC01 – Project Cost" */}
+            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--g800)', padding: '6px 0', marginBottom: 4, borderBottom: '2px solid var(--g200)' }}>
+              {cat.category_name}
+            </div>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={th}>Asset Name</th>
+                  <th style={{ ...th, textAlign: 'right', width: 100 }}>Quantity</th>
+                  <th style={{ ...th, textAlign: 'right', width: 130 }}>Cost (₹)</th>
+                  <th style={{ ...th, textAlign: 'right', width: 140 }}>Accum Depr (₹)</th>
+                  <th style={{ ...th, textAlign: 'right', width: 130 }}>WDV (₹)</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: 'var(--g50)' }}>
-                <td colSpan={4} style={{ ...td, textAlign: 'right', fontWeight: 700, color: 'var(--g700)' }}>{cat.category_name} Total</td>
-                <td style={{ ...tdNum, fontWeight: 700, color: '#0D47A1' }}>{fmt(cat.total_cost)}</td>
-                <td style={{ ...tdNum, fontWeight: 700, color: 'var(--red)' }}>{fmt(cat.total_accum_depr)}</td>
-                <td style={{ ...tdNum, fontWeight: 700, color: 'var(--brand-dark)' }}>{fmt(cat.total_wdv)}</td>
-                <td style={td} />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      ))}
+              </thead>
+              <tbody>
+                {grouped.map((a, i) => (
+                  <tr key={i}>
+                    <td style={{ ...td, fontWeight: 500 }}>{a.asset_name}</td>
+                    <td style={tdNum}>{a.count}</td>
+                    <td style={{ ...tdNum, color: '#0D47A1' }}>{fmt(a.purchase_cost)}</td>
+                    <td style={{ ...tdNum, color: 'var(--red)' }}>{fmt(a.accumulated_depreciation)}</td>
+                    <td style={{ ...tdNum, fontWeight: 600 }}>{fmt(a.wdv_as_of)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'var(--g50)' }}>
+                  <td colSpan={2} style={{ ...td, textAlign: 'right', fontWeight: 700, color: 'var(--g700)' }}>{cat.category_name} Total</td>
+                  <td style={{ ...tdNum, fontWeight: 700, color: '#0D47A1' }}>{fmt(cat.total_cost)}</td>
+                  <td style={{ ...tdNum, fontWeight: 700, color: 'var(--red)' }}>{fmt(cat.total_accum_depr)}</td>
+                  <td style={{ ...tdNum, fontWeight: 700, color: 'var(--brand-dark)' }}>{fmt(cat.total_wdv)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        );
+      })}
 
       {/* Grand total — same style as CC reports "Overall Grand Total" */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 0', borderTop: '2px solid var(--g300)', marginTop: 8 }}>
