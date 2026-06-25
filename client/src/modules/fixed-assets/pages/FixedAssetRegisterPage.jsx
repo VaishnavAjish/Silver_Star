@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { Search, BookOpen, BarChart2, List } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
+import SearchableSelect from '../../../shared/components/SearchableSelect';
 import Modal from '../../../shared/components/Modal';
 import toast from 'react-hot-toast';
 
@@ -18,6 +19,12 @@ const VIEWS = [
   { key: 'dashboard',      label: 'Dashboard',       icon: BarChart2 },
   { key: 'trial-balance',  label: 'Trial Balance',   icon: BookOpen  },
   { key: 'asset-register', label: 'Asset Register',  icon: List      },
+];
+
+const MODES = [
+  { key: 'category', label: 'Category View' },
+  { key: 'summary',  label: 'Summary View' },
+  { key: 'detailed', label: 'Detailed View' },
 ];
 
 // ── Asset detail popup ─────────────────────────────────────────────────────────
@@ -261,12 +268,79 @@ function TrialBalanceTable({ data }) {
 }
 
 // ── ASSET REGISTER TAB ─────────────────────────────────────────────────────────
-function AssetRegisterTable({ data, onSelectAsset }) {
+function AssetRegisterTable({ data, mode, onSelectAsset }) {
   if (!data) return <p style={{ padding: 24 }}>No data. Click Apply to load.</p>;
+
+  // Collect all assets into a single list for Detailed View
+  const allAssets = data.categories.flatMap(c => 
+    c.assets.map(a => ({ ...a, category_name: c.category_name }))
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      {data.categories.map((cat, ci) => (
+      {/* ── SUMMARY VIEW ── */}
+      {mode === 'summary' && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+          <thead>
+            <tr>
+              <th style={th}>Category Name</th>
+              <th style={{ ...th, textAlign: 'right', width: 130 }}>Total Cost (₹)</th>
+              <th style={{ ...th, textAlign: 'right', width: 140 }}>Accum Depr (₹)</th>
+              <th style={{ ...th, textAlign: 'right', width: 130 }}>Net Book Value (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.categories.map((cat, i) => (
+              <tr key={i}>
+                <td style={{ ...td, fontWeight: 600 }}>{cat.category_name}</td>
+                <td style={{ ...tdNum, color: '#0D47A1' }}>{fmt(cat.total_cost)}</td>
+                <td style={{ ...tdNum, color: 'var(--red)' }}>{fmt(cat.total_accum_depr)}</td>
+                <td style={{ ...tdNum, fontWeight: 700, color: 'var(--brand-dark)' }}>{fmt(cat.total_wdv)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* ── DETAILED VIEW ── */}
+      {mode === 'detailed' && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, width: 90 }}>Asset Code</th>
+              <th style={th}>Asset Name</th>
+              <th style={th}>Category</th>
+              <th style={{ ...th, width: 105 }}>Purchase Date</th>
+              <th style={{ ...th, width: 105 }}>In Service</th>
+              <th style={{ ...th, textAlign: 'right', width: 130 }}>Cost (₹)</th>
+              <th style={{ ...th, textAlign: 'right', width: 140 }}>Accum Depr (₹)</th>
+              <th style={{ ...th, textAlign: 'right', width: 130 }}>WDV (₹)</th>
+              <th style={{ ...th, width: 70 }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allAssets.map((a, i) => (
+              <tr key={i}
+                onDoubleClick={() => a.id && onSelectAsset(a.id)}
+                style={{ cursor: a.id ? 'pointer' : 'default' }}
+              >
+                <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--brand)' }}>{a.asset_code}</td>
+                <td style={{ ...td, fontWeight: 500 }}>{a.asset_name}</td>
+                <td style={td}>{a.category_name}</td>
+                <td style={td}>{fmtDate(a.purchase_date)}</td>
+                <td style={td}>{fmtDate(a.in_service_date)}</td>
+                <td style={{ ...tdNum, color: '#0D47A1' }}>{fmt(a.purchase_cost)}</td>
+                <td style={{ ...tdNum, color: 'var(--red)' }}>{fmt(a.accumulated_depreciation)}</td>
+                <td style={{ ...tdNum, fontWeight: 600 }}>{fmt(a.wdv_as_of)}</td>
+                <td style={td}><span className={`badge b-${a.status === 'active' ? 'active' : 'draft'}`} style={{ fontSize: 10 }}>{a.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* ── CATEGORY VIEW ── */}
+      {mode === 'category' && data.categories.map((cat, ci) => (
         <div key={ci} style={{ marginBottom: 24 }}>
           {/* Category heading — same style as CC reports "CC01 – Project Cost" */}
           <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--g800)', padding: '6px 0', marginBottom: 4, borderBottom: '2px solid var(--g200)' }}>
@@ -331,6 +405,7 @@ function AssetRegisterTable({ data, onSelectAsset }) {
 export default function FixedAssetRegister() {
   const api      = useApi();
   const [view, setView]         = useState('dashboard');
+  const [mode, setMode]         = useState('category');
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading]   = useState(false);
   const [data, setData]         = useState(null);
@@ -382,6 +457,18 @@ export default function FixedAssetRegister() {
         <div style={{ flex: 1 }} />
 
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+          {view === 'asset-register' && (
+            <div className="filter-field" style={{ width: 160 }}>
+              <label className="filter-label">View Mode</label>
+              <SearchableSelect
+                dropdownSearch
+                placeholder="Category View"
+                value={MODES.find(m => m.key === mode) ? { id: mode, name: MODES.find(m => m.key === mode).label } : null}
+                onChange={v => setMode(v ? v.id : 'category')}
+                options={MODES.map(m => ({ id: m.key, name: m.label }))}
+              />
+            </div>
+          )}
           <div className="filter-field" style={{ width: 160 }}>
             <label className="filter-label">As of Date</label>
             <DatePicker value={asOfDate} onChange={v => setAsOfDate(v || '')} />
@@ -399,7 +486,7 @@ export default function FixedAssetRegister() {
           <>
             {view === 'dashboard'      && <DashboardTable      data={data} />}
             {view === 'trial-balance'  && <TrialBalanceTable   data={data} />}
-            {view === 'asset-register' && <AssetRegisterTable  data={data} onSelectAsset={setSelectedAssetId} />}
+            {view === 'asset-register' && <AssetRegisterTable  data={data} mode={mode} onSelectAsset={setSelectedAssetId} />}
           </>
         )}
       </div>
