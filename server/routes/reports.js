@@ -720,7 +720,7 @@ router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
     // Get GL account balances for all accounts linked to fixed asset categories
     const r = await pool.query(
       `SELECT
-         a.id, a.code, a.name, a.account_type, a.sub_type,
+         a.id, a.code, a.name, a.type AS account_type,
          COALESCE(SUM(jl.debit), 0) AS total_debit,
          COALESCE(SUM(jl.credit), 0) AS total_credit,
          COALESCE(SUM(jl.debit - jl.credit), 0) AS net_balance
@@ -735,7 +735,7 @@ router.get('/fixed-asset-trial-balance', authenticate, async (req, res) => {
          UNION
          SELECT DISTINCT gl_depr_expense_account_id FROM fixed_asset_categories WHERE gl_depr_expense_account_id IS NOT NULL
        )
-       GROUP BY a.id, a.code, a.name, a.account_type, a.sub_type
+       GROUP BY a.id, a.code, a.name, a.type
        ORDER BY a.code`,
       [asOfDate]
     );
