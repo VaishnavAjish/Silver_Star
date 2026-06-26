@@ -150,8 +150,34 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // ── UPDATE ────────────────────────────────────────────────────────────────────
+/**
+ * CATEGORY CASCADE BEHAVIOUR:
+ * When a template's category_id is changed, all fixed_assets linked to this template
+ * (via template_id) that have NO posted depreciation runs will automatically inherit
+ * the new category. Assets that already have posted depreciation are skipped to
+ * preserve GL reconciliation — those require the Asset Reclassification Utility.
+ */
 router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
+  const client = await pool.primaryPool.connect();
   try {
+    await client.query('BEGIN');
+
+    // Fetch the current template to detect a category change
+    const currentR = await client.query(
+      'SELECT * FROM asset_templates WHERE id = $1',
+      [req.params.id]
+    );
+    if (!currentR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not found' });
+    }
+    const currentTemplate = currentR.rows[0];
+    const newCategoryId = req.body.category_id !== undefined
+      ? (req.body.category_id === '' ? null : parseInt(req.body.category_id))
+      : null;
+    const categoryChanged = newCategoryId && newCategoryId !== parseInt(currentTemplate.category_id);
+
+    // Build the SET clause for the template update
     const sets   = [];
     const params = [];
     const add    = (col, val) => {
@@ -170,24 +196,91 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
       }
     }
 
-    if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+    if (!sets.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
 
     params.push(req.params.id);
-    const r = await pool.query(
+    const r = await client.query(
       `UPDATE asset_templates SET ${sets.join(', ')}, updated_at = NOW()
        WHERE id = $${params.length} RETURNING *`,
       params
     );
-    if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
-    dispatchEvent('asset_template.updated', { id: r.rows[0].id, code: r.rows[0].code, name: r.rows[0].name, module: 'fixed_assets' });
-    res.json(r.rows[0]);
+    if (!r.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not found' });
+    }
+    const updatedTemplate = r.rows[0];
+
+    // ── CASCADE category to linked fixed_assets ───────────────────────────────
+    let assetsUpdated = 0;
+    let assetsSkipped = 0;
+
+    if (categoryChanged) {
+      // Find all assets linked to this template
+      const linkedR = await client.query(
+        'SELECT id FROM fixed_assets WHERE template_id = $1',
+        [req.params.id]
+      );
+
+      for (const asset of linkedR.rows) {
+        // Check if this asset has any posted depreciation runs
+        const deprR = await client.query(
+          `SELECT COUNT(*) FROM depreciation_run_lines drl
+           JOIN depreciation_runs dr ON drl.run_id = dr.id
+           WHERE drl.fixed_asset_id = $1 AND dr.status = 'posted'`,
+          [asset.id]
+        );
+        const hasPostedDepr = parseInt(deprR.rows[0].count) > 0;
+
+        if (hasPostedDepr) {
+          // Skip — changing category after depreciation is posted requires
+          // a formal Asset Reclassification Journal via the Reclassification Utility
+          assetsSkipped++;
+        } else {
+          // Safe to update — no GL impact since depreciation has not been posted yet
+          await client.query(
+            'UPDATE fixed_assets SET category_id = $1, updated_at = NOW() WHERE id = $2',
+            [newCategoryId, asset.id]
+          );
+          assetsUpdated++;
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+
+    dispatchEvent('asset_template.updated', {
+      id: updatedTemplate.id,
+      code: updatedTemplate.code,
+      name: updatedTemplate.name,
+      module: 'fixed_assets',
+      category_cascaded: categoryChanged,
+      assets_updated: assetsUpdated,
+      assets_skipped: assetsSkipped,
+    });
+
+    res.json({
+      ...updatedTemplate,
+      category_cascaded: categoryChanged,
+      assets_updated: assetsUpdated,
+      assets_skipped: assetsSkipped,
+      ...(assetsSkipped > 0 && {
+        skip_reason: `${assetsSkipped} asset(s) have posted depreciation and were not updated. Use the Asset Reclassification Utility to move them.`,
+      }),
+    });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') {
       return res.status(409).json({ error: 'A template with this name or code already exists' });
     }
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
+
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
 router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
