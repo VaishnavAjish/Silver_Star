@@ -49,17 +49,17 @@ async function fixHistoricalAssets() {
         const jeId = jeRes.rows[0].id;
 
         // Find the debit line for the Asset
-        const linesRes = await client.query(`SELECT id, account_id, debit, credit FROM journal_entry_lines WHERE journal_entry_id = $1`, [jeId]);
+        const linesRes = await client.query(`SELECT id, account_id, debit, credit FROM je_lines WHERE je_id = $1`, [jeId]);
         
         const assetLine = linesRes.rows.find(l => parseFloat(l.debit) == parseFloat(asset.purchase_cost));
         
         if (assetLine) {
           // Update the asset line's debit to the new purchase cost
-          await client.query(`UPDATE journal_entry_lines SET debit = $1 WHERE id = $2`, [newPurchaseCost, assetLine.id]);
+          await client.query(`UPDATE je_lines SET debit = $1 WHERE id = $2`, [newPurchaseCost, assetLine.id]);
           
           // Insert a new line for the GST debit
           await client.query(`
-            INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit)
+            INSERT INTO je_lines (je_id, account_id, debit, credit)
             VALUES ($1, $2, $3, 0)
           `, [jeId, gstAccountId, claimableGst]);
           
