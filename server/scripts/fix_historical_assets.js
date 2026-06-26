@@ -1,4 +1,4 @@
-const { pool } = require('../db');
+const pool = require('../db/pool');
 
 async function fixHistoricalAssets() {
   const client = await pool.primaryPool.connect();
@@ -80,7 +80,7 @@ async function fixHistoricalAssets() {
     console.error('Error fixing assets:', err);
   } finally {
     client.release();
-    pool.end();
+    pool.shutdown();
     process.exit(0);
   }
 }
