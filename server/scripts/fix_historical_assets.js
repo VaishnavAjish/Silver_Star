@@ -26,7 +26,7 @@ async function fixHistoricalAssets() {
     console.log(`Found ${result.rows.length} asset(s) to fix.`);
 
     // Get the GST account
-    const gstAccRes = await client.query(`SELECT id FROM accounts WHERE role = 'GST_PAYABLE' LIMIT 1`);
+    const gstAccRes = await client.query(`SELECT id FROM accounts WHERE account_role = 'GST_PAYABLE' LIMIT 1`);
     if (gstAccRes.rows.length === 0) {
       throw new Error("Could not find GST_PAYABLE account.");
     }
