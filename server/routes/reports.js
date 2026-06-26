@@ -552,7 +552,7 @@ router.get('/fixed-asset-register', authenticate, async (req, res) => {
     // For each asset, WDV as of date = purchase_cost - (accumulated_depr - future_runs_after_date)
     const result = await pool.query(
       `SELECT
-         fa.id, fa.asset_code, fa.asset_name,
+         fa.id, fa.asset_code, fa.asset_name, fa.qty,
          fa.purchase_date, fa.in_service_date, fa.purchase_cost, fa.salvage_value,
          fa.status, fa.disposal_date,
          fac.id as category_id, fac.name as category_name, fac.depreciation_rate_pct,
@@ -579,6 +579,7 @@ router.get('/fixed-asset-register', authenticate, async (req, res) => {
         id:                        row.id,
         asset_code:                row.asset_code,
         asset_name:                row.asset_name,
+        qty:                       parseFloat(row.qty) || 1,
         purchase_date:             row.purchase_date,
         in_service_date:           row.in_service_date,
         purchase_cost:             parseFloat(row.purchase_cost),
@@ -627,7 +628,7 @@ router.get('/fixed-asset-dashboard', authenticate, async (req, res) => {
     const r = await pool.query(
       `SELECT
          fac.name AS category_name,
-         COUNT(fa.id) AS asset_count,
+         SUM(COALESCE(fa.qty, 1)) AS asset_count,
          SUM(fa.purchase_cost) AS total_cost,
          SUM(fa.accumulated_depreciation - COALESCE((
            SELECT SUM(drl.depreciation_amount)
@@ -641,8 +642,8 @@ router.get('/fixed-asset-dashboard', authenticate, async (req, res) => {
            JOIN depreciation_runs dr ON drl.run_id = dr.id
            WHERE drl.fixed_asset_id = fa.id AND dr.status = 'posted' AND dr.period_to > $1
          ), 0))) AS total_wdv,
-         COUNT(CASE WHEN fa.status = 'active' THEN 1 END) AS active_count,
-         COUNT(CASE WHEN fa.status = 'disposed' THEN 1 END) AS disposed_count
+         SUM(CASE WHEN fa.status = 'active' THEN COALESCE(fa.qty, 1) ELSE 0 END) AS active_count,
+         SUM(CASE WHEN fa.status = 'disposed' THEN COALESCE(fa.qty, 1) ELSE 0 END) AS disposed_count
        FROM fixed_assets fa
        JOIN fixed_asset_categories fac ON fa.category_id = fac.id
        WHERE fa.purchase_date <= $1

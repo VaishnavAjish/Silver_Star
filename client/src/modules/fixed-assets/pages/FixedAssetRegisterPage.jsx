@@ -310,6 +310,7 @@ function AssetRegisterTable({ data, mode, onSelectAsset }) {
               <th style={{ ...th, width: 90 }}>Asset Code</th>
               <th style={th}>Asset Name</th>
               <th style={th}>Category</th>
+              <th style={{ ...th, textAlign: 'right', width: 60 }}>Qty</th>
               <th style={{ ...th, width: 105 }}>Purchase Date</th>
               <th style={{ ...th, width: 105 }}>In Service</th>
               <th style={{ ...th, textAlign: 'right', width: 130 }}>Cost (₹)</th>
@@ -327,6 +328,7 @@ function AssetRegisterTable({ data, mode, onSelectAsset }) {
                 <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--brand)' }}>{a.asset_code}</td>
                 <td style={{ ...td, fontWeight: 500 }}>{a.asset_name}</td>
                 <td style={td}>{a.category_name}</td>
+                <td style={tdNum}>{a.qty}</td>
                 <td style={td}>{fmtDate(a.purchase_date)}</td>
                 <td style={td}>{fmtDate(a.in_service_date)}</td>
                 <td style={{ ...tdNum, color: '#0D47A1' }}>{fmt(a.purchase_cost)}</td>
