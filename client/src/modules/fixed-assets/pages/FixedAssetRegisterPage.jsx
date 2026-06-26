@@ -354,7 +354,7 @@ function AssetRegisterTable({ data, mode, onSelectAsset }) {
               wdv_as_of: 0
             };
           }
-          acc[a.asset_name].count += 1;
+          acc[a.asset_name].count += Number(a.qty || 1);
           acc[a.asset_name].purchase_cost += Number(a.purchase_cost || 0);
           acc[a.asset_name].accumulated_depreciation += Number(a.accumulated_depreciation || 0);
           acc[a.asset_name].wdv_as_of += Number(a.wdv_as_of || 0);
