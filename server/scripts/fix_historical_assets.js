@@ -43,7 +43,7 @@ async function fixHistoricalAssets() {
       console.log(`  -> Updated purchase_cost to ${newPurchaseCost}`);
 
       // 2. Find the Journal Entry
-      const jeRes = await client.query(`SELECT id FROM journal_entries WHERE reference_type = 'fixed_asset_purchase' AND reference_id = $1`, [asset.id]);
+      const jeRes = await client.query(`SELECT id FROM journal_entries WHERE source_type = 'fixed_asset_purchase' AND source_id = $1`, [asset.id]);
       
       if (jeRes.rows.length > 0) {
         const jeId = jeRes.rows[0].id;
