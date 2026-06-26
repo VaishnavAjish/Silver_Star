@@ -450,7 +450,7 @@ export default function ManualFixedAssetEntry() {
         ...next,
         cgst_amount: String(cgst), sgst_amount: String(sgst), igst_amount: String(igst),
         total_invoice_value: String(invoiceTotal),
-        purchase_cost: String(invoiceTotal),
+        purchase_cost: String(round(invoiceTotal - num(claimable))),
         gst_claimable_amount: claimable,
         gst_non_claimable_amount: nonClaimable,
       };

@@ -201,11 +201,11 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const igst = money(igst_amount);
     const totalGst = money(cgst + sgst + igst);
     const invoiceTotal = money(total_invoice_value || taxable + totalGst || purchase_cost);
-    const capitalizedCost = money(purchase_cost || invoiceTotal);
     const treatment = ['claimable', 'non_claimable', 'partial'].includes(gst_treatment)
       ? gst_treatment : 'non_claimable';
     const claimable    = money(gst_claimable_amount);
     const nonClaimable = money(gst_non_claimable_amount);
+    const capitalizedCost = money(invoiceTotal - claimable);
 
     if (money(claimable + nonClaimable) > totalGst) {
       return res.status(400).json({ error: 'Claimable + non-claimable GST cannot exceed total GST' });
@@ -230,7 +230,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
        RETURNING *`,
       [assetCode, purchase_date, vendor_id || null, 'fixed_asset', department_id || null,
        'Immediate', 'INR', invoice_no || null, `Fixed asset purchase - ${asset_name}`,
-       1, taxable || capitalizedCost, totalGst, capitalizedCost, req.user.id]
+       1, taxable || money(invoiceTotal - totalGst), totalGst, invoiceTotal, req.user.id]
     );
     const pn = pnResult.rows[0];
 
@@ -276,8 +276,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
          (purchase_note_id, line_no, item_id, description, qty, unit, rate, amount, tax_pct, tax_amount, total, is_capital)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [pn.id, 1, null, asset_name, 1, 'NOS',
-       taxable || capitalizedCost, taxable || capitalizedCost,
-       money(gst_rate), totalGst, capitalizedCost, true]
+       taxable || money(invoiceTotal - totalGst), taxable || money(invoiceTotal - totalGst),
+       money(gst_rate), totalGst, invoiceTotal, true]
     );
 
     if (taxable > 0 || totalGst > 0 || invoice_no) {
@@ -304,20 +304,34 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
     if (!payableAccId) throw new Error('Accounts Payable account role not found in COA');
 
-    // JE: Dr category FA account / Cr AP — unchanged from before
+    const jeLines = [
+      { accountId: assetAccId,   debit: capitalizedCost, credit: 0,
+        narration: `Capitalized asset cost - ${assetCode}`,
+        costCenterId: asset.cost_center_id || null }
+    ];
+
+    if (claimable > 0) {
+      const gstAccId = await getAccountByRole('GST_PAYABLE', client);
+      if (!gstAccId) throw new Error('GST account role not found in COA');
+      jeLines.push({
+        accountId: gstAccId, debit: claimable, credit: 0,
+        narration: `Claimable GST - ${assetCode}`,
+        costCenterId: asset.cost_center_id || null
+      });
+    }
+
+    jeLines.push({
+      accountId: payableAccId, debit: 0, credit: invoiceTotal,
+      narration: `Payable to ${vendorName} - ${assetCode}`,
+      costCenterId: asset.cost_center_id || null
+    });
+
     const je = await journalEngine.createEntry({
       date:        purchase_date,
       description: `Fixed Asset Purchase ${assetCode} - ${asset_name}`,
       sourceType:  'fixed_asset_purchase',
       sourceId:    asset.id,
-      lines: [
-        { accountId: assetAccId,   debit: capitalizedCost, credit: 0,
-          narration: `Capitalized asset cost - ${assetCode}`,
-          costCenterId: asset.cost_center_id || null },
-        { accountId: payableAccId, debit: 0, credit: capitalizedCost,
-          narration: `Payable to ${vendorName} - ${assetCode}`,
-          costCenterId: asset.cost_center_id || null },
-      ],
+      lines:       jeLines,
       autoPost:   true,
       createdBy:  req.user.id,
       client,

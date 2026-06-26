@@ -330,26 +330,35 @@ function CostCentreReportCategoryTable({ rows }) {
                 <th style={{ ...th, textAlign: 'right' }}>Addition (Net)</th>
               </tr></thead>
               <tbody>
-                {Object.entries(catGroups).map(([category, items]) => (
-                  <Fragment key={category}>
-                    <tr>
-                      <td colSpan={3} style={{ padding: '12px 10px 4px', fontSize: 14, fontWeight: 700, color: 'var(--brand)', borderBottom: '1px solid var(--g200)' }}>
-                        {category}
-                      </td>
-                    </tr>
-                    {items.map((r, i) => (
-                      <tr key={i}>
-                        <td style={td}>{r.account_code} {r.account_name}</td>
-                        <td style={td}>{r.type}</td>
-                        <td style={tdNum}>{money(r.net)}</td>
+                {Object.entries(catGroups).map(([category, items]) => {
+                  const accountGroups = {};
+                  items.forEach(r => {
+                    const accKey = `${r.account_code} ${r.account_name}`;
+                    if (!accountGroups[accKey]) accountGroups[accKey] = { type: r.type, net: 0 };
+                    accountGroups[accKey].net += Number(r.net || 0);
+                  });
+
+                  return (
+                    <Fragment key={category}>
+                      <tr>
+                        <td colSpan={3} style={{ padding: '12px 10px 4px', fontSize: 14, fontWeight: 700, color: 'var(--brand)', borderBottom: '1px solid var(--g200)' }}>
+                          {category}
+                        </td>
                       </tr>
-                    ))}
-                    <tr>
-                      <td colSpan={2} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
-                      <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
-                    </tr>
-                  </Fragment>
-                ))}
+                      {Object.entries(accountGroups).map(([accName, accData], i) => (
+                        <tr key={i}>
+                          <td style={td}>{accName}</td>
+                          <td style={td}>{accData.type}</td>
+                          <td style={tdNum}>{money(accData.net)}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td colSpan={2} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
+                        <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
+                      </tr>
+                    </Fragment>
+                  );
+                })}
                 <tr>
                   <td colSpan={2} style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right' }}>Cost Centre Total</td>
                   <td style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--green)' }}>
