@@ -81,7 +81,7 @@ class ReportingCurrencyService {
         return node.map(n => traverseAndFormat(n));
       } else if (node !== null && typeof node === 'object') {
         const newNode = { ...node };
-        const fieldsToFormat = ['amount', 'balance', 'net_balance', 'group_net', 'dr_val', 'cr_val', 'debit', 'credit', 'total_debit', 'total_credit', 'grandDebit', 'grandCredit', 'closing_balance', 'net_profit', 'total_assets', 'total_liabilities', 'total_equity', 'totalAssets', 'totalLiabilities', 'totalEquity', 'retainedEarnings'];
+        const fieldsToFormat = ['amount', 'balance', 'net_balance', 'group_net', 'dr_val', 'cr_val', 'debit', 'credit', 'total_debit', 'total_credit', 'grandDebit', 'grandCredit', 'closing_balance', 'net_profit', 'total_assets', 'total_liabilities', 'total_equity', 'totalAssets', 'totalLiabilities', 'totalEquity', 'retainedEarnings', 'totalRevenue', 'totalCogs', 'grossProfit', 'totalOpex', 'netProfit', 'openingStock', 'purchases', 'closingStock'];
 
         for (const field of fieldsToFormat) {
           if (newNode[field] !== undefined && newNode[field] !== null) {
