@@ -3,6 +3,8 @@ const pool = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
 const { getInventoryValuation, getInventoryValuationLines, round2 } = require('../services/inventoryAccounting');
 const { logger } = require('../middleware/logger');
+const { buildTrialBalanceHierarchy, buildAccountHierarchy } = require('../services/glQueryService');
+const { getFundMovementSummary, getDrillDownData } = require('../services/fundMovementService');
 
 const router = express.Router();
 
@@ -272,117 +274,12 @@ router.get('/trial-balance-detailed', authenticate, async (req, res) => {
 });
 
 // ── Balance sheet hierarchy helper ────────────────────────────────────────────
-
-async function buildAccountHierarchy(type, asOfDate) {
-  const result = await pool.query(
-    `WITH ledger AS (
-       SELECT jl.account_id,
-              SUM(jl.debit)  AS total_debit,
-              SUM(jl.credit) AS total_credit
-       FROM   je_lines jl
-       JOIN   journal_entries je ON je.id = jl.je_id
-       WHERE  je.status = 'posted' AND je.date <= $1
-       GROUP  BY jl.account_id
-     )
-     SELECT a.id, a.code, a.name, a.parent_id, a.is_group, a.level, a.path,
-            CASE WHEN a.type IN ('asset','expense')
-                 THEN COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0)
-                 ELSE COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0)
-            END AS balance
-     FROM   accounts a
-     LEFT JOIN ledger l ON l.account_id = a.id
-     WHERE  a.type = $2 AND a.status = 'active'
-     ORDER  BY COALESCE(a.path, a.code), a.code`,
-    [asOfDate, type]
-  );
-
-  const byId = {};
-  for (const row of result.rows) {
-    byId[row.id] = { ...row, balance: parseFloat(row.balance) || 0, children: [] };
-  }
-  const roots = [];
-  for (const row of result.rows) {
-    const node = byId[row.id];
-    if (row.parent_id && byId[row.parent_id]) {
-      byId[row.parent_id].children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-  const calcTotal = (node) => {
-    if (!node.children.length) return node.balance;
-    const childSum = node.children.reduce((s, c) => s + calcTotal(c), 0);
-    node.group_total = Math.round((node.balance + childSum) * 100) / 100;
-    return node.group_total;
-  };
-  roots.forEach(calcTotal);
-  return roots;
-}
+// Imported from glQueryService — do not duplicate here.
+// buildAccountHierarchy() and buildTrialBalanceHierarchy() are now shared
+// services consumed by both this file and fundMovementService.
 
 // ── Trial balance hierarchy helper ───────────────────────────────────────────
-
-async function buildTrialBalanceHierarchy(fromDate, toDate) {
-  const result = await pool.query(
-    `WITH period AS (
-       SELECT jl.account_id,
-              SUM(jl.debit)             AS total_debit,
-              SUM(jl.credit)            AS total_credit,
-              SUM(jl.debit - jl.credit) AS net_balance
-       FROM je_lines jl
-       JOIN journal_entries je ON je.id = jl.je_id
-       WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
-       GROUP BY jl.account_id
-     )
-     SELECT a.id, a.code, a.name, a.type, a.parent_id, a.is_group, a.level, a.path,
-            COALESCE(p.total_debit,  0) AS total_debit,
-            COALESCE(p.total_credit, 0) AS total_credit,
-            COALESCE(p.net_balance,  0) AS net_balance
-     FROM   accounts a
-     LEFT JOIN period p ON p.account_id = a.id
-     WHERE  a.status = 'active'
-     ORDER  BY COALESCE(a.path, a.code), a.code`,
-    [fromDate, toDate]
-  );
-
-  const byId = {};
-  for (const r of result.rows) {
-    byId[r.id] = {
-      ...r,
-      total_debit:  parseFloat(r.total_debit)  || 0,
-      total_credit: parseFloat(r.total_credit) || 0,
-      net_balance:  parseFloat(r.net_balance)  || 0,
-      children: [],
-    };
-  }
-
-  const roots = [];
-  for (const r of result.rows) {
-    const node = byId[r.id];
-    if (r.parent_id && byId[r.parent_id]) {
-      byId[r.parent_id].children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  // Aggregate group totals bottom-up (own direct entries + all children)
-  const aggregate = (node) => {
-    if (!node.children.length) {
-      return { debit: node.total_debit, credit: node.total_credit, net: node.net_balance };
-    }
-    let sumD = node.total_debit, sumC = node.total_credit, sumN = node.net_balance;
-    for (const child of node.children) {
-      const c = aggregate(child);
-      sumD += c.debit; sumC += c.credit; sumN += c.net;
-    }
-    node.group_debit  = Math.round(sumD * 100) / 100;
-    node.group_credit = Math.round(sumC * 100) / 100;
-    node.group_net    = Math.round(sumN * 100) / 100;
-    return { debit: sumD, credit: sumC, net: sumN };
-  };
-  roots.forEach(aggregate);
-  return roots;
-}
+// Imported from glQueryService — do not duplicate here.
 
 // GET /api/reports/trial-balance-hierarchy?from_date=&to_date=
 router.get('/trial-balance-hierarchy', authenticate, async (req, res) => {
@@ -1376,6 +1273,63 @@ router.get('/costing', authenticate, async (req, res) => {
       components: compWithPct,
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── FUND UTILIZATION DASHBOARD ────────────────────────────────────────────────
+// GET /api/reports/fund-utilization?from_date=&to_date=&as_of_date=
+//
+// Consumes fundMovementService exclusively. No duplicate calculations.
+// This endpoint powers the Executive Fund Utilization Dashboard.
+// Future Cash Flow, Fund Flow, and Executive Dashboard must also consume
+// fundMovementService — never implement their own financial calculations.
+router.get('/fund-utilization', authenticate, async (req, res) => {
+  try {
+    const today   = new Date().toISOString().split('T')[0];
+    // Default from_date = start of current financial year (April 1)
+    const fyYear  = new Date().getMonth() >= 3
+      ? new Date().getFullYear()
+      : new Date().getFullYear() - 1;
+    const fyStart = `${fyYear}-04-01`;
+
+    const fromDate  = req.query.from_date  || fyStart;
+    const toDate    = req.query.to_date    || today;
+    const asOfDate  = req.query.as_of_date || today;
+
+    const summary = await getFundMovementSummary({ fromDate, toDate, asOfDate });
+    res.json(summary);
+  } catch (err) {
+    require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── FUND UTILIZATION DRILL-DOWN ───────────────────────────────────────────────
+// GET /api/reports/fund-utilization/drill-down/:accountId?from_date=&to_date=
+//
+// Returns the journal entries behind any figure in the fund utilization dashboard.
+// Drill path: Dashboard → Account Group → Ledger → Journal Entry → Source Document
+router.get('/fund-utilization/drill-down/:accountId', authenticate, async (req, res) => {
+  try {
+    const today    = new Date().toISOString().split('T')[0];
+    const fyYear   = new Date().getMonth() >= 3
+      ? new Date().getFullYear()
+      : new Date().getFullYear() - 1;
+    const fyStart  = `${fyYear}-04-01`;
+
+    const accountId = parseInt(req.params.accountId);
+    const fromDate  = req.query.from_date || fyStart;
+    const toDate    = req.query.to_date   || today;
+
+    if (!accountId || isNaN(accountId)) {
+      return res.status(400).json({ error: 'Invalid accountId' });
+    }
+
+    const data = await getDrillDownData(accountId, fromDate, toDate);
+    res.json(data);
+  } catch (err) {
+    require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack);
     res.status(500).json({ error: err.message });
   }
 });
