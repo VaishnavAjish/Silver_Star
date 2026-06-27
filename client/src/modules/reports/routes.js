@@ -13,6 +13,7 @@ const CostCenterReportPage       = lazy(() => import('./pages/CostCenterReportPa
 const CostCenterTransactionsPage = lazy(() => import('./pages/CostCenterTransactionsPage'));
 const AccountsReceivablePage     = lazy(() => import('./pages/AccountsReceivablePage'));
 const AccountsPayablePage        = lazy(() => import('./pages/AccountsPayablePage'));
+const FundUtilizationDashboardPage = lazy(() => import('./pages/FundUtilizationDashboardPage'));
 
 export default [
   { path: 'ledger',                           Component: LedgerPage },
@@ -26,4 +27,5 @@ export default [
   { path: 'reports/cost-center-transactions', Component: CostCenterTransactionsPage },
   { path: 'reports/accounts-receivable',      Component: AccountsReceivablePage },
   { path: 'reports/accounts-payable',         Component: AccountsPayablePage },
+  { path: 'reports/fund-utilization',         Component: FundUtilizationDashboardPage },
 ];

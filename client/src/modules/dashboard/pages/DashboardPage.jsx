@@ -6,7 +6,7 @@ import { useAuth } from '../../../core/context/AuthContext';
 import {
   Leaf, Settings, Warehouse, ShoppingCart, Receipt,
   FileText, Send, Gem, Building2,
-  BookOpen, BarChart3,
+  BookOpen, BarChart3, PieChart
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import WidgetCard from '../components/WidgetCard';
@@ -114,6 +114,7 @@ export default function Dashboard() {
       <div className="dash-section">
         <div className="dash-section-title">Accounting</div>
         <div className="dash-cards">
+          <NavCard icon={PieChart}  label="Fund Utilization"  path="/reports/fund-utilization" color="#455A64" />
           <NavCard icon={Building2} label="Chart of Accounts" path="/accounts"        color="#455A64" />
           <NavCard icon={BookOpen}  label="Journal Entries"   path="/journal-entries" color="#455A64" />
           <NavCard icon={BarChart3} label="P&L Report"        path="/pnl"             color="#455A64" />
