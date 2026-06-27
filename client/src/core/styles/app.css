@@ -499,12 +499,16 @@ a {
   table-layout: auto;
 }
 
-/* Sticky header — use box-shadow not border so no gap during horizontal scroll */
 .dgrid thead {
   position: sticky;
   top: 0;
   z-index: 100;
   transform: translateZ(1px);
+}
+
+/* Fix sticky header offset in modals due to modal-body padding-top: 16px */
+.modal-body .dgrid thead {
+  top: -16px;
 }
 
 .dgrid th {
