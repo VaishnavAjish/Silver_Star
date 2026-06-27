@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useTabs } from '../../../core/tabs';
 import Modal from '../../../shared/components/Modal';
 import DatePicker from '../../../shared/components/DatePicker';
 import { Search, Printer, X, Download, TrendingUp, TrendingDown, PiggyBank, Landmark, Layers } from 'lucide-react';
@@ -14,6 +15,7 @@ const COLORS = ['#0D7C5F', '#1565C0', '#E87722', '#D32F2F', '#455A64', '#7B1FA2'
 export default function FundUtilizationDashboardPage() {
   const api = useApi();
   const navigate = useNavigate();
+  const { openTab } = useTabs();
 
   const fyYear = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1;
   const [fromDate, setFromDate] = useState(`${fyYear}-04-01`);
@@ -262,8 +264,8 @@ export default function FundUtilizationDashboardPage() {
                   <tr key={i}>
                     <td>{new Date(e.date).toLocaleDateString('en-IN')}</td>
                     <td onClick={() => {
-                        // Open standard JE window if needed, for now just show ID
-                        window.open('/journal-entries?search=' + e.je_number, '_blank');
+                        openTab({ id: `/journal-entries/${e.je_id}`, name: `JE ${e.je_number}`, path: `/journal-entries/${e.je_id}`, closable: true });
+                        navigate(`/journal-entries/${e.je_id}`);
                       }} style={{ cursor: 'pointer' }}>
                       <span style={{ color: 'var(--brand)', textDecoration: 'underline' }}>{e.je_number}</span>
                     </td>
