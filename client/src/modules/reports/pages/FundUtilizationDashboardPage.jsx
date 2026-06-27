@@ -75,19 +75,17 @@ export default function FundUtilizationDashboardPage() {
     <div className="grid-page animate-in">
       {/* ─── HEADER ─── */}
       <div className="page-section page-actions-bar no-print">
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="fg" style={{ margin: 0 }}><label style={{ margin: '0 8px 0 0' }}>Period From</label><DatePicker value={fromDate} onChange={setFromDate} /></div>
-          <div className="fg" style={{ margin: 0 }}><label style={{ margin: '0 8px 0 0' }}>To</label><DatePicker value={toDate} onChange={setToDate} /></div>
-          <div className="fg" style={{ margin: 0 }}><label style={{ margin: '0 8px 0 0' }}>Snapshot As-Of</label><DatePicker value={asOfDate} onChange={setAsOfDate} /></div>
-          <button className="btn btn-primary" onClick={fetchDashboard} disabled={loading}>
-            {loading ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Search size={14} />} 
-            Generate
-          </button>
-        </div>
+        <div className="fg"><label>Period From</label><DatePicker value={fromDate} onChange={setFromDate} /></div>
+        <div className="fg"><label>To</label><DatePicker value={toDate} onChange={setToDate} /></div>
+        <div className="fg"><label>Snapshot As-Of</label><DatePicker value={asOfDate} onChange={setAsOfDate} /></div>
+        <button className="btn btn-primary" onClick={fetchDashboard} disabled={loading}>
+          {loading ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Search size={14} />} 
+          Generate
+        </button>
         <button className="btn" onClick={() => setTimeout(() => window.print(), 100)}><Printer size={14} /> Print</button>
       </div>
 
-      <div className="page-section page-content" style={{ padding: '24px', background: 'transparent', border: 'none' }}>
+      <div className="page-section page-content" style={{ padding: '24px', background: 'transparent', border: 'none', overflowY: 'auto' }}>
         
         {/* ─── TOP KPI CARDS ─── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '24px' }}>
