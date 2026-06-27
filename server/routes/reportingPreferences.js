@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db/pool');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const pool = require('../db/pool');
+const { authenticate, authorize } = require('../middleware/auth');
 const { logger } = require('../middleware/logger');
 
 // Get company reporting preferences
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const result = await pool.query(`SELECT * FROM company_reporting_preferences WHERE id = true`);
     if (result.rows.length === 0) {
@@ -27,7 +27,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // Update company reporting preferences
-router.put('/', requireAuth, requireRole(['Super Admin', 'Admin']), async (req, res) => {
+router.put('/', authenticate, authorize('admin', 'management'), async (req, res) => {
   const {
     base_currency = 'INR',
     reporting_currency = 'USD',
