@@ -81,6 +81,7 @@ export const NAV = [
   },
   {
     label: 'Reports', icon: BarChart3, module: 'reports', children: [
+      { label: 'Fund Utilization', path: '/reports/fund-utilization' },
       { label: 'Ledger', path: '/ledger' },
       { label: 'Trial Balance', path: '/trial-balance' },
       { label: 'Profit & Loss', path: '/pnl' },
@@ -122,6 +123,7 @@ const ROOT_PATHS = new Set([
   '/reports/fixed-asset-register', '/reports/depreciation-schedule',
   '/reports/accounts-receivable', '/reports/accounts-payable',
   '/reports/bank-reconciliation', '/reports/cost-center',
+  '/reports/fund-utilization',
   '/admin/users', '/clipboard',
 ]);
 
@@ -245,6 +247,7 @@ function LayoutInner() {
     '/reports/cost-center-transactions': 'Cost Center Transactions',
     '/reports/bank-reconciliation': 'Bank Reconciliation',
     '/reports/cost-center': 'Cost Center P&L',
+    '/reports/fund-utilization': 'Fund Utilization',
     '/manufacturing/control-tower': 'Manufacturing Control Tower',
     '/manufacturing/process-master': 'Process Master',
     '/admin/users': 'Admin Panel',
