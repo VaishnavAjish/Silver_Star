@@ -498,12 +498,12 @@ a {
 
 /* Sticky header — use box-shadow not border so no gap during horizontal scroll */
 .dgrid thead {
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 
 .dgrid th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   background: var(--table-header);
   padding: 4px 10px;
   text-align: left;
@@ -517,7 +517,6 @@ a {
   box-shadow: inset 0 -1px 0 #D4E8DC, 0 1px 0 #D4E8DC;
   vertical-align: middle;
   box-sizing: content-box;
-  position: relative;
 }
 
 .dgrid th.text-right {
