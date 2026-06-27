@@ -14,26 +14,34 @@ class ReportingCurrencyService {
       return this.cachedPreferences;
     }
 
+    const defaults = {
+      base_currency: 'INR',
+      reporting_currency: 'USD',
+      reporting_exchange_rate: 85.000000,
+      display_currency: 'INR',
+      number_format: 'INDIAN',
+      decimal_precision: 2,
+      negative_number_style: 'ACCOUNTING'
+    };
+
     try {
       const res = await pool.query(`SELECT * FROM company_reporting_preferences WHERE id = true`);
       if (res.rows.length > 0) {
         this.cachedPreferences = res.rows[0];
         this.cacheTime = now;
       } else {
-        // Fallback defaults
-        this.cachedPreferences = {
-          base_currency: 'INR',
-          reporting_currency: 'USD',
-          reporting_exchange_rate: 85.000000,
-          display_currency: 'INR',
-          number_format: 'INDIAN',
-          decimal_precision: 2,
-          negative_number_style: 'ACCOUNTING'
-        };
+        // Table exists but empty — use defaults
+        this.cachedPreferences = defaults;
       }
     } catch (err) {
-      logger.error({ err }, 'Failed to fetch reporting preferences');
-      throw err;
+      // 42P01 = table does not exist (migration not yet applied) — use defaults gracefully
+      if (err.code === '42P01') {
+        logger.warn('company_reporting_preferences table not found — using defaults. Run migration phase43_reporting_preferences.sql');
+        this.cachedPreferences = defaults;
+      } else {
+        logger.error({ err }, 'Failed to fetch reporting preferences');
+        throw err;
+      }
     }
 
     return this.cachedPreferences;
