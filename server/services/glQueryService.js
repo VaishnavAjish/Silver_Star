@@ -48,11 +48,14 @@ async function buildTrialBalanceHierarchy(fromDate, toDate) {
 
   const byId = {};
   for (const r of result.rows) {
+    const net_balance = parseFloat(r.net_balance) || 0;
     byId[r.id] = {
       ...r,
       total_debit:  parseFloat(r.total_debit)  || 0,
       total_credit: parseFloat(r.total_credit) || 0,
-      net_balance:  parseFloat(r.net_balance)  || 0,
+      net_balance:  net_balance,
+      dr_val: net_balance > 0.005 ? net_balance : 0,
+      cr_val: net_balance < -0.005 ? Math.abs(net_balance) : 0,
       children: [],
     };
   }
@@ -76,9 +79,12 @@ async function buildTrialBalanceHierarchy(fromDate, toDate) {
       const c = aggregate(child);
       sumD += c.debit; sumC += c.credit; sumN += c.net;
     }
+    const group_net = Math.round(sumN * 100) / 100;
     node.group_debit  = Math.round(sumD * 100) / 100;
     node.group_credit = Math.round(sumC * 100) / 100;
-    node.group_net    = Math.round(sumN * 100) / 100;
+    node.group_net    = group_net;
+    node.dr_val = group_net > 0.005 ? group_net : 0;
+    node.cr_val = group_net < -0.005 ? Math.abs(group_net) : 0;
     return { debit: sumD, credit: sumC, net: sumN };
   };
   roots.forEach(aggregate);

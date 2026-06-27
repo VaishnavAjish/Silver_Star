@@ -156,6 +156,11 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
 });
 
 // ── MANUAL ENTRY (opening-balance assets) ─────────────────────────────────────
+/**
+ * ACCOUNTING BEHAVIOUR NOTE:
+ * Asset Templates are creation defaults only. Once an asset is capitalized, it becomes an
+ * independent accounting object. Template edits never modify historical assets.
+ */
 router.post('/', authenticate, authorize('admin'), async (req, res) => {
   const client = await pool.primaryPool.connect();
   try {

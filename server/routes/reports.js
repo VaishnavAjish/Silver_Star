@@ -5,6 +5,7 @@ const { getInventoryValuation, getInventoryValuationLines, round2 } = require('.
 const { logger } = require('../middleware/logger');
 const { buildTrialBalanceHierarchy, buildAccountHierarchy } = require('../services/glQueryService');
 const { getFundMovementSummary, getDrillDownData } = require('../services/fundMovementService');
+const reportingCurrencyService = require('../services/reportingCurrencyService');
 
 const router = express.Router();
 
@@ -86,7 +87,7 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     logger.info(`[P&L Report] period=${from_date}..${to_date} revenue=${totalRevenue} cogs=${totalCogs} opex=${totalOpex} gross=${grossProfit} net=${netProfit}`);
 
-    res.json({
+    const payload = {
       period: { from: from_date, to: to_date },
       revenue, totalRevenue,
       cogs, totalCogs,
@@ -100,7 +101,9 @@ router.get('/pnl', authenticate, async (req, res) => {
       grossProfit,
       opex, totalOpex,
       netProfit, netMargin,
-    });
+    };
+    const formatted = await reportingCurrencyService.formatReport(payload, 'pnl', req.query);
+    res.json(formatted);
   } catch (err) { 
     require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); 
     res.status(500).json({ error: err.message }); 
@@ -209,7 +212,9 @@ router.get('/trial-balance', authenticate, async (req, res) => {
     );
     const totalDr = result.rows.reduce((s, r) => s + parseFloat(r.debit_balance || 0), 0);
     const totalCr = result.rows.reduce((s, r) => s + parseFloat(r.credit_balance || 0), 0);
-    res.json({ accounts: result.rows, totalDebit: totalDr, totalCredit: totalCr, balanced: Math.abs(totalDr - totalCr) < 0.01 });
+    const payload = { accounts: result.rows, totalDebit: totalDr, totalCredit: totalCr, balanced: Math.abs(totalDr - totalCr) < 0.01 };
+    const formatted = await reportingCurrencyService.formatReport(payload, 'trial_balance', req.query);
+    res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -269,7 +274,9 @@ router.get('/trial-balance-detailed', authenticate, async (req, res) => {
       credit: s.credit + r.credit,
       closing: s.closing + r.closing,
     }), { opening: 0, debit: 0, credit: 0, closing: 0 });
-    res.json({ period: { from: fromDate, to: toDate }, accounts, totals, balanced: Math.abs(totals.debit - totals.credit) < 0.01 });
+    const payload = { period: { from: fromDate, to: toDate }, accounts, totals, balanced: Math.abs(totals.debit - totals.credit) < 0.01 };
+    const formatted = await reportingCurrencyService.formatReport(payload, 'trial_balance_detailed', req.query);
+    res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -302,13 +309,15 @@ router.get('/trial-balance-hierarchy', authenticate, async (req, res) => {
     const grandDebit  = Math.round(parseFloat(totR.rows[0].grand_debit)  * 100) / 100;
     const grandCredit = Math.round(parseFloat(totR.rows[0].grand_credit) * 100) / 100;
 
-    res.json({
+    const payload = {
       period: { from: fromDate, to: toDate },
       roots,
       grandDebit,
       grandCredit,
       balanced: Math.abs(grandDebit - grandCredit) < 0.01,
-    });
+    };
+    const formatted = await reportingCurrencyService.formatReport(payload, 'trial_balance_hierarchy', req.query);
+    res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -431,12 +440,14 @@ router.get('/balance-sheet', authenticate, async (req, res) => {
       buildAccountHierarchy('equity',    asOfDate),
     ]);
 
-    res.json({
+    const payload = {
       asOfDate, assets, liabilities, equity,
       totalAssets, totalLiabilities, totalEquity, retainedEarnings,
       isBalanced, vertical,
       hierarchy: { assets: hAssets, liabilities: hLiabs, equity: hEquity },
-    });
+    };
+    const formatted = await reportingCurrencyService.formatReport(payload, 'balance_sheet', req.query);
+    res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 

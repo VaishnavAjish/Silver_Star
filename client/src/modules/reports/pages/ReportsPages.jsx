@@ -5,6 +5,7 @@ import { useApi } from '../../../shared/hooks/useApi';
 import Modal from '../../../shared/components/Modal';
 import { BookOpen, TrendingUp, Calculator, Search, BarChart3, ChevronRight, ChevronDown, Folder, FileText, X, Printer } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
+import ReportToolbar from '../../../shared/components/ReportToolbar';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid, Legend } from 'recharts';
 
 const fmt = v => `₹${Math.round(Number(v)||0).toLocaleString('en-IN')}`;
@@ -182,19 +183,29 @@ export function PnLPage() {
   const navigate = useNavigate();
   const [fromDate, setFromDate] = useState('2025-04-01');
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
+  const [currency, setCurrency] = useState('INR');
+  const [format, setFormat] = useState('INDIAN');
+  const [decimals, setDecimals] = useState(2);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    try { setData(await api.get(`/api/reports/pnl?from_date=${fromDate}&to_date=${toDate}`)); }
+    try { setData(await api.get(`/api/reports/pnl?from_date=${fromDate}&to_date=${toDate}&currency=${currency}&format=${format}&decimals=${decimals}`)); }
     catch (err) {} finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currency, format, decimals]);
 
   return (
     <div className="grid-page animate-in">
+
+      <ReportToolbar 
+        currency={currency} onCurrencyChange={setCurrency}
+        format={format} onFormatChange={setFormat}
+        decimals={decimals} onDecimalsChange={setDecimals}
+        onPrint={() => setTimeout(() => window.print(), 100)}
+      />
 
       <div className="page-section page-actions-bar no-print">
         <div className="fg"><label>From</label><DatePicker value={fromDate} onChange={v => setFromDate(v)} /></div>
@@ -236,11 +247,11 @@ export function PnLPage() {
                       onMouseLeave={r.id ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
                       onClick={r.id ? () => navigate(`/reports/transactions?account_id=${r.id}&from=${fromDate}&to=${toDate}&account_name=${encodeURIComponent(r.name)}`) : undefined}
                     >
-                      {fmt(r.amount)}
+                      {r.amount_display}
                     </td>
                   </tr>
                 ))}
-                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total Revenue</td><td className="num" style={{color:'var(--green)', fontSize:14}}>{fmt(data.totalRevenue)}</td></tr>
+                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total Revenue</td><td className="num" style={{color:'var(--green)', fontSize:14, whiteSpace: 'pre-wrap'}}>{data.totalRevenue_display}</td></tr>
 
                 <tr><td>&nbsp;</td><td></td></tr>
                 <tr style={{background:'#FFF3E0'}}><td style={{fontWeight:700, color:'#E65100'}}>Cost of Goods Sold</td><td></td></tr>
@@ -257,7 +268,7 @@ export function PnLPage() {
                     onMouseLeave={(data.inventory?.openingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
                     onClick={(data.inventory?.openingStock !== 0) ? () => navigate('/inventory/opening') : undefined}
                   >
-                    {fmt(data.inventory?.openingStock)}
+                    {data.inventory?.openingStock_display || '-'}
                   </td>
                 </tr>
                 <tr>
@@ -273,7 +284,7 @@ export function PnLPage() {
                     onMouseLeave={(data.inventory?.purchases !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
                     onClick={(data.inventory?.purchases !== 0) ? () => navigate('/purchase-notes') : undefined}
                   >
-                    {fmt(data.inventory?.purchases)}
+                    {data.inventory?.purchases_display || '-'}
                   </td>
                 </tr>
                 <tr>
@@ -289,13 +300,13 @@ export function PnLPage() {
                     onMouseLeave={(data.inventory?.closingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
                     onClick={(data.inventory?.closingStock !== 0) ? () => navigate('/inventory/closing') : undefined}
                   >
-                    -{fmt(data.inventory?.closingStock)}
+                    -{data.inventory?.closingStock_display || '-'}
                   </td>
                 </tr>
-                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total COGS</td><td className="num" style={{color:'var(--red)'}}>{fmt(data.totalCogs)}</td></tr>
+                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total COGS</td><td className="num" style={{color:'var(--red)', whiteSpace: 'pre-wrap'}}>{data.totalCogs_display}</td></tr>
 
                 <tr><td>&nbsp;</td><td></td></tr>
-                <tr style={{background:'#E8F5E9', fontWeight:700, fontSize:14}}><td style={{color:'var(--green)'}}>Gross Profit</td><td className="num" style={{color:'var(--green)'}}>{fmt(data.grossProfit)}</td></tr>
+                <tr style={{background:'#E8F5E9', fontWeight:700, fontSize:14}}><td style={{color:'var(--green)'}}>Gross Profit</td><td className="num" style={{color:'var(--green)', whiteSpace: 'pre-wrap'}}>{data.grossProfit_display}</td></tr>
 
                 <tr><td>&nbsp;</td><td></td></tr>
                 <tr style={{background:'var(--g100)'}}><td style={{fontWeight:700}}>Operating Expenses</td><td></td></tr>
@@ -313,16 +324,16 @@ export function PnLPage() {
                       onMouseLeave={(r.id && r.amount !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
                       onClick={(r.id && r.amount !== 0) ? () => navigate(`/reports/transactions?account_id=${r.id}&from=${fromDate}&to=${toDate}&account_name=${encodeURIComponent(r.name)}`) : undefined}
                     >
-                      {fmt(r.amount)}
+                      {r.amount_display}
                     </td>
                   </tr>
                 ))}
-                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total OpEx</td><td className="num">{fmt(data.totalOpex)}</td></tr>
+                <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total OpEx</td><td className="num" style={{whiteSpace: 'pre-wrap'}}>{data.totalOpex_display}</td></tr>
 
                 <tr><td>&nbsp;</td><td></td></tr>
                 <tr style={{background: data.netProfit >= 0 ? '#E8F5E9' : '#FFEBEE', fontWeight:700, fontSize:15, borderTop:'3px solid var(--brand)'}}>
                   <td style={{color: data.netProfit >= 0 ? 'var(--brand-dark)' : 'var(--red)'}}>Net Profit</td>
-                  <td className="num" style={{color: data.netProfit >= 0 ? 'var(--brand-dark)' : 'var(--red)', fontSize:15}}>{fmt(data.netProfit)}</td>
+                  <td className="num" style={{color: data.netProfit >= 0 ? 'var(--brand-dark)' : 'var(--red)', fontSize:15, whiteSpace: 'pre-wrap'}}>{data.netProfit_display}</td>
                 </tr>
                 <tr><td style={{color:'var(--g500)', fontSize:11}}>Net Margin</td><td className="num" style={{color:'var(--g500)', fontSize:11}}>{data.netMargin}%</td></tr>
               </tbody>
@@ -394,6 +405,9 @@ export function TrialBalancePage() {
   const navigate = useNavigate();
   const [fromDate, setFromDate] = useState('2025-04-01');
   const [toDate,   setToDate]   = useState(new Date().toISOString().split('T')[0]);
+  const [currency, setCurrency] = useState('INR');
+  const [format, setFormat] = useState('INDIAN');
+  const [decimals, setDecimals] = useState(2);
   const [data,     setData]     = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [expanded, setExpanded] = useState(new Set());
@@ -403,7 +417,7 @@ export function TrialBalancePage() {
     try {
       const f = fd || fromDate || '2000-01-01';
       const t = td || toDate   || '2099-12-31';
-      const d = await api.get(`/api/reports/trial-balance-hierarchy?from_date=${f}&to_date=${t}`);
+      const d = await api.get(`/api/reports/trial-balance-hierarchy?from_date=${f}&to_date=${t}&currency=${currency}&format=${format}&decimals=${decimals}`);
       setData(d);
       const ids = new Set();
       const autoExpand = (nodes, depth) => {
@@ -416,7 +430,7 @@ export function TrialBalancePage() {
     } catch {} finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currency, format, decimals]);
 
   const toggle = (id) => setExpanded(prev => {
     const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s;
@@ -433,10 +447,10 @@ export function TrialBalancePage() {
       const isExp   = expanded.has(node.id);
       const hasKids = (node.children?.length || 0) > 0;
       const isGroup = node.is_group;
-      const net   = hasKids ? (node.group_net ?? node.net_balance) : node.net_balance;
-      const drVal = net >  0.005 ? net           : 0;
-      const crVal = net < -0.005 ? Math.abs(net) : 0;
       const showAmt = !hasKids || !isExp;
+      
+      const drVal = node.dr_val;
+      const crVal = node.cr_val;
 
       const bg  = !isGroup ? 'transparent' : depth === 0 ? '#eef1f8' : depth === 1 ? '#f4f6fb' : '#fafafa';
       const fw  = depth === 0 ? 700 : depth === 1 ? 600 : isGroup ? 500 : 400;
@@ -466,7 +480,7 @@ export function TrialBalancePage() {
             onMouseEnter={!isGroup && drVal > 0 ? hoverOn : undefined}
             onMouseLeave={!isGroup && drVal > 0 ? hoverOff : undefined}
           >
-            {showAmt && drVal > 0 ? fmtBS(drVal) : ''}
+            {showAmt && drVal > 0 ? (node.dr_val_display || '') : ''}
           </td>
           <td
             className="num"
@@ -476,7 +490,7 @@ export function TrialBalancePage() {
             onMouseEnter={!isGroup && crVal > 0 ? hoverOn : undefined}
             onMouseLeave={!isGroup && crVal > 0 ? hoverOff : undefined}
           >
-            {showAmt && crVal > 0 ? fmtBS(crVal) : ''}
+            {showAmt && crVal > 0 ? (node.cr_val_display || '') : ''}
           </td>
         </tr>
       );
@@ -484,19 +498,18 @@ export function TrialBalancePage() {
       const childRows = hasKids && isExp ? renderRows(node.children, depth + 1) : [];
 
       const totalRow = hasKids && isExp ? (() => {
-        const tNet = node.group_net ?? node.net_balance;
-        const tDr  = tNet >  0.005 ? tNet           : 0;
-        const tCr  = tNet < -0.005 ? Math.abs(tNet) : 0;
+        const tDr  = node.dr_val;
+        const tCr  = node.cr_val;
         return (
           <tr key={`${node.id}__total`} style={{ background: bg, borderTop: `1px solid ${depth === 0 ? 'var(--g300)' : 'var(--g200)'}` }}>
             <td style={{ paddingLeft: ind + 28, fontWeight: 700, color: 'var(--g600)', fontSize: 11 }}>
               Total {node.name}
             </td>
             <td className="num" style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: tDr > 0 ? 'var(--green)' : '' }}>
-              {tDr > 0 ? fmtBS(tDr) : ''}
+              {tDr > 0 ? (node.dr_val_display || '') : ''}
             </td>
             <td className="num" style={{ fontWeight: 700, fontFamily: 'var(--mono)', color: tCr > 0 ? 'var(--red)' : '' }}>
-              {tCr > 0 ? fmtBS(tCr) : ''}
+              {tCr > 0 ? (node.cr_val_display || '') : ''}
             </td>
           </tr>
         );
@@ -508,6 +521,13 @@ export function TrialBalancePage() {
   return (
     <div className="grid-page animate-in">
 
+      <ReportToolbar 
+        currency={currency} onCurrencyChange={setCurrency}
+        format={format} onFormatChange={setFormat}
+        decimals={decimals} onDecimalsChange={setDecimals}
+        onPrint={() => setTimeout(() => window.print(), 100)}
+      />
+
       <div className="page-section page-actions-bar no-print">
         <div className="fg"><label>From</label><DatePicker value={fromDate} onChange={v => setFromDate(v)} /></div>
         <div className="fg"><label>To</label><DatePicker value={toDate} onChange={v => setToDate(v)} /></div>
@@ -515,7 +535,6 @@ export function TrialBalancePage() {
           <button className="btn" style={{ background: 'var(--g100)', color: 'var(--g700)' }} onClick={() => { setFromDate(''); setToDate(''); load('', ''); }}><X size={14} /> Clear</button>
         )}
         <button className="btn btn-primary" onClick={() => load()}><Search size={14} /> Generate</button>
-        <button className="btn" onClick={() => setTimeout(() => window.print(), 100)}><Printer size={14} /> Print</button>
       </div>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -544,8 +563,8 @@ export function TrialBalancePage() {
                 <thead>
                   <tr>
                     <th style={{ padding: '10px 12px', verticalAlign: 'middle' }}>Account</th>
-                    <th className="text-right" style={{ width: 160, padding: '10px 12px', verticalAlign: 'middle' }}>Debit (₹)</th>
-                    <th className="text-right" style={{ width: 160, padding: '10px 12px', verticalAlign: 'middle' }}>Credit (₹)</th>
+                    <th className="text-right" style={{ width: 180, padding: '10px 12px', verticalAlign: 'middle' }}>Debit</th>
+                    <th className="text-right" style={{ width: 180, padding: '10px 12px', verticalAlign: 'middle' }}>Credit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -554,11 +573,11 @@ export function TrialBalancePage() {
                 <tbody style={{ zIndex: 10 }}>
                   <tr style={{ fontWeight: 800 }}>
                     <td style={{ position: 'sticky', bottom: -1, zIndex: 10, color: 'var(--brand-dark)', fontSize: 13, background: 'var(--brand-50)', borderTop: '3px solid var(--brand)', borderBottom: 'none' }}>Grand Total</td>
-                    <td className="num" style={{ position: 'sticky', bottom: -1, zIndex: 10, fontFamily: 'var(--mono)', color: 'var(--green)', fontSize: 13, background: 'var(--brand-50)', borderTop: '3px solid var(--brand)', borderBottom: 'none' }}>
-                      {fmtBS(data.grandDebit)}
+                    <td className="num" style={{ position: 'sticky', bottom: -1, zIndex: 10, fontFamily: 'var(--mono)', color: 'var(--green)', fontSize: 13, background: 'var(--brand-50)', borderTop: '3px solid var(--brand)', borderBottom: 'none', whiteSpace: 'pre-wrap' }}>
+                      {data.grandDebit_display}
                     </td>
-                    <td className="num" style={{ position: 'sticky', bottom: -1, zIndex: 10, fontFamily: 'var(--mono)', color: 'var(--red)', fontSize: 13, background: 'var(--brand-50)', borderTop: '3px solid var(--brand)', borderBottom: 'none' }}>
-                      {fmtBS(data.grandCredit)}
+                    <td className="num" style={{ position: 'sticky', bottom: -1, zIndex: 10, fontFamily: 'var(--mono)', color: 'var(--red)', fontSize: 13, background: 'var(--brand-50)', borderTop: '3px solid var(--brand)', borderBottom: 'none', whiteSpace: 'pre-wrap' }}>
+                      {data.grandCredit_display}
                     </td>
                   </tr>
                 </tbody>
@@ -576,6 +595,9 @@ export function BalanceSheetPage() {
   const api = useApi();
   const navigate = useNavigate();
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
+  const [currency, setCurrency] = useState('INR');
+  const [format, setFormat] = useState('INDIAN');
+  const [decimals, setDecimals] = useState(2);
   const [data,     setData]     = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [bsExp,    setBsExp]    = useState(new Set());
@@ -583,7 +605,7 @@ export function BalanceSheetPage() {
   const load = async (date) => {
     setLoading(true);
     try {
-      const d = await api.get(`/api/reports/balance-sheet?asOfDate=${date}`);
+      const d = await api.get(`/api/reports/balance-sheet?asOfDate=${date}&currency=${currency}&format=${format}&decimals=${decimals}`);
       setData(d);
       if (d.hierarchy) {
         const ids = new Set();
@@ -597,7 +619,7 @@ export function BalanceSheetPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(asOfDate); }, []);
+  useEffect(() => { load(asOfDate); }, [currency, format, decimals]);
 
   const handleDateChange = (v) => { setAsOfDate(v); load(v); };
 
@@ -652,7 +674,7 @@ export function BalanceSheetPage() {
             onMouseEnter={!isGroup && node.id !== '__re' ? e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.textDecoration = 'underline'; } : undefined}
             onMouseLeave={!isGroup && node.id !== '__re' ? e => { e.currentTarget.style.color = ''; e.currentTarget.style.textDecoration = ''; } : undefined}
           >
-            {(!isGroup || !hasChildren || !isExpanded) ? fmtBS(balance) : ''}
+            {(!isGroup || !hasChildren || !isExpanded) ? (node.balance_display || '') : ''}
           </td>
         </tr>
       );
@@ -661,7 +683,7 @@ export function BalanceSheetPage() {
       return [row, ...childRows];
     });
 
-  const HierarchySection = ({ title, nodes, total, headerBg, headerColor }) => (
+  const HierarchySection = ({ title, nodes, totalDisplay, headerBg, headerColor }) => (
     <tbody>
       <tr style={{ background: headerBg, fontWeight: 800 }}>
         <td colSpan={3} style={{ color: headerColor }}>{title}</td>
@@ -671,7 +693,7 @@ export function BalanceSheetPage() {
         : <tr><td colSpan={3} style={{ textAlign: 'center', color: 'var(--g400)', padding: '10px 0' }}>—</td></tr>}
       <tr style={{ fontWeight: 800, borderTop: '2px solid var(--g300)' }}>
         <td colSpan={2} style={{ color: headerColor }}>Total {title}</td>
-        <td className="num" style={{ color: headerColor, fontFamily: 'var(--mono)', fontSize: 13 }}>{fmtBS(total)}</td>
+        <td className="num" style={{ color: headerColor, fontFamily: 'var(--mono)', fontSize: 13, whiteSpace: 'pre-wrap' }}>{totalDisplay}</td>
       </tr>
     </tbody>
   );
@@ -679,10 +701,16 @@ export function BalanceSheetPage() {
   return (
     <div className="grid-page animate-in">
 
+      <ReportToolbar 
+        currency={currency} onCurrencyChange={setCurrency}
+        format={format} onFormatChange={setFormat}
+        decimals={decimals} onDecimalsChange={setDecimals}
+        onPrint={() => setTimeout(() => window.print(), 100)}
+      />
+
       <div className="page-section page-actions-bar no-print">
         <div className="fg"><label>As of Date</label><DatePicker value={asOfDate} onChange={handleDateChange} /></div>
         <button className="btn btn-primary" onClick={() => load(asOfDate)}><Search size={14} /> Generate</button>
-        <button className="btn" onClick={() => setTimeout(() => window.print(), 100)}><Printer size={14} /> Print</button>
       </div>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -726,49 +754,49 @@ export function BalanceSheetPage() {
                 <HierarchySection
                   title="LIABILITIES"
                   nodes={data.hierarchy.liabilities || []}
-                  total={data.totalLiabilities}
+                  totalDisplay={data.totalLiabilities_display}
                   headerBg="#FFEBEE" headerColor="#c62828"
                 />
                 <HierarchySection
                   title="EQUITY"
                   nodes={[
                     ...(data.hierarchy.equity || []),
-                    { id: '__re', code: '', name: 'Current Year Profit (Retained Earnings)', is_group: false, balance: data.retainedEarnings, children: [] },
+                    { id: '__re', code: '', name: 'Current Year Profit (Retained Earnings)', is_group: false, balance_display: data.retainedEarnings_display, children: [] },
                   ]}
-                  total={data.totalEquity + data.retainedEarnings}
+                  totalDisplay={data.totalEquity_display} 
                   headerBg="var(--brand-50)" headerColor="var(--brand-dark)"
                 />
                 <HierarchySection
                   title="ASSETS"
                   nodes={data.hierarchy.assets || []}
-                  total={data.totalAssets}
+                  totalDisplay={data.totalAssets_display}
                   headerBg="#E3F2FD" headerColor="#1565c0"
                 />
               </>
             ) : (
               <tbody>
                 <tr style={{ background: '#FFEBEE', fontWeight: 800 }}><td colSpan={3}>LIABILITIES</td></tr>
-                {data.liabilities.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{fmtBS(r.balance)}</td></tr>)}
-                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Liabilities</td><td className="num">{fmtBS(data.totalLiabilities)}</td></tr>
+                {data.liabilities.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{r.balance_display}</td></tr>)}
+                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Liabilities</td><td className="num">{data.totalLiabilities_display}</td></tr>
                 <tr style={{ background: 'var(--brand-50)', fontWeight: 800 }}><td colSpan={3}>EQUITY</td></tr>
-                {data.equity.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{fmtBS(r.balance)}</td></tr>)}
-                <tr><td style={{ color: 'var(--g500)' }} /><td>Current Year Profit</td><td className="num">{fmtBS(data.retainedEarnings)}</td></tr>
-                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Equity</td><td className="num">{fmtBS(data.totalEquity + data.retainedEarnings)}</td></tr>
+                {data.equity.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{r.balance_display}</td></tr>)}
+                <tr><td style={{ color: 'var(--g500)' }} /><td>Current Year Profit</td><td className="num">{data.retainedEarnings_display}</td></tr>
+                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Equity</td><td className="num">{data.totalEquity_display}</td></tr>
                 <tr style={{ background: '#E3F2FD', fontWeight: 800 }}><td colSpan={3}>ASSETS</td></tr>
-                {data.assets.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{fmtBS(r.balance)}</td></tr>)}
-                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Assets</td><td className="num">{fmtBS(data.totalAssets)}</td></tr>
+                {data.assets.map((r, i) => <tr key={i}><td style={{ color: 'var(--g500)' }}>{r.code}</td><td>{r.name}</td><td className="num">{r.balance_display}</td></tr>)}
+                <tr style={{ fontWeight: 800 }}><td colSpan={2}>Total Assets</td><td className="num">{data.totalAssets_display}</td></tr>
               </tbody>
             )}
           </table>
           <div className="no-print" style={{ position: 'sticky', bottom: 0, zIndex: 10, flexShrink: 0, padding: 12, background: 'var(--brand-50)', border: '1px solid var(--sidebar-border)', borderRadius: 8, display: 'flex', gap: 28, flexWrap: 'wrap', maxWidth: 820, margin: '0 auto' }}>
             {[
-              { label: 'Total Assets',                  value: data.totalAssets,                              color: '#1565c0' },
-              { label: 'Total Liabilities',             value: data.totalLiabilities,                         color: 'var(--red)' },
-              { label: 'Total Equity incl. Retained',   value: data.totalEquity + data.retainedEarnings,      color: 'var(--brand-dark)' },
+              { label: 'Total Assets',                  valueDisplay: data.totalAssets_display,                              color: '#1565c0' },
+              { label: 'Total Liabilities',             valueDisplay: data.totalLiabilities_display,                         color: 'var(--red)' },
+              { label: 'Total Equity incl. Retained',   valueDisplay: data.totalEquity_display,      color: 'var(--brand-dark)' },
             ].map((s, i) => (
               <div key={i}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: s.color }}>{s.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: s.color }}>{fmtBS(s.value)}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: s.color, whiteSpace: 'pre-wrap' }}>{s.valueDisplay}</div>
               </div>
             ))}
           </div>

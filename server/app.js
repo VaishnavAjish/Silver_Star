@@ -193,6 +193,7 @@ const debugAccRoutes = require('./routes/debugAccounting');
 const jobRoutes = require('./routes/jobs');
 const stockTransferRoutes = require('./routes/stockTransfer');
 const roleRoutes = require('./routes/roles');
+const reportingPreferencesRoutes = require('./routes/reportingPreferences');
 
 
 app.use('/api/auth', authRoutes);
@@ -221,6 +222,7 @@ app.use('/api/depreciation-runs', depreciationRoutes);
 app.use('/api/admin', userRoutes);
 app.use('/api/permissions', permsRoutes);
 app.use('/api/clipboard', clipboardRoutes);
+app.use('/api/reporting-preferences', reportingPreferencesRoutes);
 app.use('/api/master', createMasterRouter('master', {
   alias: 'mst',
 }));
