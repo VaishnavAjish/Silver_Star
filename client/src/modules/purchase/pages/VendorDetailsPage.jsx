@@ -567,14 +567,14 @@ export default function VendorDetailsPage() {
                                           navigate(`/purchase-notes/${t.id}`);
                                         }}
                                       >
-                                        View
+                                        View Details
                                       </span>
                                       <span
                                         className="btn btn-sm"
                                         style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--red)', borderColor: 'var(--red)' }}
                                         onClick={() => handleDeleteBill(t.id)}
                                       >
-                                        <Trash2 size={12} />
+                                        <Trash2 size={12} /> Delete
                                       </span>
                                     </div>
                                   ) : t.type === 'JE Adjustment' && t.je_id ? (
