@@ -14,7 +14,7 @@ router.get('/', authenticate, async (req, res) => {
     const offset = parseInt(req.query.offset || '0', 10);
     const { status, search } = req.query;
 
-    const conditions = ["pn.item_type = 'Expense Bill'"];
+    const conditions = [];
     const params = [];
 
     if (status) {
@@ -66,7 +66,7 @@ router.get('/:id', authenticate, async (req, res) => {
         LEFT JOIN vendors v ON pn.vendor_id = v.id
         LEFT JOIN departments d ON pn.department_id = d.id
         LEFT JOIN journal_entries je ON pn.je_id = je.id
-        WHERE pn.id = $1 AND pn.item_type = 'Expense Bill'
+        WHERE pn.id = $1
       `, [id]),
       pool.query(`
         SELECT pnl.*, a.name as category_name,
@@ -191,18 +191,23 @@ router.delete('/:id', authenticate, authorize('admin', 'operator'), async (req, 
   try {
     await client.query('BEGIN');
     const id = parseInt(req.params.id, 10);
-    const pnR = await client.query('SELECT status, je_id, amount_paid FROM purchase_notes WHERE id = $1 AND item_type = $2 FOR UPDATE', [id, 'Expense Bill']);
+    const pnR = await client.query('SELECT status, je_id, amount_paid FROM purchase_notes WHERE id = $1 FOR UPDATE', [id]);
     if (!pnR.rows.length) throw new Error('Bill not found');
     const pn = pnR.rows[0];
 
-    if (pn.status === 'cancelled') throw new Error('Bill is already cancelled');
-    if (parseFloat(pn.amount_paid) > 0) throw new Error('Cannot cancel a bill with payments applied');
+    if (parseFloat(pn.amount_paid) > 0) throw new Error('Cannot delete a bill with payments applied. Remove payments first.');
 
+    // 1. Delete lines
+    await client.query('DELETE FROM purchase_note_lines WHERE purchase_note_id = $1', [id]);
+    
+    // 2. Delete main record
+    await client.query('DELETE FROM purchase_notes WHERE id = $1', [id]);
+
+    // 3. Delete JE if exists (cascade should handle je_lines)
     if (pn.je_id) {
-      await journalEngine.cancelEntry(pn.je_id, req.user.id, client);
+      await client.query('DELETE FROM je_lines WHERE je_id = $1', [pn.je_id]);
+      await client.query('DELETE FROM journal_entries WHERE id = $1', [pn.je_id]);
     }
-
-    await client.query("UPDATE purchase_notes SET status = 'cancelled', updated_at = NOW() WHERE id = $1", [id]);
 
     await client.query('COMMIT');
     res.json({ success: true });

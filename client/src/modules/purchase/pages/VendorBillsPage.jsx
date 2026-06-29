@@ -4,7 +4,7 @@ import { useNavigate, Link, useParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import DataGrid from '../../../shared/components/DataGrid';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
-import { Plus, Receipt, X, Save } from 'lucide-react';
+import { Plus, Receipt, X, Save, Trash2, Edit } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
@@ -60,6 +60,19 @@ export const VendorBillsPage = () => {
 
   const handleFilterChange = (k, v) => { setPage(1); setFilters(p => ({ ...p, [k]: v })); };
 
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to completely delete this bill? This action cannot be undone.')) return;
+    setLoading(true);
+    try {
+      await api.delete(`/api/expense-bills/${id}`);
+      toast.success('Bill deleted successfully');
+      loadBills.current(page, filters);
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete bill');
+      setLoading(false);
+    }
+  };
+
   const filterFields = useMemo(() => [
     { key: 'search', label: 'Search by Bill No or Vendor', type: 'text' },
     { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
@@ -88,7 +101,17 @@ export const VendorBillsPage = () => {
             const colorClass = isCan ? 'b-cancelled' : 
                                statusLabel === 'PAID' ? 'b-posted' : 'b-draft';
             return <span className={colorClass}>{statusLabel}</span>;
-          }}
+          }},
+          { key: 'actions',    label: 'Actions', width: 90, render: (_, r) => (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="icon-btn" onClick={(e) => { e.stopPropagation(); navigate(`/bills/${r.id}`); }} title="Edit">
+                <Edit size={14} />
+              </button>
+              <button className="icon-btn" style={{ color: 'var(--red)' }} onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }} title="Delete">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
         ]}
         data={data}
         total={total}
