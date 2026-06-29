@@ -5,7 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Search, ChevronRight, Edit2, Plus, X,
   Phone, Mail, MapPin, FileText, CreditCard, Receipt,
-  AlertCircle, Clock, CheckCircle, ChevronDown, Link2, RefreshCw,
+  AlertCircle, Clock, CheckCircle, ChevronDown, Link2, RefreshCw, Trash2
 } from 'lucide-react';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
@@ -97,6 +97,19 @@ export default function VendorDetailsPage() {
       setLoading(false);
     }
   }, [id, get]);
+
+  const handleDeleteBill = async (billId) => {
+    if (!window.confirm('Are you sure you want to completely delete this bill? This action cannot be undone.')) return;
+    setLoading(true);
+    try {
+      await del(`/api/expense-bills/${billId}`);
+      toast.success('Bill deleted successfully');
+      loadVendor();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete bill');
+      setLoading(false);
+    }
+  };
 
   // ── Allocation handlers ───────────────────────────────────────────────────
   const openAllocModal = useCallback((t) => {
@@ -545,16 +558,25 @@ export default function VendorDetailsPage() {
                                 </td>
                                 <td>
                                   {t.type === 'Bill' ? (
-                                    <span
-                                      className="btn btn-sm"
-                                      style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
-                                      onClick={() => {
-                                        openTab({ id: `/purchase-notes/${t.id}`, name: t.ref_no || `#${t.id}`, path: `/purchase-notes/${t.id}`, closable: true });
-                                        navigate(`/purchase-notes/${t.id}`);
-                                      }}
-                                    >
-                                      View
-                                    </span>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                      <span
+                                        className="btn btn-sm"
+                                        style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                                        onClick={() => {
+                                          openTab({ id: `/purchase-notes/${t.id}`, name: t.ref_no || `#${t.id}`, path: `/purchase-notes/${t.id}`, closable: true });
+                                          navigate(`/purchase-notes/${t.id}`);
+                                        }}
+                                      >
+                                        View
+                                      </span>
+                                      <span
+                                        className="btn btn-sm"
+                                        style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--red)', borderColor: 'var(--red)' }}
+                                        onClick={() => handleDeleteBill(t.id)}
+                                      >
+                                        <Trash2 size={12} />
+                                      </span>
+                                    </div>
                                   ) : t.type === 'JE Adjustment' && t.je_id ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                                       <span
