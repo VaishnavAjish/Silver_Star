@@ -201,7 +201,9 @@ export const VendorBillForm = () => {
     setLoading(true);
     try {
       if (isEdit) {
-        toast.error('Editing bills is not supported. Please cancel and create a new one if necessary.');
+        await api.put(`/api/expense-bills/${id}`, { ...form, lines: validLines });
+        toast.success('Bill updated');
+        navigate('/bills');
       } else {
         await api.post('/api/expense-bills', { ...form, lines: validLines });
         toast.success('Bill saved');
@@ -248,7 +250,7 @@ export const VendorBillForm = () => {
           auditMeta={isEdit ? `Dated: ${fmtDate(form.doc_date)}` : (grandTotal > 0 ? `Total: ₹${fmt(grandTotal)}` : undefined)}
         />
       }
-      footer={!isEdit && (
+      footer={(!isEdit || detailData?.status !== 'cancelled') && (
         <StickyActionFooter
           left={<button className="btn" onClick={() => navigate('/bills')}>Cancel</button>}
           hint={grandTotal > 0 ? (
@@ -271,7 +273,7 @@ export const VendorBillForm = () => {
             <SelectDropdown 
               value={String(form.vendor_id || '')} 
               onChange={e => setForm({ ...form, vendor_id: e.target.value })} 
-              disabled={isEdit} 
+              disabled={isEdit && detailData?.status === 'cancelled'} 
             >
               <option value="">- Select Vendor -</option>
               {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -282,7 +284,7 @@ export const VendorBillForm = () => {
             <SelectDropdown 
               value={String(form.department_id || '')} 
               onChange={e => setForm({ ...form, department_id: e.target.value })} 
-              disabled={isEdit} 
+              disabled={isEdit && detailData?.status === 'cancelled'} 
             >
               <option value="">-- None --</option>
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -293,7 +295,7 @@ export const VendorBillForm = () => {
             <SelectDropdown 
               value={String(form.cost_center_id || '')} 
               onChange={e => setForm({ ...form, cost_center_id: e.target.value })} 
-              disabled={isEdit} 
+              disabled={isEdit && detailData?.status === 'cancelled'} 
             >
               <option value="">-- None --</option>
               {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -306,7 +308,7 @@ export const VendorBillForm = () => {
             <DatePicker 
               value={form.doc_date} 
               onChange={v => setForm({ ...form, doc_date: v })} 
-              disabled={isEdit} 
+              disabled={isEdit && detailData?.status === 'cancelled'} 
             />
           </div>
           <div className="fg" style={{ minWidth: 180 }}>
@@ -314,7 +316,7 @@ export const VendorBillForm = () => {
             <input 
               value={form.reference_no} 
               onChange={e => setForm({ ...form, reference_no: e.target.value })} 
-              disabled={isEdit} 
+              disabled={isEdit && detailData?.status === 'cancelled'} 
             />
           </div>
         </div>
@@ -325,7 +327,7 @@ export const VendorBillForm = () => {
         icon={<Receipt size={13} />}
         noPad
         actions={
-          !isEdit && (
+          (!isEdit || detailData?.status !== 'cancelled') && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {grandTotal > 0 && (
                 <span style={{ fontSize: 11, color: 'var(--g600)', fontFamily: 'var(--mono)' }}>
@@ -359,7 +361,7 @@ export const VendorBillForm = () => {
                   <SelectDropdown 
                     value={String(line.expense_account_id || '')} 
                     onChange={e => updateLine(idx, 'expense_account_id', e.target.value)} 
-                    disabled={isEdit} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
                   >
                     <option value="">- Select Category -</option>
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -370,14 +372,14 @@ export const VendorBillForm = () => {
                     value={line.description} 
                     onChange={e => updateLine(idx, 'description', e.target.value)} 
                     placeholder="What is this for?"
-                    disabled={isEdit} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
                   />
                 </td>
                 <td>
                   <SelectDropdown 
                     value={String(line.department_id || '')} 
                     onChange={e => updateLine(idx, 'department_id', e.target.value)} 
-                    disabled={isEdit} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
                   >
                     <option value="">Default</option>
                     {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -387,7 +389,7 @@ export const VendorBillForm = () => {
                   <SelectDropdown 
                     value={String(line.cost_center_id || '')} 
                     onChange={e => updateLine(idx, 'cost_center_id', e.target.value)} 
-                    disabled={isEdit} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
                   >
                     <option value="">Default</option>
                     {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -402,11 +404,11 @@ export const VendorBillForm = () => {
                     min="0"
                     step="0.01"
                     style={{ textAlign: 'right' }} 
-                    disabled={isEdit} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
                   />
                 </td>
                 <td>
-                  {!isEdit && lines.length > 1 && (
+                  {(!isEdit || detailData?.status !== 'cancelled') && lines.length > 1 && (
                     <button className="icon-btn" onClick={() => removeLine(idx)} title="Remove line">
                       <X size={12} />
                     </button>
