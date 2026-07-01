@@ -7,6 +7,8 @@ const { isSeedItem, nextPurchaseLotCode, nextLotOpId } = require('../services/se
 const { reserveCode } = require('../services/codeGeneratorService');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+const gstEngine = require('../services/gstEngine');
+const { buildPurchaseJournal } = require('../services/purchaseJournalBuilder');
 
 const router = express.Router();
 
@@ -194,16 +196,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     const seqR = await client.query("SELECT nextval('pn_seq') as num");
     const docNumber = `PN-${seqR.rows[0].num}`;
 
-    // Calculate totals
-    let totalQty = 0, totalAmount = 0, taxAmount = 0;
-    for (const line of lines) {
-      const amt = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0);
-      const tax = amt * ((parseFloat(line.tax_pct) || 0) / 100);
+    // Calculate totals using shared GST engine
+    const { lines: processedLines, totalTaxable: totalAmount, totalTax: taxAmount, grandTotal } = gstEngine.calculateDocumentGST(lines);
+    
+    let totalQty = 0;
+    for (const line of processedLines) {
       totalQty += parseFloat(line.qty) || 0;
-      totalAmount += amt;
-      taxAmount += tax;
     }
-    const grandTotal = totalAmount + taxAmount;
 
     // Insert purchase note header
     const pnR = await client.query(
@@ -241,11 +240,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       for (const row of catR.rows) catsById[row.id] = row;
     }
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const amt     = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0);
-      const taxAmt  = amt * ((parseFloat(line.tax_pct) || 0) / 100);
-      const lineTotal = amt + taxAmt;
+    for (let i = 0; i < processedLines.length; i++) {
+      const line = processedLines[i];
+      const amt = line.computed_amount;
+      const taxAmt = line.computed_tax_amount;
+      const lineTotal = line.computed_total;
 
       const item = itemsById[parseInt(line.item_id)];
       if (!item) throw new Error(`Item ID ${line.item_id} not found`);
@@ -360,35 +359,22 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       }
     }
 
-    const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
-    if (!payableAccId) throw new Error(`Payable account role 'ACCOUNTS_PAYABLE' not found in Chart of Accounts.`);
-
-    // Build JE debit lines from drAccountMap
-    const jeLines = [];
-    for (const [accId, amount] of Object.entries(drAccountMap)) {
-      jeLines.push({ accountId: parseInt(accId), debit: amount, credit: 0,
-                     narration: `Purchase ${item_type} - ${docNumber}`,
-                     costCenterId });
-    }
-
-    // Add GST if applicable
-    if (taxAmount > 0) {
-      const gstAccId = await getAccountByRole('GST_PAYABLE', client);
-      if (gstAccId) {
-        jeLines.push({ accountId: gstAccId, debit: Math.round(taxAmount * 100) / 100, credit: 0,
-                       narration: `GST on ${docNumber}`,
-                       costCenterId });
-      }
-    }
-
+    // Build JE using shared routine
     const vendorNameR = vendor_id
       ? await client.query('SELECT name FROM vendors WHERE id=$1', [vendor_id])
       : { rows: [{ name: 'Unknown Vendor' }] };
     if (vendor_id && !vendorNameR.rows[0]) throw new Error(`Vendor ID ${vendor_id} not found`);
-    jeLines.push({
-      accountId: payableAccId, debit: 0, credit: Math.round(grandTotal * 100) / 100,
-      narration: `Payable to ${vendorNameR.rows[0]?.name || 'Unknown Vendor'}`,
-      costCenterId,
+
+    const jeLines = await buildPurchaseJournal({
+      client,
+      docNumber,
+      date: doc_date,
+      vendorName: vendorNameR.rows[0]?.name,
+      itemType: item_type,
+      debitLines: Object.entries(drAccountMap).map(([accId, amt]) => ({ accountId: parseInt(accId), amount: amt })),
+      taxAmount,
+      grandTotal,
+      globalCostCenterId: costCenterId
     });
 
     const je = await journalEngine.createEntry({

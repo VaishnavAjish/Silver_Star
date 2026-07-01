@@ -4,6 +4,8 @@ const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const accountResolver = require('../services/accountResolver');
+const gstEngine = require('../services/gstEngine');
+const { buildPurchaseJournal } = require('../services/purchaseJournalBuilder');
 
 const router = express.Router();
 
@@ -98,8 +100,12 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     if (!doc_date || !vendor_id) throw new Error('Date and Vendor are required');
     if (!lines || lines.length === 0) throw new Error('At least one line item is required');
 
-    // Calculate totals
-    const grandTotal = Math.round(lines.reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0) * 100) / 100;
+    // Calculate totals using shared GST engine
+    const gstData = gstEngine.calculateDocumentGST(lines);
+    const totalAmount = gstData.totalTaxable;
+    const taxAmount = gstData.totalTax;
+    const grandTotal = gstData.grandTotal;
+
     if (grandTotal <= 0) throw new Error('Total amount must be greater than 0');
 
     // Generate Bill Number
@@ -111,50 +117,55 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       `INSERT INTO purchase_notes (doc_number, doc_date, vendor_id, item_type, department_id,
           reference_no, remark, total_qty, total_amount, tax_amount, grand_total,
           balance_due, amount_paid, payment_status, status, created_by, cost_center_id)
-       VALUES ($1,$2,$3,'Expense Bill',$4,$5,$6,0,$7,0,$8,$9,0,'UNPAID','open',$10,$11) RETURNING *`,
+       VALUES ($1,$2,$3,'Expense Bill',$4,$5,$6,0,$7,$8,$9,$10,0,'UNPAID','open',$11,$12) RETURNING *`,
       [docNumber, doc_date, vendor_id, department_id || null, reference_no, remark,
-       grandTotal, grandTotal, grandTotal, req.user.id, cost_center_id || null]
+       totalAmount, taxAmount, grandTotal, grandTotal, req.user.id, cost_center_id || null]
     );
     const pn = pnR.rows[0];
 
-    const jeLines = [];
+    const debitLines = [];
     const insertedLines = [];
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const amt = parseFloat(line.amount) || 0;
+    for (let i = 0; i < gstData.lines.length; i++) {
+      const line = gstData.lines[i];
+      const amt = line.computed_amount;
+      const taxAmt = line.computed_tax_amount;
+      const lineTotal = line.computed_total;
+      
       if (amt <= 0) continue;
       if (!line.expense_account_id) throw new Error('Expense Category is required for all lines');
 
       const lineR = await client.query(
         `INSERT INTO purchase_note_lines
-           (purchase_note_id, line_no, expense_account_id, description, department_id, cost_center_id, amount, total, qty, rate)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9) RETURNING *`,
+           (purchase_note_id, line_no, expense_account_id, description, department_id, cost_center_id, amount, tax_pct, tax_amount, total, qty, rate)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11) RETURNING *`,
         [pn.id, i + 1, parseInt(line.expense_account_id), line.description || '',
          line.department_id ? parseInt(line.department_id) : null,
          line.cost_center_id ? parseInt(line.cost_center_id) : null,
-         amt, amt, amt]
+         amt, parseFloat(line.tax_pct) || 0, taxAmt, lineTotal, amt]
       );
       insertedLines.push(lineR.rows[0]);
 
-      jeLines.push({
+      debitLines.push({
         accountId: parseInt(line.expense_account_id),
-        debit: amt,
-        credit: 0,
+        amount: amt,
         narration: `Vendor Bill ${docNumber}`,
         costCenterId: line.cost_center_id ? parseInt(line.cost_center_id) : (cost_center_id ? parseInt(cost_center_id) : null)
       });
     }
 
-    // Accounts Payable
-    const apAccount = await accountResolver.getAccountByRole('ACCOUNTS_PAYABLE', client);
-    if (!apAccount) throw new Error('Accounts Payable role not configured');
-
-    jeLines.push({
-      accountId: apAccount,
-      debit: 0,
-      credit: grandTotal,
-      narration: `Vendor Bill ${docNumber}`
+    // Build JE using shared routine
+    const vendorNameR = await client.query('SELECT name FROM vendors WHERE id=$1', [vendor_id]);
+    const jeLines = await buildPurchaseJournal({
+      client,
+      docNumber,
+      date: doc_date,
+      vendorName: vendorNameR.rows[0]?.name,
+      itemType: 'Expense Bill',
+      debitLines,
+      taxAmount,
+      grandTotal,
+      globalCostCenterId: cost_center_id ? parseInt(cost_center_id) : null
     });
 
     const je = await journalEngine.createEntry({
@@ -239,8 +250,12 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
       throw new Error('Cannot edit a bill with payments applied. Remove payments first.');
     }
 
-    // Calculate totals
-    const grandTotal = Math.round(lines.reduce((sum, line) => sum + (parseFloat(line.amount) || 0), 0) * 100) / 100;
+    // Calculate totals using shared GST engine
+    const gstData = gstEngine.calculateDocumentGST(lines);
+    const totalAmount = gstData.totalTaxable;
+    const taxAmount = gstData.totalTax;
+    const grandTotal = gstData.grandTotal;
+
     if (grandTotal <= 0) throw new Error('Total amount must be greater than 0');
 
     // 1. Delete old lines
@@ -256,51 +271,56 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
     await client.query(
       `UPDATE purchase_notes 
        SET doc_date=$1, vendor_id=$2, department_id=$3, reference_no=$4, remark=$5, 
-           total_amount=$6, grand_total=$7, balance_due=$8, cost_center_id=$9
-       WHERE id = $10`,
+           total_amount=$6, tax_amount=$7, grand_total=$8, balance_due=$9, cost_center_id=$10
+       WHERE id = $11`,
       [doc_date, vendor_id, department_id || null, reference_no, remark,
-       grandTotal, grandTotal, grandTotal, cost_center_id || null, id]
+       totalAmount, taxAmount, grandTotal, grandTotal, cost_center_id || null, id]
     );
 
-    const jeLines = [];
+    const debitLines = [];
     const insertedLines = [];
 
     // 4. Insert new lines
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const amt = parseFloat(line.amount) || 0;
+    for (let i = 0; i < gstData.lines.length; i++) {
+      const line = gstData.lines[i];
+      const amt = line.computed_amount;
+      const taxAmt = line.computed_tax_amount;
+      const lineTotal = line.computed_total;
+      
       if (amt <= 0) continue;
       if (!line.expense_account_id) throw new Error('Expense Category is required for all lines');
 
       const lineR = await client.query(
         `INSERT INTO purchase_note_lines
-           (purchase_note_id, line_no, expense_account_id, description, department_id, cost_center_id, amount, total, qty, rate)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9) RETURNING *`,
+           (purchase_note_id, line_no, expense_account_id, description, department_id, cost_center_id, amount, tax_pct, tax_amount, total, qty, rate)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11) RETURNING *`,
         [id, i + 1, parseInt(line.expense_account_id), line.description || '',
          line.department_id ? parseInt(line.department_id) : null,
          line.cost_center_id ? parseInt(line.cost_center_id) : null,
-         amt, amt, amt]
+         amt, parseFloat(line.tax_pct) || 0, taxAmt, lineTotal, amt]
       );
       insertedLines.push(lineR.rows[0]);
 
-      jeLines.push({
+      debitLines.push({
         accountId: parseInt(line.expense_account_id),
-        debit: amt,
-        credit: 0,
+        amount: amt,
         narration: `Vendor Bill ${pn.doc_number} (Edited)`,
         costCenterId: line.cost_center_id ? parseInt(line.cost_center_id) : (cost_center_id ? parseInt(cost_center_id) : null)
       });
     }
 
-    // Accounts Payable
-    const apAccount = await accountResolver.getAccountByRole('ACCOUNTS_PAYABLE', client);
-    if (!apAccount) throw new Error('Accounts Payable role not configured');
-
-    jeLines.push({
-      accountId: apAccount,
-      debit: 0,
-      credit: grandTotal,
-      narration: `Vendor Bill ${pn.doc_number} (Edited)`
+    // Build JE using shared routine
+    const vendorNameR = await client.query('SELECT name FROM vendors WHERE id=$1', [vendor_id]);
+    const jeLines = await buildPurchaseJournal({
+      client,
+      docNumber: pn.doc_number,
+      date: doc_date,
+      vendorName: vendorNameR.rows[0]?.name,
+      itemType: 'Expense Bill',
+      debitLines,
+      taxAmount,
+      grandTotal,
+      globalCostCenterId: cost_center_id ? parseInt(cost_center_id) : null
     });
 
     // 5. Create new JE

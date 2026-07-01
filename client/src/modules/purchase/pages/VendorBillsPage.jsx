@@ -19,7 +19,7 @@ const fmtDate = d => {
   const dt = new Date(typeof d === 'string' && !d.includes('T') ? `${d}T00:00:00` : d);
   return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
-const newLine = () => ({ expense_account_id: '', description: '', amount: '', department_id: '', cost_center_id: '' });
+const newLine = () => ({ expense_account_id: '', description: '', amount: '', tax_pct: '', department_id: '', cost_center_id: '' });
 
 const STATUS_OPTIONS = [
   { value: 'open',      label: 'Open' },
@@ -277,7 +277,7 @@ export const VendorBillForm = () => {
         if (d.lines && d.lines.length > 0) {
           setLines(d.lines.map(l => ({
             expense_account_id: l.expense_account_id || '', description: l.description || '',
-            amount: l.amount || '', department_id: l.department_id || '', cost_center_id: l.cost_center_id || ''
+            amount: l.amount || '', tax_pct: l.tax_pct || '', department_id: l.department_id || '', cost_center_id: l.cost_center_id || ''
           })));
         } else {
            setLines([]);
@@ -294,7 +294,17 @@ export const VendorBillForm = () => {
     else setLines([newLine()]);
   };
 
-  const grandTotal = lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const { subtotal, taxTotal, grandTotal } = useMemo(() => {
+    let s = 0, t = 0;
+    lines.forEach(l => {
+      const amt = parseFloat(l.amount) || 0;
+      const pct = parseFloat(l.tax_pct) || 0;
+      const tax = amt * (pct / 100);
+      s += amt;
+      t += tax;
+    });
+    return { subtotal: s, taxTotal: t, grandTotal: s + t };
+  }, [lines]);
 
   const handleVendorCreated = (newVendor) => {
     setVendors(prev => [...prev, newVendor]);
@@ -466,6 +476,8 @@ export const VendorBillForm = () => {
               <th style={{ width: 110 }}>Department</th>
               <th style={{ width: 140 }}>Cost Center</th>
               <th style={{ width: 130, textAlign: 'right' }}>Amount (₹) *</th>
+              <th style={{ width: 90, textAlign: 'right' }}>Tax %</th>
+              <th style={{ width: 110, textAlign: 'right' }}>Tax Amount</th>
               <th style={{ width: 36 }}></th>
             </tr>
           </thead>
@@ -524,6 +536,21 @@ export const VendorBillForm = () => {
                   />
                 </td>
                 <td>
+                  <input 
+                    type="number" 
+                    value={line.tax_pct} 
+                    onChange={e => updateLine(idx, 'tax_pct', e.target.value)} 
+                    placeholder="0"
+                    min="0"
+                    step="0.01"
+                    style={{ textAlign: 'right' }} 
+                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                  />
+                </td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--g700)', verticalAlign: 'middle', paddingRight: 10 }}>
+                  {fmt((parseFloat(line.amount) || 0) * ((parseFloat(line.tax_pct) || 0) / 100))}
+                </td>
+                <td>
                   {(!isEdit || detailData?.status !== 'cancelled') && lines.length > 1 && (
                     <button className="icon-btn" onClick={() => removeLine(idx)} title="Remove line">
                       <X size={12} />
@@ -533,11 +560,31 @@ export const VendorBillForm = () => {
               </tr>
             ))}
           </tbody>
-          {lines.length > 1 && (
+          {lines.length > 0 && (
             <tfoot>
               <tr>
-                <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12 }}>
-                  Expense Total
+                <td colSpan={7} style={{ textAlign: 'right', fontWeight: 500, paddingRight: 10, fontSize: 12, color: 'var(--g600)' }}>
+                  Subtotal
+                </td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 12 }}>
+                  ₹{fmt(subtotal)}
+                </td>
+                <td />
+              </tr>
+              {taxTotal > 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'right', fontWeight: 500, paddingRight: 10, fontSize: 12, color: 'var(--g600)' }}>
+                    GST
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 12 }}>
+                    ₹{fmt(taxTotal)}
+                  </td>
+                  <td />
+                </tr>
+              )}
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12 }}>
+                  Grand Total
                 </td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13 }}>
                   ₹{fmt(grandTotal)}
