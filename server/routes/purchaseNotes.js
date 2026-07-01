@@ -11,7 +11,7 @@ const { logger } = require('../middleware/logger');
 const router = express.Router();
 
 // Auto-migrate missing column if it doesn't exist
-pool.query('ALTER TABLE purchase_notes ADD COLUMN cost_center_id INT').catch(() => {}).finally(() => {
+pool.query('ALTER TABLE purchase_notes ADD COLUMN IF NOT EXISTS cost_center_id INT').catch(() => {}).finally(() => {
   pool.query(`
     UPDATE purchase_notes 
     SET cost_center_id = (
