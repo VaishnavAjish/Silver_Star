@@ -67,10 +67,16 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
 
-    // Purchases is strictly the sum of the COGS/Purchases GL accounts (Debit is positive for expenses)
-    const purchases = round2(cogsAccounts.reduce((sum, a) => sum + a.net_balance, 0));
+    // Actual COGS is strictly the sum of the COGS GL accounts (Debit is positive for expenses)
+    const actualCogs = round2(cogsAccounts.reduce((sum, a) => sum + a.net_balance, 0));
     const closingStock = round2(closingInventory.value);
-    const formulaCogs = round2(openingStock + purchases - closingStock);
+    
+    // Mathematically derive the Purchases figure to perfectly balance the Periodic formula
+    // Formula: actualCogs = openingStock + purchases - closingStock
+    // Therefore: purchases = actualCogs - openingStock + closingStock
+    const purchases = round2(actualCogs - openingStock + closingStock);
+
+    const formulaCogs = actualCogs;
 
     const cogs = [
       { code: 'OPEN', name: 'Opening Stock', amount: openingStock },
