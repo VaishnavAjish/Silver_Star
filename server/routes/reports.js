@@ -16,11 +16,8 @@ router.get('/pnl', authenticate, async (req, res) => {
     if (!from_date) from_date = '1970-01-01';
     if (!to_date) to_date = new Date().toISOString().split('T')[0];
 
-    // Fetch GL balances via Trial Balance hierarchy and inventory valuations concurrently
-    const [roots, closingInventory] = await Promise.all([
-      buildTrialBalanceHierarchy(from_date, to_date),
-      getInventoryValuation(to_date)
-    ]);
+    // Fetch GL balances via Trial Balance hierarchy (General Ledger is the single source of truth)
+    const roots = await buildTrialBalanceHierarchy(from_date, to_date);
 
     // Flatten the Trial Balance tree to get all leaf accounts with activity
     const allLeaves = [];
@@ -36,15 +33,7 @@ router.get('/pnl', authenticate, async (req, res) => {
     };
     flatten(roots, null);
 
-    // inventory_opening table may not exist on older deployments - fall back to 0
-    let openingStock = 0;
-    try {
-      const openingR = await pool.query(
-        `SELECT COALESCE(SUM(value), 0) AS value FROM inventory_opening WHERE as_of_date < $1`,
-        [from_date]
-      );
-      openingStock = round2(openingR.rows[0].value);
-    } catch { /* table missing - treat opening stock as 0 */ }
+
 
     // Revenue accounts (Credit balances are positive for revenue)
     const revenue = allLeaves
@@ -53,13 +42,15 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     const expenses = allLeaves.filter(a => a.type === 'expense');
 
-    // Identify COGS accounts via root group name or fallback codes
+    // Identify COGS accounts via root group name, account name, or role
     const isCogs = (a) => {
-      if (a.rootGroup) {
-        const rg = a.rootGroup.toLowerCase();
-        if (rg.includes('cost of goods sold') || rg.includes('direct expense')) return true;
-      }
-      return ['5001', '5002', '5003'].includes(a.code);
+      const groupName = (a.rootGroup || '').toLowerCase();
+      const name = a.name.toLowerCase();
+      return groupName.includes('cost of goods sold') || 
+             groupName.includes('direct expense') ||
+             name.includes('cost of goods sold') ||
+             name.includes('direct expense') ||
+             a.account_role === 'COGS';
     };
 
     const cogsAccounts = expenses.filter(isCogs);
@@ -67,20 +58,13 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
 
-    // Purchases is strictly the sum of the COGS/Purchases GL accounts (Debit is positive for expenses)
-    const purchases = round2(cogsAccounts.reduce((sum, a) => sum + a.net_balance, 0));
-    const closingStock = round2(closingInventory.value);
-    const formulaCogs = round2(openingStock + purchases - closingStock);
-
-    const cogs = [
-      { code: 'OPEN', name: 'Opening Stock', amount: openingStock },
-      { code: 'PURCHASES', name: 'Purchases', amount: purchases },
-      { code: 'CLOSE', name: 'Less: Closing Stock', amount: -closingStock },
-    ];
+    // COGS is strictly the mapped expense ledgers (Debit is positive for expenses)
+    const cogs = cogsAccounts.map(a => ({ ...a, amount: a.net_balance }));
+    const totalCogs = cogs.reduce((s, r) => s + r.amount, 0);
 
     const opex = opexAccounts.map(a => ({ ...a, amount: a.net_balance }));
-    const totalCogs = formulaCogs;
-    const totalOpex = round2(opex.reduce((s, r) => s + r.amount, 0));
+    const totalOpex = opex.reduce((s, r) => s + r.amount, 0);
+    
     const grossProfit = totalRevenue - totalCogs;
     const netProfit = grossProfit - totalOpex;
     const netMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 10000) / 100 : 0;
@@ -91,13 +75,7 @@ router.get('/pnl', authenticate, async (req, res) => {
       period: { from: from_date, to: to_date },
       revenue, totalRevenue,
       cogs, totalCogs,
-      inventory: {
-        openingStock,
-        purchases,
-        closingStock,
-        closingMode: closingInventory.mode,
-        closingAsOfDate: closingInventory.as_of_date,
-      },
+
       grossProfit,
       opex, totalOpex,
       netProfit, netMargin,
