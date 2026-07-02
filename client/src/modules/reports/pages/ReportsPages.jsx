@@ -255,24 +255,54 @@ export function PnLPage() {
 
                 <tr><td>&nbsp;</td><td></td></tr>
                 <tr style={{background:'#FFF3E0'}}><td style={{fontWeight:700, color:'#E65100'}}>Cost of Goods Sold</td><td></td></tr>
-                {data.cogs.map((r, i) => (
-                  <tr key={i}>
-                    <td style={{paddingLeft:30}}>{r.name}</td>
-                    <td
-                      className="num"
-                      title={r.id ? 'Click to view transactions' : undefined}
-                      style={{ 
-                        cursor: r.id ? 'pointer' : 'default',
-                        color: r.id ? 'var(--brand)' : 'inherit',
-                      }}
-                      onMouseEnter={r.id ? e => e.currentTarget.style.textDecoration = 'underline' : undefined}
-                      onMouseLeave={r.id ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
-                      onClick={r.id ? () => navigate(`/reports/transactions?account_id=${r.id}&from=${fromDate}&to=${toDate}&account_name=${encodeURIComponent(r.name)}`) : undefined}
-                    >
-                      {r.amount_display}
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td style={{paddingLeft:30}}>Opening Stock</td>
+                  <td 
+                    className="num"
+                    title={(data.inventory?.openingStock !== 0) ? 'Click to view opening stock' : undefined}
+                    style={{ 
+                      cursor: (data.inventory?.openingStock !== 0) ? 'pointer' : 'default',
+                      color: (data.inventory?.openingStock !== 0) ? 'var(--brand)' : 'inherit',
+                    }}
+                    onMouseEnter={(data.inventory?.openingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'underline' : undefined}
+                    onMouseLeave={(data.inventory?.openingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
+                    onClick={(data.inventory?.openingStock !== 0) ? () => navigate('/inventory/opening') : undefined}
+                  >
+                    {data.inventory?.openingStock_display || '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{paddingLeft:30}}>Purchases</td>
+                  <td 
+                    className="num"
+                    title={(data.inventory?.purchases !== 0) ? 'Click to view purchases' : undefined}
+                    style={{ 
+                      cursor: (data.inventory?.purchases !== 0) ? 'pointer' : 'default',
+                      color: (data.inventory?.purchases !== 0) ? 'var(--brand)' : 'inherit',
+                    }}
+                    onMouseEnter={(data.inventory?.purchases !== 0) ? e => e.currentTarget.style.textDecoration = 'underline' : undefined}
+                    onMouseLeave={(data.inventory?.purchases !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
+                    onClick={(data.inventory?.purchases !== 0) ? () => navigate('/purchase-notes') : undefined}
+                  >
+                    {data.inventory?.purchases_display || '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{paddingLeft:30}}>Less: Closing Stock <span style={{color:'var(--g500)', fontSize:11}}>({data.inventory?.closingMode})</span></td>
+                  <td 
+                    className="num"
+                    title={(data.inventory?.closingStock !== 0) ? 'Click to view closing stock details' : undefined}
+                    style={{ 
+                      cursor: (data.inventory?.closingStock !== 0) ? 'pointer' : 'default',
+                      color: (data.inventory?.closingStock !== 0) ? 'var(--brand)' : 'inherit',
+                    }}
+                    onMouseEnter={(data.inventory?.closingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'underline' : undefined}
+                    onMouseLeave={(data.inventory?.closingStock !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
+                    onClick={(data.inventory?.closingStock !== 0) ? () => navigate('/inventory/closing') : undefined}
+                  >
+                    -{data.inventory?.closingStock_display || '-'}
+                  </td>
+                </tr>
                 <tr style={{fontWeight:700, borderTop:'2px solid var(--g300)'}}><td>Total COGS</td><td className="num" style={{color:'var(--red)', whiteSpace: 'pre-wrap'}}>{data.totalCogs_display}</td></tr>
 
                 <tr><td>&nbsp;</td><td></td></tr>
