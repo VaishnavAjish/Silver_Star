@@ -301,19 +301,21 @@ export function PurchaseNoteForm() {
   const addLine = () => setLines(prev => [...prev, { ...INITIAL_LINE }]);
   const removeLine = (idx) => { if (lines.length > 1) setLines(prev => prev.filter((_, i) => i !== idx)); };
 
-  // When viewing an existing PN, prefer the saved totals from the DB header
-  const calcTotalAmt = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
-  const calcTotalTax = lines.reduce((s, l) => { const a = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0); return s + a * ((parseFloat(l.tax_pct) || 0) / 100); }, 0);
+  const calcTotalAmt = lines.reduce((s, l) => s + (parseFloat(l.amount) || ((parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0))), 0);
+  const calcTotalTax = lines.reduce((s, l) => { 
+    const a = parseFloat(l.amount) || ((parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0)); 
+    return s + a * ((parseFloat(l.tax_pct) || 0) / 100); 
+  }, 0);
   const calcGrandTotal = calcTotalAmt + calcTotalTax;
   const calcTotalWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
 
-  const totalAmt = (isView && lines.length === 0) ? (parseFloat(viewData?.total_amount) || 0) : calcTotalAmt;
-  const totalTax = (isView && lines.length === 0) ? (parseFloat(viewData?.tax_amount) || 0) : calcTotalTax;
-  const grandTotal = (isView && lines.length === 0) ? (parseFloat(viewData?.grand_total) || 0) : calcGrandTotal;
+  const totalAmt = isView ? (parseFloat(viewData?.total_amount) || calcTotalAmt) : calcTotalAmt;
+  const totalTax = isView ? (parseFloat(viewData?.tax_amount) || calcTotalTax) : calcTotalTax;
+  const grandTotal = isView ? (parseFloat(viewData?.grand_total) || calcGrandTotal) : calcGrandTotal;
   const totalWeight = calcTotalWeight;
 
   const calcTotalQty = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-  const totalQty = (isView && lines.length === 0) ? (parseFloat(viewData?.total_qty) || 0) : calcTotalQty;
+  const totalQty = isView ? (parseFloat(viewData?.total_qty) || calcTotalQty) : calcTotalQty;
 
   const filteredItems = items.filter(i => i.is_capital_asset || !form.item_type || i.category === form.item_type);
 
@@ -504,7 +506,7 @@ export function PurchaseNoteForm() {
                           value={
                             line.item_name ||
                             selItem?.name ||
-                            (line.item_id ? `Item #${line.item_id}` : '—')
+                            (line.item_id ? `Item #${line.item_id}` : (line.description ? '— (Service / Misc)' : '—'))
                           }
                           disabled
                           style={{ fontWeight: 500 }}
