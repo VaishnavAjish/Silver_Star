@@ -188,6 +188,7 @@ export function PnLPage() {
   const [decimals, setDecimals] = useState(2);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [purchasePopup, setPurchasePopup] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -275,14 +276,14 @@ export function PnLPage() {
                   <td style={{paddingLeft:30}}>Purchases</td>
                   <td 
                     className="num"
-                    title={(data.inventory?.purchases !== 0) ? 'Click to view purchases' : undefined}
+                    title={(data.inventory?.purchases !== 0) ? 'Click to view purchases breakdown' : undefined}
                     style={{ 
                       cursor: (data.inventory?.purchases !== 0) ? 'pointer' : 'default',
                       color: (data.inventory?.purchases !== 0) ? 'var(--brand)' : 'inherit',
                     }}
                     onMouseEnter={(data.inventory?.purchases !== 0) ? e => e.currentTarget.style.textDecoration = 'underline' : undefined}
                     onMouseLeave={(data.inventory?.purchases !== 0) ? e => e.currentTarget.style.textDecoration = 'none' : undefined}
-                    onClick={(data.inventory?.purchases !== 0) ? () => navigate('/purchase-notes') : undefined}
+                    onClick={(data.inventory?.purchases !== 0) ? () => setPurchasePopup(true) : undefined}
                   >
                     {data.inventory?.purchases_display || '-'}
                   </td>
@@ -394,6 +395,42 @@ export function PnLPage() {
           </div>
         );
       })()}
+      {data && !loading && purchasePopup && (
+        <Modal open={purchasePopup} onClose={() => setPurchasePopup(false)} title="Purchases Breakdown">
+          <div style={{ padding: '16px' }}>
+            <table className="dgrid">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.inventory?.purchaseBreakdown?.map((cat, i) => (
+                  <tr key={i}>
+                    <td 
+                      style={{ cursor: 'pointer', color: 'var(--brand)', textTransform: 'capitalize' }}
+                      onClick={() => {
+                        sessionStorage.setItem('purchase_notes_filters', JSON.stringify({ type: cat.category, date_from: fromDate, date_to: toDate }));
+                        navigate('/purchase-notes');
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                      onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                    >
+                      {cat.category}
+                    </td>
+                    <td className="num">{cat.amount_display}</td>
+                  </tr>
+                ))}
+                {(!data?.inventory?.purchaseBreakdown || data.inventory.purchaseBreakdown.length === 0) && (
+                  <tr><td colSpan={2} style={{ textAlign: 'center', color: 'var(--g500)' }}>No purchases found in this period.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+
       </div>
     </div>
   );

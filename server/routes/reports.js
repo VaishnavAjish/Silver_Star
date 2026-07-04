@@ -89,6 +89,21 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     logger.info(`[P&L Report] period=${from_date}..${to_date} revenue=${totalRevenue} cogs=${totalCogs} opex=${totalOpex} gross=${grossProfit} net=${netProfit}`);
 
+    // Calculate Purchase Breakdown directly from purchase_notes
+    let purchaseBreakdown = [];
+    try {
+      const breakdownR = await pool.query(
+        `SELECT COALESCE(item_type, 'General') AS category, COALESCE(SUM(total_amount), 0) as amount
+         FROM purchase_notes
+         WHERE doc_date >= $1 AND doc_date <= $2 AND status != 'cancelled'
+         GROUP BY COALESCE(item_type, 'General')`,
+        [from_date, to_date]
+      );
+      purchaseBreakdown = breakdownR.rows;
+    } catch (err) {
+      logger.error('Failed to get purchase breakdown:', err);
+    }
+
     const payload = {
       period: { from: from_date, to: to_date },
       revenue, totalRevenue,
@@ -96,6 +111,7 @@ router.get('/pnl', authenticate, async (req, res) => {
       inventory: {
         openingStock,
         purchases,
+        purchaseBreakdown,
         closingStock,
         closingMode: closingInventory.mode,
         closingAsOfDate: closingInventory.as_of_date,
