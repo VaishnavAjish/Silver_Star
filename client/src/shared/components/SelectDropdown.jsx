@@ -98,6 +98,19 @@ export default function SelectDropdown({
     if (onChange) onChange({ target: { value: draftValues.join(',') } });
   };
 
+  const clearMultiple = () => setDraftValues([]);
+
+  // Memoized filters for performance
+  const baseOpts = useMemo(() => 
+    multiple ? options.filter(o => o.value !== '' && o.value != null) : options,
+  [multiple, options]);
+
+  const visibleOpts = useMemo(() => 
+    showSearch && query.trim()
+      ? baseOpts.filter(o => String(o.label).toLowerCase().includes(query.toLowerCase()))
+      : baseOpts,
+  [baseOpts, showSearch, query]);
+
   useEffect(() => {
     setActiveIndex(-1);
   }, [query, visibleOpts.length]);
@@ -142,19 +155,6 @@ export default function SelectDropdown({
       wrapRef.current?.querySelector('button')?.focus();
     }
   };
-
-  const clearMultiple = () => setDraftValues([]);
-
-  // Memoized filters for performance
-  const baseOpts = useMemo(() => 
-    multiple ? options.filter(o => o.value !== '' && o.value != null) : options,
-  [multiple, options]);
-
-  const visibleOpts = useMemo(() => 
-    showSearch && query.trim()
-      ? baseOpts.filter(o => String(o.label).toLowerCase().includes(query.toLowerCase()))
-      : baseOpts,
-  [baseOpts, showSearch, query]);
 
   const toggleAll = () => {
     if (draftValues.length === visibleOpts.length) {
