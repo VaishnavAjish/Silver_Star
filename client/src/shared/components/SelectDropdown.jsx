@@ -62,6 +62,7 @@ export default function SelectDropdown({
   const wrapRef   = useRef(null);
   const searchRef = useRef(null);
   const ignoreFocusRef = useRef(false);
+  const openedByTabRef = useRef(false);
   const [focused, setFocused] = useState(false);
 
   // Close on outside click
@@ -76,11 +77,14 @@ export default function SelectDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Focus search on open
+  // Focus search on open (only when opened by mouse, not Tab)
   useEffect(() => {
     if (open && showSearch) {
       setQuery('');
-      setTimeout(() => searchRef.current?.focus(), 30);
+      if (!openedByTabRef.current) {
+        setTimeout(() => searchRef.current?.focus(), 30);
+      }
+      openedByTabRef.current = false;
     }
   }, [open, showSearch]);
 
@@ -152,9 +156,20 @@ export default function SelectDropdown({
       setOpen(false);
       wrapRef.current?.querySelector('button')?.focus();
     } else if (e.key === 'Tab') {
-      // Close dropdown and let browser naturally move to next element
+      // Close dropdown and manually advance focus to next element after the trigger button
+      e.preventDefault();
       setOpen(false);
       setQuery('');
+      requestAnimationFrame(() => {
+        const SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const allFocusable = Array.from(document.querySelectorAll(SELECTOR))
+          .filter(el => !el.closest('[data-portal-dropdown]') && el.offsetParent !== null);
+        const btn = wrapRef.current?.querySelector('button');
+        const btnIdx = allFocusable.indexOf(btn);
+        if (btnIdx >= 0 && btnIdx + 1 < allFocusable.length) {
+          allFocusable[btnIdx + 1].focus();
+        }
+      });
     }
   };
 
@@ -201,6 +216,7 @@ export default function SelectDropdown({
         disabled={disabled}
         onMouseDown={(e) => {
           ignoreFocusRef.current = true;
+          openedByTabRef.current = false;
           if (!disabled) setOpen(o => !o);
           setTimeout(() => { ignoreFocusRef.current = false; }, 100);
         }}
@@ -208,6 +224,7 @@ export default function SelectDropdown({
           setFocused(true);
           // Only open when arriving via Tab (relatedTarget is outside this wrapper)
           if (!disabled && !ignoreFocusRef.current && !wrapRef.current?.contains(e.relatedTarget)) {
+            openedByTabRef.current = true;
             setOpen(true);
           }
         }}

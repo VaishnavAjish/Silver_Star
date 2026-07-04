@@ -110,6 +110,7 @@ export default function SearchableSelect({
   const searchRef       = useRef(null);
   const portalRef       = useRef(null);
   const ignoreFocusRef  = useRef(false);
+  const openedByTabRef  = useRef(false);
   const valueRef      = useRef(value);
   const openRef       = useRef(internalOpen);
   const mountedRef    = useRef(true);
@@ -225,9 +226,20 @@ export default function SearchableSelect({
       setOpen(false);
       wrapRef.current?.querySelector('button, input')?.focus();
     } else if (e.key === 'Tab') {
-      // Close dropdown and let browser naturally move to next element
+      // Close dropdown and manually advance focus to next element after the trigger button
+      e.preventDefault();
       setOpen(false);
       setQuery('');
+      requestAnimationFrame(() => {
+        const SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const allFocusable = Array.from(document.querySelectorAll(SELECTOR))
+          .filter(el => !el.closest('[data-portal-dropdown]') && el.offsetParent !== null);
+        const btn = wrapRef.current?.querySelector('button');
+        const btnIdx = allFocusable.indexOf(btn);
+        if (btnIdx >= 0 && btnIdx + 1 < allFocusable.length) {
+          allFocusable[btnIdx + 1].focus();
+        }
+      });
     }
   };
 
@@ -283,7 +295,11 @@ export default function SearchableSelect({
     if (dropdownSearch && open) {
       setQuery('');
       runSearch('');
-      setTimeout(() => searchRef.current?.focus(), 30);
+      // Only auto-focus search if opened by mouse click, not by Tab key
+      if (!openedByTabRef.current) {
+        setTimeout(() => searchRef.current?.focus(), 30);
+      }
+      openedByTabRef.current = false;
     }
   }, [open, dropdownSearch]); // eslint-disable-line
 
@@ -320,12 +336,14 @@ export default function SearchableSelect({
           disabled={disabled}
           onMouseDown={(e) => {
             ignoreFocusRef.current = true;
+            openedByTabRef.current = false;
             if (!disabled) setOpen(o => !o);
             setTimeout(() => { ignoreFocusRef.current = false; }, 100);
           }}
           onFocus={(e) => {
             // Only open when arriving via Tab from outside this wrapper
             if (!disabled && !ignoreFocusRef.current && !wrapRef.current?.contains(e.relatedTarget)) {
+              openedByTabRef.current = true;
               setOpen(true);
             }
           }}
