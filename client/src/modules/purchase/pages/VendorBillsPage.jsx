@@ -6,7 +6,7 @@ import DataGrid from '../../../shared/components/DataGrid';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import { Plus, Receipt, X, Save, Trash2, Edit, ShoppingCart } from 'lucide-react';
 import toast from 'react-hot-toast';
-import QuickCreateVendorModal from '../../shared/components/QuickCreateVendorModal';
+import QuickCreateVendorModal from '../../../shared/components/QuickCreateVendorModal';
 import QuickCreateModal from '../../../features/quick-create/QuickCreateModal';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
