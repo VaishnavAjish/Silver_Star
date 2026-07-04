@@ -23,6 +23,7 @@ const MENU_CONFIG = [
       { label: 'Expense',          path: '/expenses',            icon: CreditCard },
       { label: 'Purchase Note',    path: '/purchase-notes/new',  icon: ShoppingCart, hot: true },
       { label: 'Demo Purchase Note', path: '/purchase-notes/new?demo=true', icon: ShoppingCart },
+      { label: 'Vendor Bill',      path: '/bills/new',           icon: FileText, hot: true },
       { label: 'Pay Bills',        path: '/payments/new',        icon: TrendingDown },
       { label: 'Vendor',           path: '/vendors',             icon: Building2 },
     ],
