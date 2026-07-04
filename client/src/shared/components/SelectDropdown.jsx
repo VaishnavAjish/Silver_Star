@@ -61,6 +61,8 @@ export default function SelectDropdown({
   const [draftValues, setDraftValues] = useState([]);
   const wrapRef   = useRef(null);
   const searchRef = useRef(null);
+  const ignoreFocusRef = useRef(false);
+  const [focused, setFocused] = useState(false);
 
   // Close on outside click
   useEffect(() => {
@@ -205,7 +207,16 @@ export default function SelectDropdown({
         type="button"
         className={className}
         disabled={disabled}
-        onClick={() => !disabled && setOpen(o => !o)}
+        onMouseDown={(e) => {
+          ignoreFocusRef.current = true;
+          if (!disabled) setOpen(o => !o);
+          setTimeout(() => ignoreFocusRef.current = false, 100);
+        }}
+        onFocus={() => {
+          setFocused(true);
+          if (!disabled && !ignoreFocusRef.current) setOpen(true);
+        }}
+        onBlur={() => setFocused(false)}
         onKeyDown={handleKeyDown}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -217,7 +228,7 @@ export default function SelectDropdown({
           color: hasValue ? 'var(--g800)' : '#999',
           outline: 'none', boxSizing: 'border-box',
           transition: 'border-color .12s',
-          ...(open ? { borderColor: '#0D7C5F', boxShadow: '0 0 0 2px rgba(13,124,95,.12)' } : {}),
+          ...(open || focused ? { borderColor: '#0D7C5F', boxShadow: '0 0 0 2px rgba(13,124,95,.12)' } : {}),
           ...buttonStyle,
         }}
       >

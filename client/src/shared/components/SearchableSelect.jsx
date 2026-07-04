@@ -105,10 +105,11 @@ export default function SearchableSelect({
   const [focused,  setFocused]  = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  const wrapRef       = useRef(null);
-  const inputRef      = useRef(null);
-  const searchRef     = useRef(null);
-  const portalRef     = useRef(null);
+  const wrapRef         = useRef(null);
+  const inputRef        = useRef(null);
+  const searchRef       = useRef(null);
+  const portalRef       = useRef(null);
+  const ignoreFocusRef  = useRef(false);
   const valueRef      = useRef(value);
   const openRef       = useRef(internalOpen);
   const mountedRef    = useRef(true);
@@ -321,7 +322,19 @@ export default function SearchableSelect({
           type="button"
           className={className}
           disabled={disabled}
-          onClick={() => !disabled && setOpen(o => !o)}
+          onMouseDown={(e) => {
+            ignoreFocusRef.current = true;
+            if (!disabled) setOpen(o => !o);
+            setTimeout(() => { ignoreFocusRef.current = false; }, 100);
+          }}
+          onFocus={() => {
+            if (!disabled && !ignoreFocusRef.current) setOpen(true);
+          }}
+          onBlur={(e) => {
+            if (!wrapRef.current?.contains(e.relatedTarget) && !portalRef.current?.contains(e.relatedTarget)) {
+              setOpen(false);
+            }
+          }}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             width: '100%', height: 32, padding: '0 10px',

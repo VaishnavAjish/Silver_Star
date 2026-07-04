@@ -262,7 +262,7 @@ export default function DatePicker({
         ].filter(Boolean).join(' ')}
         onClick={() => !disabled && setOpen(true)}
         role="button"
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={-1}
         onKeyDown={(e) => {
           if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
@@ -292,10 +292,14 @@ export default function DatePicker({
               e.preventDefault();
               commitInput();
               setOpen(false);
+            } else if (e.key === 'Tab') {
+              commitInput();
+              setOpen(false);
             }
           }}
           placeholder={placeholder}
           disabled={disabled}
+          tabIndex={disabled ? -1 : 0}
         />
         {selected && !disabled && (
           <button className="dp-trigger-clear" onClick={handleClear} aria-label="Clear date" tabIndex={-1}>
