@@ -102,7 +102,7 @@ export default function SearchableSelect({
   const [internalOpen, setInternalOpen] = useState(false);
   const [loading,  setLoading]  = useState(false);
   const [focused,  setFocused]  = useState(false);
-  const [hoverId,  setHoverId]  = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
 
   const wrapRef       = useRef(null);
   const inputRef      = useRef(null);
@@ -185,6 +185,47 @@ export default function SearchableSelect({
       if (mountedRef.current) setLoading(false);
     }
   }, 180)).current;
+
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [query, displayOptions.length]);
+
+  const handleKeyDown = (e) => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev < displayOptions.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const idx = activeIndex >= 0 ? activeIndex : (displayOptions.length === 1 ? 0 : -1);
+      if (idx >= 0 && idx < displayOptions.length) {
+        handleSelect(displayOptions[idx]);
+        wrapRef.current?.querySelector('button, input')?.focus();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      wrapRef.current?.querySelector('button, input')?.focus();
+    } else if (e.key === 'Tab') {
+      const idx = activeIndex >= 0 ? activeIndex : (displayOptions.length === 1 ? 0 : -1);
+      if (idx >= 0 && idx < displayOptions.length) {
+        handleSelect(displayOptions[idx]);
+      } else {
+        setOpen(false);
+      }
+      wrapRef.current?.querySelector('button, input')?.focus();
+    }
+  };
 
   /* ── sync display text with selected value ─────────────────────────────────── */
   useEffect(() => {
@@ -313,6 +354,7 @@ export default function SearchableSelect({
                   type="text"
                   value={query}
                   onChange={e => { const q = e.target.value; setQuery(q); runSearch(q); }}
+                  onKeyDown={handleKeyDown}
                   placeholder="Search…"
                   autoComplete="off"
                   style={{
@@ -338,15 +380,15 @@ export default function SearchableSelect({
                   }
                 </div>
               )}
-              {!loading && displayOptions.map(opt => (
+              {!loading && displayOptions.map((opt, idx) => (
                 <div
                   key={opt.id}
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelect(opt); }}
-                  onMouseEnter={() => setHoverId(opt.id)}
-                  onMouseLeave={() => setHoverId(null)}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  onMouseLeave={() => setActiveIndex(-1)}
                   style={{
                     ...base.item,
-                    ...(hoverId === opt.id   ? base.itemHover  : {}),
+                    ...(activeIndex === idx  ? base.itemHover  : {}),
                     ...(value?.id === opt.id ? base.itemActive : {}),
                   }}
                 >
@@ -397,6 +439,7 @@ export default function SearchableSelect({
           placeholder={placeholder}
           disabled={disabled}
           onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
           onFocus={handleFocus}
           onBlur={() => { setTimeout(() => { if (mountedRef.current) setFocused(false); }, 200); }}
           style={inputStyle_}
@@ -416,15 +459,15 @@ export default function SearchableSelect({
           {!loading && displayOptions.length === 0 && (
             <div style={base.msg}>{query.trim() ? 'No results found' : 'Start typing to search'}</div>
           )}
-          {!loading && displayOptions.map(opt => (
+          {!loading && displayOptions.map((opt, idx) => (
             <div
               key={opt.id}
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelect(opt); }}
-              onMouseEnter={() => setHoverId(opt.id)}
-              onMouseLeave={() => setHoverId(null)}
+              onMouseEnter={() => setActiveIndex(idx)}
+              onMouseLeave={() => setActiveIndex(-1)}
               style={{
                 ...base.item,
-                ...(hoverId === opt.id   ? base.itemHover  : {}),
+                ...(activeIndex === idx  ? base.itemHover  : {}),
                 ...(value?.id === opt.id ? base.itemActive : {}),
               }}
             >

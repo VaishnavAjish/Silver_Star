@@ -55,7 +55,7 @@ export default function SelectDropdown({
 
   const [open,       setOpen]      = useState(false);
   const [query,      setQuery]     = useState('');
-  const [hoveredVal, setHoveredVal] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const [draftValues, setDraftValues] = useState([]);
   const wrapRef   = useRef(null);
   const searchRef = useRef(null);
@@ -96,6 +96,51 @@ export default function SelectDropdown({
     setOpen(false);
     setQuery('');
     if (onChange) onChange({ target: { value: draftValues.join(',') } });
+  };
+
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [query, visibleOpts.length]);
+
+  const handleKeyDown = (e) => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev < visibleOpts.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const idx = activeIndex >= 0 ? activeIndex : (visibleOpts.length === 1 ? 0 : -1);
+      if (idx >= 0 && idx < visibleOpts.length) {
+        handleSelect(visibleOpts[idx].value);
+        if (!multiple) wrapRef.current?.querySelector('button')?.focus();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      wrapRef.current?.querySelector('button')?.focus();
+    } else if (e.key === 'Tab') {
+      if (!multiple) {
+        const idx = activeIndex >= 0 ? activeIndex : (visibleOpts.length === 1 ? 0 : -1);
+        if (idx >= 0 && idx < visibleOpts.length) {
+          handleSelect(visibleOpts[idx].value);
+        } else {
+          setOpen(false);
+        }
+      } else {
+        setOpen(false);
+      }
+      wrapRef.current?.querySelector('button')?.focus();
+    }
   };
 
   const clearMultiple = () => setDraftValues([]);
@@ -153,6 +198,7 @@ export default function SelectDropdown({
         className={className}
         disabled={disabled}
         onClick={() => !disabled && setOpen(o => !o)}
+        onKeyDown={handleKeyDown}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           width: '100%', height: size === 'sm' ? 28 : 34, padding: '0 10px',
@@ -193,6 +239,7 @@ export default function SelectDropdown({
                   ref={searchRef}
                   value={query}
                   onChange={e => setQuery(e.target.value)}
+                  onKeyDown={handleKeyDown}
                   placeholder="Search…"
                   autoComplete="off"
                   style={{
@@ -226,14 +273,14 @@ export default function SelectDropdown({
           <div style={{ flex: 1, overflowY: 'auto', maxHeight: showSearch ? 180 : 200 }}>
             {visibleOpts.map((opt, i) => {
               const isSel     = multiple ? draftValues.includes(String(opt.value)) : String(opt.value) === String(value ?? '');
-              const isHovered = hoveredVal === opt.value;
+              const isHovered = activeIndex === i;
               const isEmpty   = opt.value === '' || opt.value == null;
               return (
                 <div
                   key={i}
                   onMouseDown={() => !opt.disabled && handleSelect(opt.value)}
-                  onMouseEnter={() => setHoveredVal(opt.value)}
-                  onMouseLeave={() => setHoveredVal(null)}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onMouseLeave={() => setActiveIndex(-1)}
                   style={{
                     padding: '8px 12px', fontSize: 13,
                     cursor: opt.disabled ? 'not-allowed' : 'pointer',
