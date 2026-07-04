@@ -26,7 +26,7 @@ function calculateDocumentGST(lines) {
     // For purchase notes, amount is often qty * rate. For bills it's just amount.
     // If the consumer passes 'amount' directly, we use it. Otherwise compute qty * rate.
     let amt = 0;
-    if (line.amount !== undefined && line.amount !== null) {
+    if (line.amount !== undefined && line.amount !== null && line.amount !== '') {
       amt = parseFloat(line.amount) || 0;
     } else {
       amt = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0);
