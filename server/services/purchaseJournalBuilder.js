@@ -1,6 +1,6 @@
 'use strict';
 
-const accountResolver = require('./accountResolver');
+const FinancialMappingService = require('./FinancialMappingService');
 
 /**
  * purchaseJournalBuilder
@@ -39,9 +39,9 @@ async function buildPurchaseJournal({
 
   // 2. GST Debit line
   if (taxAmount > 0) {
-    const gstAccId = await accountResolver.getAccountByRole('GST_PAYABLE', client);
+    const gstAccId = await FinancialMappingService.resolveGST(client);
     if (!gstAccId) {
-      throw new Error(`GST_PAYABLE account role not found in Chart of Accounts.`);
+      throw new Error(`GST account role not found in COA`);
     }
     jeLines.push({
       accountId: gstAccId,
@@ -53,9 +53,9 @@ async function buildPurchaseJournal({
   }
 
   // 3. Accounts Payable Credit line
-  const payableAccId = await accountResolver.getAccountByRole('ACCOUNTS_PAYABLE', client);
+  const payableAccId = await FinancialMappingService.resolveAP(client);
   if (!payableAccId) {
-    throw new Error(`ACCOUNTS_PAYABLE account role not found in Chart of Accounts.`);
+    throw new Error(`Accounts Payable account role not found in COA`);
   }
   
   jeLines.push({

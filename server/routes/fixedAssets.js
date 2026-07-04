@@ -6,12 +6,10 @@ const { calculateForAsset, projectSchedule } = require('../services/depreciation
 const { reserveCode } = require('../services/codeGeneratorService');
 const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const { round2: money } = require('../services/inventoryAccounting');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
-
-const { getAccountByRole } = require('../services/accountResolver');
-
-const money = value => Math.round((parseFloat(value) || 0) * 100) / 100;
 
 // ── LIST ──────────────────────────────────────────────────────────────────────
 router.get('/', authenticate, async (req, res) => {
@@ -306,8 +304,9 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     const assetAccId = catR.rows[0]?.gl_asset_account_id;
     if (!assetAccId) throw new Error('Fixed asset category is missing an asset GL account');
 
-    const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
-    if (!payableAccId) throw new Error('Accounts Payable account role not found in COA');
+    // ── Purchase Journal Entry ───────────────────────────────────────────────
+    const payableAccId = await FinancialMappingService.resolveAP(client);
+    if (!payableAccId) throw new Error('Accounts Payable (3001) missing');
 
     const jeLines = [
       { accountId: assetAccId,   debit: capitalizedCost, credit: 0,
@@ -316,8 +315,8 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     ];
 
     if (claimable > 0) {
-      const gstAccId = await getAccountByRole('GST_PAYABLE', client);
-      if (!gstAccId) throw new Error('GST account role not found in COA');
+      const gstAccId = await FinancialMappingService.resolveGST(client);
+      if (!gstAccId) throw new Error('GST_PAYABLE missing');
       jeLines.push({
         accountId: gstAccId, debit: claimable, credit: 0,
         narration: `Claimable GST - ${assetCode}`,
@@ -457,11 +456,8 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
     }
 
     if (proceeds > 0) {
-      const cashId = await getAccountByRole('CASH_MAIN', client);
-      if (!cashId) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Cash account role not found in COA' });
-      }
+      const cashId = await FinancialMappingService.resolveCashMain(client);
+      if (!cashId) throw new Error('CASH_MAIN missing');
       jeLines.push({ accountId: cashId, debit: proceeds, credit: 0,
                      narration: `Disposal proceeds — ${asset.asset_code}` });
     }
@@ -474,19 +470,13 @@ router.post('/:id/dispose', authenticate, authorize('admin'), async (req, res) =
 
     if (Math.abs(gainOrLoss) >= 0.01) {
       if (gainOrLoss < 0) {
-        const lossId = await getAccountByRole('LOSS_ON_DISPOSAL', client);
-        if (!lossId) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Loss on disposal account role not found' });
-        }
+        const lossId = await FinancialMappingService.resolveLossOnDisposal(client);
+        if (!lossId) throw new Error('LOSS_ON_DISPOSAL missing');
         jeLines.push({ accountId: lossId, debit: Math.abs(gainOrLoss), credit: 0,
                        narration: `Loss on disposal — ${asset.asset_code}` });
       } else {
-        const gainId = await getAccountByRole('GAIN_ON_DISPOSAL', client);
-        if (!gainId) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Gain on disposal account role not found' });
-        }
+        const gainId = await FinancialMappingService.resolveGainOnDisposal(client);
+        if (!gainId) throw new Error('GAIN_ON_DISPOSAL missing');
         jeLines.push({ accountId: gainId, debit: 0, credit: gainOrLoss,
                        narration: `Gain on disposal — ${asset.asset_code}` });
       }

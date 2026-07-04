@@ -53,8 +53,6 @@ const CURRENT_LIABILITY_SUBTYPES = new Set(['current_liability', 'payable', 'tax
 const LIQUID_SUBTYPES            = new Set(['bank', 'cash']);
 const LOAN_SUBTYPES              = new Set(['loan', 'term_loan', 'bank_loan', 'borrowing']);
 const INVENTORY_ROLES            = /^INVENTORY_/i;
-const TAX_PATTERN                = /tax|gst|tds|vat/i;
-const INTEREST_PATTERN           = /interest/i;
 const DISPOSAL_ROLES             = new Set(['GAIN_ON_DISPOSAL', 'LOSS_ON_DISPOSAL']);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,7 +108,7 @@ async function getSourcesOfFunds(fromDate, toDate) {
     }
 
     // Interest income
-    if (acc.type === 'revenue' && INTEREST_PATTERN.test(acc.name)) {
+    if (acc.type === 'revenue' && (acc.sub_type === 'interest' || acc.sub_type === 'other_income')) {
       interestIncome.push(item);
       continue;
     }
@@ -221,7 +219,7 @@ async function getApplicationsOfFunds(fromDate, toDate) {
     }
 
     // Tax payments: debit on tax/GST/TDS liabilities
-    if (acc.type === 'liability' && TAX_PATTERN.test(acc.name)) {
+    if (acc.type === 'liability' && (acc.sub_type === 'tax' || acc.account_role === 'GST_PAYABLE')) {
       taxes.push(item);
       continue;
     }

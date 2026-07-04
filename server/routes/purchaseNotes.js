@@ -9,6 +9,7 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const gstEngine = require('../services/gstEngine');
 const { buildPurchaseJournal } = require('../services/purchaseJournalBuilder');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ pool.query('ALTER TABLE purchase_notes ADD COLUMN IF NOT EXISTS cost_center_id I
 });
 
 
-const { getAccountByRole } = require('../services/accountResolver');
+
 
 // GET /api/purchase-notes/debug
 router.get('/debug', async (req, res) => {
@@ -219,7 +220,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     // Insert lines — handle capital vs regular items
     const insertedLines = [];
     const createdAssets = [];
-    const invAccountCodeMap = { seed: '2001', gas: '2002', consumable: '2003' };
+
     const drAccountMap = {}; // { accountId: totalAmount (pre-tax) }
 
     // Batch-fetch all items in a single query instead of N+1
@@ -350,10 +351,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         insertedLines.push(lineR.rows[0]);
 
         // Accumulate Dr line by item category
-        const invRoleMap = { seed: 'INVENTORY_SEED', gas: 'INVENTORY_GAS', consumable: 'INVENTORY_CONSUMABLE' };
-        const invAccRole = invRoleMap[item.category] || 'INVENTORY_SEED';
-        const invAccId   = await getAccountByRole(invAccRole, client);
-        if (!invAccId) throw new Error(`Inventory account role '${invAccRole}' not found in Chart of Accounts.`);
+        const invAccId = await FinancialMappingService.resolveInventoryAccount(item.category, client);
+
         drAccountMap[invAccId] = Math.round(((drAccountMap[invAccId] || 0) + amt) * 100) / 100;
         await applyPurchase(client, line.item_id, line.qty, line.rate, amt);
       }

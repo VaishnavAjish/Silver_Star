@@ -3,13 +3,9 @@ const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
-
-async function getAccountByCode(code, client = pool) {
-  const r = await client.query('SELECT id FROM accounts WHERE code = $1', [code]);
-  return r.rows[0]?.id || null;
-}
 
 // GET /api/expenses
 router.get('/', authenticate, async (req, res) => {
@@ -175,8 +171,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     // ── Resolve Accounts Payable GL (needed for AP settlement) ───────────────
     let payableAccId = null;
     if (hasAllocations && appliedToBills > 0.005) {
-      payableAccId = await getAccountByCode('3001', client);
-      if (!payableAccId) throw new Error('Accounts Payable (3001) not configured in chart of accounts');
+      payableAccId = await FinancialMappingService.resolveAP(client);
     }
 
     // ── Resolve vendor name for JE description ───────────────────────────────

@@ -3,10 +3,10 @@ const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const { getCostCenterIdForDepartment } = require('../services/departmentService');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
-
-const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/process-transactions/seeds-in-process
 router.get('/seeds-in-process', authenticate, async (req, res) => {
@@ -104,9 +104,10 @@ router.post('/_send_legacy', authenticate, authorize('admin', 'operator'), async
       }
     }
 
-    // JE: Dr WIP, Cr Raw Material
-    const wipAccId = await getAccountByRole('INVENTORY_GROWTH_RUN', client);
-    const rawAccId = await getAccountByRole('INVENTORY_SEED', client);
+    // JE: Capitalize raw material directly to WIP (Growth Run Inventory)
+    const wipAccId = await FinancialMappingService.resolveInventoryAccount('wip', client);
+    const rawAccId = await FinancialMappingService.resolveInventoryAccount('seed', client); // Assumes seed as default raw material for process
+
     if (wipAccId && rawAccId && totalWt > 0) {
       // Calculate value from inventory records
       let totalValue = 0;

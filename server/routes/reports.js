@@ -53,13 +53,9 @@ router.get('/pnl', authenticate, async (req, res) => {
 
     const expenses = allLeaves.filter(a => a.type === 'expense');
 
-    // Identify COGS accounts via root group name or fallback codes
+    // Identify COGS accounts via structural fields, never by user-defined string names
     const isCogs = (a) => {
-      if (a.rootGroup) {
-        const rg = a.rootGroup.toLowerCase();
-        if (rg.includes('cost of goods sold') || rg.includes('direct expense')) return true;
-      }
-      return ['5001', '5002', '5003'].includes(a.code);
+      return a.account_role === 'COGS' || a.sub_type === 'cogs' || a.sub_type === 'direct_expense';
     };
 
     const cogsAccounts = expenses.filter(isCogs);

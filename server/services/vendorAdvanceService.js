@@ -23,7 +23,7 @@
 
 const pool = require('../db/pool');
 const journalEngine = require('./journalEngine');
-const { getAccountByRole } = require('./accountResolver');
+const FinancialMappingService = require('./FinancialMappingService');
 
 const EPS = 0.005;
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
@@ -203,11 +203,11 @@ async function applyAdvancesToBill({ purchaseNoteId, vendorId, mode = 'auto', al
     return { applied: 0, je_id: null, breakdown: [], bill_balance_after: round2(grandTotal - amountPaid) };
   }
 
-  // Resolve GL accounts by ROLE (COA-restructuring safe).
-  const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
-  if (!payableAccId) throw new Error('Accounts Payable account role (ACCOUNTS_PAYABLE) not configured');
-  const advanceAccId = await getAccountByRole('VENDOR_ADVANCE', client);
-  if (!advanceAccId) throw new Error('Vendor Advance account role (VENDOR_ADVANCE) not configured — run phase42 migration');
+  // Resolve GL accounts.
+  const payableAccId = await FinancialMappingService.resolveAP(client);
+  if (!payableAccId) throw new Error('Accounts Payable (3001) missing in COA');
+  const advanceAccId = await FinancialMappingService.resolveVendorAdvance(client);
+  if (!advanceAccId) throw new Error('Vendor Advance (1050) missing in COA');
 
   // Post ONE balanced JE for the application total: Dr AP / Cr Vendor Advance.
   const je = await journalEngine.createEntry({

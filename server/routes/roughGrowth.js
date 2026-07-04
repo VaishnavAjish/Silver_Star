@@ -5,10 +5,9 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { nextLotOpId } = require('../services/seedLotCodeService');
 const { findActiveBiscuitByProcess, applyMeasurements } = require('../services/growthRunService');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
-
-const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/rough-growth
 router.get('/', authenticate, async (req, res) => {
@@ -408,8 +407,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     }
 
     // Create JE: Dr Rough Diamond Inventory (2004), Cr Work-in-Progress (2005)
-    const roughAccId = await getAccountByRole('INVENTORY_ROUGH', client);
-    const wipAccId   = await getAccountByRole('INVENTORY_GROWTH_RUN', client);
+    const roughAccId = await FinancialMappingService.resolveInventoryAccount('rough', client);
+    const wipAccId   = await FinancialMappingService.resolveInventoryAccount('wip', client);
 
     if (roughAccId && wipAccId && totalCost > 0) {
       const je = await journalEngine.createEntry({
@@ -423,6 +422,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         ],
         autoPost: true,
         createdBy: req.user.id,
+        client
       });
       await client.query('UPDATE rough_growth SET je_id = $1 WHERE id = $2', [je.id, rg.id]);
     }

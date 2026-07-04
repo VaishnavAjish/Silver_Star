@@ -4,7 +4,7 @@ const journalEngine = require('../services/journalEngine');
 const { applyStockOut, stockQty, round2 } = require('../services/inventoryAccounting');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
-const { getAccountByRole } = require('../services/accountResolver');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
 
@@ -125,9 +125,9 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     }
 
     // JE 1: Revenue booking — Dr Accounts Receivable, Cr Sales Revenue (+ Cr GST Payable if tax)
-    const arAccId = await getAccountByRole('ACCOUNTS_RECEIVABLE', client);
-    const revenueAccId = await getAccountByRole('SALES_REVENUE', client);
-    const gstAccId = await getAccountByRole('GST_PAYABLE', client);
+    const arAccId = await FinancialMappingService.resolveAR(client);
+    const revenueAccId = await FinancialMappingService.resolveRevenueAccount(client);
+    const gstAccId = await FinancialMappingService.resolveGST(client);
 
     if (!arAccId || !revenueAccId) throw new Error('Revenue accounts not found in COA');
 
@@ -150,8 +150,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     // JE 2: COGS booking — Dr COGS-Diamonds, Cr Rough Diamond Inventory
     let cogsJeId = null;
     if (totalCogs > 0) {
-      const cogsAccId = await getAccountByRole('COGS', client);
-      const roughInvAccId = await getAccountByRole('INVENTORY_ROUGH', client);
+      const cogsAccId = await FinancialMappingService.resolveCOGSAccount(client);
+      const roughInvAccId = await FinancialMappingService.resolveInventoryAccount('rough', client);
       if (cogsAccId && roughInvAccId) {
         const cogsJE = await journalEngine.createEntry({
           date: doc_date, description: `Invoice ${docNumber} - COGS`,

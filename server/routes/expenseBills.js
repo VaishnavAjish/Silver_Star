@@ -3,7 +3,7 @@ const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
-const accountResolver = require('../services/accountResolver');
+
 const gstEngine = require('../services/gstEngine');
 const { buildPurchaseJournal } = require('../services/purchaseJournalBuilder');
 

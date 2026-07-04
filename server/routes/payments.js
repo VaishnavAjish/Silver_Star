@@ -4,10 +4,9 @@ const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
-
-const { getAccountByRole } = require('../services/accountResolver');
 
 // GET /api/payments
 router.get('/', authenticate, async (req, res) => {
@@ -165,7 +164,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       return fail(400, `Bill allocations ₹${appliedToBills.toFixed(2)} exceed payment amount ₹${totalAmount.toFixed(2)}`);
     }
 
-    const payableAccId = await getAccountByRole('ACCOUNTS_PAYABLE', client);
+    const payableAccId = await FinancialMappingService.resolveAP(client);
     if (!payableAccId) return fail(400, 'Accounts Payable (3001) not configured in chart of accounts');
 
     const manualLines = (Array.isArray(rawManualLines) ? rawManualLines : [])
@@ -179,7 +178,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     let advanceAccId = null;
     const remainingAdvance = Math.round((advanceAmount - manualLinesTotal) * 100) / 100;
     if (remainingAdvance > 0.005) {
-      advanceAccId = await getAccountByRole('VENDOR_ADVANCE', client);
+      advanceAccId = await FinancialMappingService.resolveVendorAdvance(client);
       if (!advanceAccId) return fail(400, 'Vendor Advance account (1050) not found. Run sql/phase12-advances.sql migration.');
     }
 
