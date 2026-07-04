@@ -104,10 +104,17 @@ async function getInventoryValuation(asOfDate, db = pool) {
     };
   }
 
+  // Phase 4: Deterministic As-Of-Date valuation using General Ledger
   const liveR = await db.query(
-    `SELECT COALESCE(SUM(total_value), 0) AS value
-     FROM inventory
-     WHERE status NOT IN ('SOLD', 'CONSUMED', 'CANCELLED')`
+    `SELECT COALESCE(SUM(jl.debit) - SUM(jl.credit), 0) AS value
+     FROM je_lines jl
+     JOIN journal_entries je ON je.id = jl.je_id
+     JOIN accounts a ON a.id = jl.account_id
+     WHERE je.status = 'posted' 
+       AND je.date <= $1
+       AND a.type = 'asset'
+       AND (a.account_role LIKE 'INVENTORY_%' OR a.name ILIKE '%Inventory%')`
+    , [asOfDate]
   );
 
   return {
@@ -119,6 +126,7 @@ async function getInventoryValuation(asOfDate, db = pool) {
 
 async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db = pool) {
   const offset = (page - 1) * pageSize;
+  
   const overrideR = await db.query(
     `SELECT ico.*, i.code AS item_code, i.name AS item_name, i.category
      FROM inventory_closing_override ico
@@ -158,31 +166,102 @@ async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db 
     };
   }
 
-  const liveR = await db.query(
-    `SELECT i.id AS item_id, i.code AS item_code, i.name AS item_name, i.category,
-            COALESCE(SUM(CASE WHEN i.category = 'rough' AND inv.weight > 0 THEN inv.weight ELSE inv.qty END), 0) AS quantity,
-            COALESCE(SUM(inv.total_value), 0) AS value
-     FROM items i
-     LEFT JOIN inventory inv ON inv.item_id = i.id
-       AND inv.status NOT IN ('SOLD', 'CONSUMED', 'CANCELLED')
-     GROUP BY i.id, i.code, i.name, i.category
-     HAVING COALESCE(SUM(inv.total_value), 0) <> 0
-     ORDER BY i.code
-     LIMIT $1 OFFSET $2`,
-    [pageSize, offset]
-  );
+  // Phase 4: Event Sourcing Reconstruction
+  const query = `
+    WITH movements AS (
+      -- 1. Purchases (Inbound)
+      SELECT pnl.item_id, pnl.qty AS qty_delta, pnl.total AS value_delta
+      FROM purchase_note_lines pnl
+      JOIN purchase_notes pn ON pn.id = pnl.purchase_note_id
+      WHERE pn.doc_date <= $1 AND pn.status != 'cancelled'
+      
+      UNION ALL
+      
+      -- 2. Opening Stock (Inbound)
+      SELECT io.item_id, io.quantity AS qty_delta, io.value AS value_delta
+      FROM inventory_opening io
+      WHERE io.as_of_date <= $1
+      
+      UNION ALL
+      
+      -- 3. Sales (Outbound)
+      SELECT il.item_id, 
+             CASE WHEN i.category = 'rough' THEN -il.weight ELSE -il.qty END AS qty_delta,
+             -il.cost_value AS value_delta
+      FROM invoice_lines il
+      JOIN invoices inv ON inv.id = il.invoice_id
+      JOIN items i ON i.id = il.item_id
+      WHERE inv.date <= $1 AND inv.status != 'cancelled'
+      
+      UNION ALL
+      
+      -- 4. Process Consumptions (Outbound Gas/Consumables)
+      SELECT ptl.item_id, 
+             -ptl.qty_in AS qty_delta,
+             -(ptl.qty_in * COALESCE(inv.rate, i.avg_cost, 0)) AS value_delta
+      FROM process_transaction_lines ptl
+      JOIN process_transactions pt ON pt.id = ptl.process_trs_id
+      JOIN items i ON i.id = ptl.item_id
+      LEFT JOIN inventory inv ON inv.id = ptl.inventory_id
+      WHERE pt.trs_date <= $1 AND ptl.item_id IS NOT NULL AND ptl.qty_in > 0
+      
+      UNION ALL
+      
+      -- 5. Splits/Mixes Consumption (Outbound)
+      SELECT inv.item_id,
+             -lmp.quantity_consumed AS qty_delta,
+             -(lmp.quantity_consumed * lmp.cost_per_unit) AS value_delta
+      FROM lot_movement_parents lmp
+      JOIN lot_movements lm ON lm.id = lmp.movement_id
+      JOIN inventory inv ON inv.id = lmp.parent_lot_id
+      WHERE lm.movement_date <= $1
+      
+      UNION ALL
+      
+      -- 6. Splits Creation (Inbound)
+      SELECT inv.item_id,
+             CASE WHEN i.category = 'rough' THEN inv.weight ELSE inv.qty END AS qty_delta,
+             inv.total_value AS value_delta
+      FROM lot_movement_children lmc
+      JOIN lot_movements lm ON lm.id = lmc.movement_id
+      JOIN inventory inv ON inv.id = lmc.child_lot_id
+      JOIN items i ON i.id = inv.item_id
+      WHERE lm.movement_date <= $1
+      
+      UNION ALL
+      
+      -- 7. Seed Mix Consumption (Outbound)
+      SELECT inv.item_id,
+             -lmc.qty AS qty_delta,
+             -(lmc.qty * COALESCE(inv.rate, 0)) AS value_delta
+      FROM lot_mix_components lmc
+      JOIN inventory inv ON inv.id = lmc.source_lot_id
+      JOIN inventory mixed_inv ON mixed_inv.id = lmc.mixed_lot_id
+      WHERE mixed_inv.purchase_date <= $1
+      
+      UNION ALL
+      
+      -- 8. Rough Growth Outputs (Inbound)
+      SELECT inv.item_id,
+             rgl.weight AS qty_delta,
+             (rgl.weight * COALESCE(inv.rate, 0)) AS value_delta
+      FROM rough_growth_lines rgl
+      JOIN inventory inv ON inv.id = rgl.inventory_id
+      WHERE inv.purchase_date <= $1
+    )
+    SELECT i.id AS item_id, i.code AS item_code, i.name AS item_name, i.category,
+           COALESCE(SUM(m.qty_delta), 0) AS quantity,
+           COALESCE(SUM(m.value_delta), 0) AS value
+    FROM items i
+    JOIN movements m ON m.item_id = i.id
+    GROUP BY i.id, i.code, i.name, i.category
+    HAVING COALESCE(SUM(m.qty_delta), 0) > 0.001 OR COALESCE(SUM(m.value_delta), 0) > 0.01
+  `;
 
-  const countLiveR = await db.query(
-    `SELECT COUNT(*) FROM (
-      SELECT i.id
-      FROM items i
-      LEFT JOIN inventory inv ON inv.item_id = i.id
-        AND inv.status NOT IN ('SOLD', 'CONSUMED', 'CANCELLED')
-      GROUP BY i.id
-      HAVING COALESCE(SUM(inv.total_value), 0) <> 0
-    ) sub`
-  );
-
+  const liveR = await db.query(query + ` ORDER BY i.code LIMIT $2 OFFSET $3`, [asOfDate, pageSize, offset]);
+  
+  const countLiveR = await db.query(`SELECT COUNT(*) FROM (${query}) sub`, [asOfDate]);
+  
   const totalCount = parseInt(countLiveR.rows[0].count);
   const totalPages = Math.ceil(totalCount / pageSize);
 
@@ -194,16 +273,16 @@ async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db 
       item_code: r.item_code,
       item_name: r.item_name,
       category: r.category,
-      quantity,
+      quantity: round4(quantity),
       rate: quantity > 0 ? round4(value / quantity) : 0,
-      value,
+      value: round2(value),
     };
   });
 
   return {
     mode: 'system',
     as_of_date: asOfDate,
-    total_value: round2(data.reduce((s, r) => s + r.value, 0)), // This might only reflect the page's total, but we keep it
+    total_value: round2(data.reduce((s, r) => s + r.value, 0)),
     data, totalCount, page, pageSize, totalPages,
   };
 }
