@@ -7,6 +7,7 @@ import SelectDropdown from '../../../shared/components/SelectDropdown';
 import { Plus, Receipt, X, Save, Trash2, Edit, ShoppingCart } from 'lucide-react';
 import toast from 'react-hot-toast';
 import QuickCreateVendorModal from '../../shared/components/QuickCreateVendorModal';
+import QuickCreateModal from '../../../features/quick-create/QuickCreateModal';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
   FormSectionCard, NotesAttachmentsPanel
@@ -153,6 +154,19 @@ export const VendorBillForm = () => {
   const [loading, setLoading] = useState(false);
   const [detailData, setDetailData] = useState(null);
   const [showVendorModal, setShowVendorModal] = useState(false);
+  const [quickCreate, setQuickCreate] = useState(null);
+
+  const handleQuickCreated = (result) => {
+    if (!quickCreate) return;
+    const { type, lineIndex } = quickCreate;
+    if (type === 'account') {
+      setAccounts(prev => [...prev, result]);
+      if (lineIndex !== undefined) {
+        updateLine(lineIndex, 'expense_account_id', String(result.id));
+      }
+    }
+    setQuickCreate(null);
+  };
 
   useEffect(() => {
     Promise.all([
@@ -387,10 +401,17 @@ export const VendorBillForm = () => {
                 <td>
                   <SelectDropdown 
                     value={String(line.expense_account_id || '')} 
-                    onChange={e => updateLine(idx, 'expense_account_id', e.target.value)} 
+                    onChange={e => {
+                      if (e.target.value === '__create_new__') {
+                        setQuickCreate({ type: 'account', lineIndex: idx });
+                      } else {
+                        updateLine(idx, 'expense_account_id', e.target.value);
+                      }
+                    }} 
                     disabled={isEdit && detailData?.status === 'cancelled'} 
                   >
                     <option value="">- Select Category -</option>
+                    <option value="__create_new__" style={{ color: 'var(--brand)', fontWeight: 600 }}>+ Add Category</option>
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </SelectDropdown>
                 </td>
@@ -514,9 +535,21 @@ export const VendorBillForm = () => {
 
       {showVendorModal && (
         <QuickCreateVendorModal
-          api={api}
+          api={{ post: api.post }}
           onClose={() => setShowVendorModal(false)}
-          onCreated={handleVendorCreated}
+          onCreated={(v) => {
+            setVendors(prev => [...prev, v]);
+            setForm({ ...form, vendor_id: v.id });
+            setShowVendorModal(false);
+          }}
+        />
+      )}
+
+      {quickCreate && (
+        <QuickCreateModal
+          type={quickCreate.type}
+          onClose={() => setQuickCreate(null)}
+          onCreated={handleQuickCreated}
         />
       )}
     </TransactionPageLayout>
