@@ -76,24 +76,26 @@
   color: var(--brand);
 }
 
-.dp-trigger-val {
+input.dp-trigger-val {
   flex: 1;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: none;
-  background: transparent;
-  outline: none;
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
-  padding: 0;
-  margin: 0;
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+  color: inherit !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
 }
-.dp-placeholder {
-  color: var(--g400);
-  font-weight: 400;
+.dp-placeholder,
+input.dp-trigger-val::placeholder {
+  color: var(--g400) !important;
+  font-weight: 400 !important;
 }
 
 .dp-trigger-clear {
