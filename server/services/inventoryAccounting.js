@@ -185,25 +185,26 @@ async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db 
       UNION ALL
       
       -- 3. Sales (Outbound)
-      SELECT il.item_id, 
+      SELECT inv_lot.item_id, 
              CASE WHEN i.category = 'rough' THEN -il.weight ELSE -il.qty END AS qty_delta,
              -il.cost_value AS value_delta
       FROM invoice_lines il
       JOIN invoices inv ON inv.id = il.invoice_id
-      JOIN items i ON i.id = il.item_id
+      JOIN inventory inv_lot ON inv_lot.id = il.inventory_id
+      JOIN items i ON i.id = inv_lot.item_id
       WHERE inv.date <= $1 AND inv.status != 'cancelled'
       
       UNION ALL
       
       -- 4. Process Consumptions (Outbound Gas/Consumables)
-      SELECT ptl.item_id, 
+      SELECT inv_lot.item_id, 
              -ptl.qty_in AS qty_delta,
-             -(ptl.qty_in * COALESCE(inv.rate, i.avg_cost, 0)) AS value_delta
+             -(ptl.qty_in * COALESCE(inv_lot.rate, i.avg_cost, 0)) AS value_delta
       FROM process_transaction_lines ptl
       JOIN process_transactions pt ON pt.id = ptl.process_trs_id
-      JOIN items i ON i.id = ptl.item_id
-      LEFT JOIN inventory inv ON inv.id = ptl.inventory_id
-      WHERE pt.trs_date <= $1 AND ptl.item_id IS NOT NULL AND ptl.qty_in > 0
+      JOIN inventory inv_lot ON inv_lot.id = ptl.inventory_id
+      JOIN items i ON i.id = inv_lot.item_id
+      WHERE pt.trs_date <= $1 AND ptl.inventory_id IS NOT NULL AND ptl.qty_in > 0
       
       UNION ALL
       
