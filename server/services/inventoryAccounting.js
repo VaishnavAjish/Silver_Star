@@ -192,18 +192,17 @@ async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db 
       JOIN invoices inv ON inv.id = il.invoice_id
       JOIN inventory inv_lot ON inv_lot.id = il.inventory_id
       JOIN items i ON i.id = inv_lot.item_id
-      WHERE inv.date <= $1 AND inv.status != 'cancelled'
+      WHERE inv.doc_date <= $1 AND inv.status != 'cancelled'
       
       UNION ALL
       
       -- 4. Process Consumptions (Outbound Gas/Consumables)
       SELECT inv_lot.item_id, 
              -ptl.qty_in AS qty_delta,
-             -(ptl.qty_in * COALESCE(inv_lot.rate, i.avg_cost, 0)) AS value_delta
+             -(ptl.qty_in * COALESCE(inv_lot.rate, 0)) AS value_delta
       FROM process_transaction_lines ptl
       JOIN process_transactions pt ON pt.id = ptl.process_trs_id
       JOIN inventory inv_lot ON inv_lot.id = ptl.inventory_id
-      JOIN items i ON i.id = inv_lot.item_id
       WHERE pt.trs_date <= $1 AND ptl.inventory_id IS NOT NULL AND ptl.qty_in > 0
       
       UNION ALL
@@ -221,12 +220,11 @@ async function getInventoryValuationLines(asOfDate, page = 1, pageSize = 50, db 
       
       -- 6. Splits Creation (Inbound)
       SELECT inv.item_id,
-             CASE WHEN i.category = 'rough' THEN inv.weight ELSE inv.qty END AS qty_delta,
-             inv.total_value AS value_delta
+             lmc.quantity AS qty_delta,
+             (lmc.quantity * lmc.cost_per_unit) AS value_delta
       FROM lot_movement_children lmc
       JOIN lot_movements lm ON lm.id = lmc.movement_id
       JOIN inventory inv ON inv.id = lmc.child_lot_id
-      JOIN items i ON i.id = inv.item_id
       WHERE lm.movement_date <= $1
       
       UNION ALL
