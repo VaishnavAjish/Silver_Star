@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { FormSectionCard } from '../../../core/layout';
 import DatePicker from '../../../shared/components/DatePicker';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
+import QuickCreateVendorModal from '../../../shared/components/QuickCreateVendorModal';
 
 const num   = v => Number(v || 0);
 const round = v => Math.round((v || 0) * 100) / 100;
@@ -311,6 +312,7 @@ export default function ManualFixedAssetEntry() {
   const [loadingAsset,setLoadingAsset]= useState(isEditing);
   const [costLocked,  setCostLocked]  = useState(false);
   const [selectedTpl, setSelectedTpl] = useState(null);
+  const [showVendorModal, setShowVendorModal] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -697,8 +699,19 @@ export default function ManualFixedAssetEntry() {
             <div style={row}>
               <div style={{ ...fg, flex: 2 }}>
                 <label>Vendor</label>
-                <SelectDropdown value={form.vendor_id} onChange={e => set('vendor_id', e.target.value)} disabled={isEditing}>
+                <SelectDropdown 
+                  value={form.vendor_id} 
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setShowVendorModal(true);
+                    } else {
+                      set('vendor_id', e.target.value);
+                    }
+                  }} 
+                  disabled={isEditing}
+                >
                   <option value="">— Select Vendor —</option>
+                  <option value="__create_new__" style={{ color: 'var(--brand)', fontWeight: 600 }}>+ Add New Vendor</option>
                   {vendors.map(v => <option key={v.id} value={v.id}>{v.name} ({v.code})</option>)}
                 </SelectDropdown>
               </div>
@@ -906,6 +919,18 @@ export default function ManualFixedAssetEntry() {
           <Save size={13} /> {saving ? 'Saving…' : (isEditing ? 'Update Asset' : 'Save Changes')}
         </button>
       </div>
+
+      {showVendorModal && (
+        <QuickCreateVendorModal
+          api={{ post }}
+          onClose={() => setShowVendorModal(false)}
+          onCreated={(v) => {
+            setVendors(prev => [...prev, v]);
+            set('vendor_id', v.id);
+            setShowVendorModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }
