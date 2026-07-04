@@ -3,7 +3,7 @@ const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
-const { getCostCenterIdForDepartment } = require('../services/departmentService');
+
 const FinancialMappingService = require('../services/FinancialMappingService');
 
 const router = express.Router();
