@@ -152,17 +152,9 @@ export default function SelectDropdown({
       setOpen(false);
       wrapRef.current?.querySelector('button')?.focus();
     } else if (e.key === 'Tab') {
-      if (!multiple) {
-        const idx = activeIndex >= 0 ? activeIndex : (visibleOpts.length === 1 ? 0 : -1);
-        if (idx >= 0 && idx < visibleOpts.length) {
-          handleSelect(visibleOpts[idx].value);
-        } else {
-          setOpen(false);
-        }
-      } else {
-        setOpen(false);
-      }
-      wrapRef.current?.querySelector('button')?.focus();
+      // Close dropdown and let browser naturally move to next element
+      setOpen(false);
+      setQuery('');
     }
   };
 
@@ -210,13 +202,24 @@ export default function SelectDropdown({
         onMouseDown={(e) => {
           ignoreFocusRef.current = true;
           if (!disabled) setOpen(o => !o);
-          setTimeout(() => ignoreFocusRef.current = false, 100);
+          setTimeout(() => { ignoreFocusRef.current = false; }, 100);
         }}
-        onFocus={() => {
+        onFocus={(e) => {
           setFocused(true);
-          if (!disabled && !ignoreFocusRef.current) setOpen(true);
+          // Only open when arriving via Tab (relatedTarget is outside this wrapper)
+          if (!disabled && !ignoreFocusRef.current && !wrapRef.current?.contains(e.relatedTarget)) {
+            setOpen(true);
+          }
         }}
-        onBlur={() => setFocused(false)}
+        onBlur={(e) => {
+          setFocused(false);
+          // Close when focus leaves the entire component (including portal dropdown)
+          const next = e.relatedTarget;
+          if (!wrapRef.current?.contains(next) && !next?.closest?.('[data-portal-dropdown]')) {
+            setOpen(false);
+            setQuery('');
+          }
+        }}
         onKeyDown={handleKeyDown}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',

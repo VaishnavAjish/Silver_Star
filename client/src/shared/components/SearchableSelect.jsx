@@ -225,13 +225,9 @@ export default function SearchableSelect({
       setOpen(false);
       wrapRef.current?.querySelector('button, input')?.focus();
     } else if (e.key === 'Tab') {
-      const idx = activeIndex >= 0 ? activeIndex : (displayOptions.length === 1 ? 0 : -1);
-      if (idx >= 0 && idx < displayOptions.length) {
-        handleSelect(displayOptions[idx]);
-      } else {
-        setOpen(false);
-      }
-      wrapRef.current?.querySelector('button, input')?.focus();
+      // Close dropdown and let browser naturally move to next element
+      setOpen(false);
+      setQuery('');
     }
   };
 
@@ -327,12 +323,17 @@ export default function SearchableSelect({
             if (!disabled) setOpen(o => !o);
             setTimeout(() => { ignoreFocusRef.current = false; }, 100);
           }}
-          onFocus={() => {
-            if (!disabled && !ignoreFocusRef.current) setOpen(true);
+          onFocus={(e) => {
+            // Only open when arriving via Tab from outside this wrapper
+            if (!disabled && !ignoreFocusRef.current && !wrapRef.current?.contains(e.relatedTarget)) {
+              setOpen(true);
+            }
           }}
           onBlur={(e) => {
-            if (!wrapRef.current?.contains(e.relatedTarget) && !portalRef.current?.contains(e.relatedTarget)) {
+            const next = e.relatedTarget;
+            if (!wrapRef.current?.contains(next) && !next?.closest?.('[data-portal-dropdown]')) {
               setOpen(false);
+              setQuery('');
             }
           }}
           style={{
