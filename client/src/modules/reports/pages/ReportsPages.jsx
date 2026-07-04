@@ -711,7 +711,7 @@ export function BalanceSheetPage() {
             onMouseEnter={!isGroup && node.id !== '__re' ? e => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.textDecoration = 'underline'; } : undefined}
             onMouseLeave={!isGroup && node.id !== '__re' ? e => { e.currentTarget.style.color = ''; e.currentTarget.style.textDecoration = ''; } : undefined}
           >
-            {(!isGroup || !hasChildren || !isExpanded) ? (node.balance_display || '') : ''}
+            {(!isGroup || !hasChildren || !isExpanded) ? (isGroup ? (node.group_total_display ?? node.balance_display) : node.balance_display) || '' : ''}
           </td>
         </tr>
       );
