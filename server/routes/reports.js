@@ -96,6 +96,7 @@ router.get('/pnl', authenticate, async (req, res) => {
         `SELECT COALESCE(item_type, 'General') AS category, COALESCE(SUM(total_amount), 0) as amount
          FROM purchase_notes
          WHERE doc_date >= $1 AND doc_date <= $2 AND status != 'cancelled'
+           AND LOWER(item_type) IN ('seed', 'gas')
          GROUP BY COALESCE(item_type, 'General')`,
         [from_date, to_date]
       );

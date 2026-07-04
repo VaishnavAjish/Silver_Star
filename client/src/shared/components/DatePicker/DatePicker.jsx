@@ -277,7 +277,15 @@ export default function DatePicker({
           type="text"
           className={`dp-trigger-val${!inputValue ? ' dp-placeholder' : ''}`}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={(e) => {
+            let v = e.target.value.replace(/\D/g, '');
+            if (v.length > 8) v = v.slice(0, 8);
+            let f = '';
+            if (v.length > 0) f += v.substring(0, 2);
+            if (v.length > 2) f += '/' + v.substring(2, 4);
+            if (v.length > 4) f += '/' + v.substring(4, 8);
+            setInputValue(f);
+          }}
           onBlur={commitInput}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
