@@ -14,7 +14,7 @@
  *   - onChange is called as onChange({ target: { value } }) — fully compatible with
  *     existing handlers that read e.target.value
  */
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useId } from 'react';
 import React from 'react';
 import { ChevronDown, Search, CheckSquare, Square, Trash2, X, Check } from 'lucide-react';
 import PortalDropdown from './PortalDropdown';
@@ -52,6 +52,8 @@ export default function SelectDropdown({
 
   const realCount  = options.filter(o => o.value !== '' && o.value != null).length;
   const showSearch = realCount > 3; // Enable search if there are more than 3 options
+
+  const idPrefix = useId();
 
   const [open,       setOpen]      = useState(false);
   const [query,      setQuery]     = useState('');
@@ -114,6 +116,12 @@ export default function SelectDropdown({
   useEffect(() => {
     setActiveIndex(-1);
   }, [query, visibleOpts.length]);
+
+  useEffect(() => {
+    if (activeIndex >= 0) {
+      document.getElementById(`${idPrefix}-opt-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeIndex, idPrefix]);
 
   const handleKeyDown = (e) => {
     if (!open) {
@@ -278,6 +286,7 @@ export default function SelectDropdown({
               return (
                 <div
                   key={i}
+                  id={`${idPrefix}-opt-${i}`}
                   onMouseDown={() => !opt.disabled && handleSelect(opt.value)}
                   onMouseEnter={() => setActiveIndex(i)}
                   onMouseLeave={() => setActiveIndex(-1)}

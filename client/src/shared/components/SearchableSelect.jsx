@@ -26,7 +26,7 @@
  * style        object — wrapper styles
  * inputStyle   object — trigger input styles (default mode only)
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { X, ChevronDown, Search } from 'lucide-react';
 import PortalDropdown from './PortalDropdown';
 import { useDropdownGroup } from './DropdownGroup';
@@ -97,6 +97,7 @@ export default function SearchableSelect({
   className, style, inputStyle,
   dropdownId,
 }) {
+  const idPrefix = useId();
   const [query,    setQuery]    = useState('');
   const [options,  setOptions]  = useState([]);
   const [internalOpen, setInternalOpen] = useState(false);
@@ -189,6 +190,12 @@ export default function SearchableSelect({
   useEffect(() => {
     setActiveIndex(-1);
   }, [query, displayOptions.length]);
+
+  useEffect(() => {
+    if (activeIndex >= 0) {
+      document.getElementById(`${idPrefix}-opt-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeIndex, idPrefix]);
 
   const handleKeyDown = (e) => {
     if (!open) {
@@ -383,6 +390,7 @@ export default function SearchableSelect({
               {!loading && displayOptions.map((opt, idx) => (
                 <div
                   key={opt.id}
+                  id={`${idPrefix}-opt-${idx}`}
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelect(opt); }}
                   onMouseEnter={() => setActiveIndex(idx)}
                   onMouseLeave={() => setActiveIndex(-1)}
@@ -462,6 +470,7 @@ export default function SearchableSelect({
           {!loading && displayOptions.map((opt, idx) => (
             <div
               key={opt.id}
+              id={`${idPrefix}-opt-${idx}`}
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelect(opt); }}
               onMouseEnter={() => setActiveIndex(idx)}
               onMouseLeave={() => setActiveIndex(-1)}
