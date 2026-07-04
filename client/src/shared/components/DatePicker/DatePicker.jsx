@@ -85,7 +85,7 @@ const overlayAnim = {
 export default function DatePicker({
   value,
   onChange,
-  format: fmt = 'DD MMM YYYY',
+  format: fmt = 'DD/MM/YYYY',
   placeholder = 'Select date',
   disabled = false,
   min,
@@ -112,13 +112,7 @@ export default function DatePicker({
   const [yearBase,  setYearBase]  = useState(() =>
     Math.floor(((selected ?? today).getFullYear() - 4) / 12) * 12
   );
-
-  const triggerRef  = useRef(null);
-  const popupRef    = useRef(null);
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 280 });
+  const [inputValue, setInputValue] = useState('');
 
   // Sync view to selected date when popup opens
   useEffect(() => {
@@ -129,6 +123,51 @@ export default function DatePicker({
     setYearBase(Math.floor((base.getFullYear() - 4) / 12) * 12);
     setMode('days');
   }, [open, today]);
+
+  // Sync inputValue to selected date
+  useEffect(() => {
+    setInputValue(formatDisplay(selected, fmt) || '');
+  }, [selected, fmt]);
+
+  const commitInput = () => {
+    if (!inputValue) {
+      onChange?.('', null);
+      return;
+    }
+    const parts = inputValue.split(/[\/\-\.]/);
+    if (parts.length === 3) {
+      let d = parseInt(parts[0], 10);
+      let m = parseInt(parts[1], 10);
+      let y = parseInt(parts[2], 10);
+      
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+        if (y < 100) y += 2000;
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          const newDate = new Date(y, m - 1, d);
+          if (newDate.getDate() === d) {
+             if (!isDayDisabled(newDate)) {
+               onChange?.(toYMD(newDate), newDate);
+               setViewYear(newDate.getFullYear());
+               setViewMonth(newDate.getMonth());
+               setInputValue(formatDisplay(newDate, fmt));
+               return;
+             }
+          }
+        }
+      }
+    }
+    // Invalid or disabled date, revert
+    setInputValue(formatDisplay(selected, fmt) || '');
+  };
+
+  const triggerRef  = useRef(null);
+  const popupRef    = useRef(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 280 });
+
+
 
   // Compute and maintain popup position
   const reposition = useCallback(() => {
@@ -221,22 +260,35 @@ export default function DatePicker({
           open     ? 'dp-trigger--open'     : '',
           disabled ? 'dp-trigger--disabled' : '',
         ].filter(Boolean).join(' ')}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => !disabled && setOpen(true)}
         role="button"
         tabIndex={disabled ? -1 : 0}
         onKeyDown={(e) => {
           if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
-            setOpen((o) => !o);
+            setOpen(true);
           }
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
         <CalendarIcon size={13} className="dp-trigger-ico" />
-        <span className={`dp-trigger-val${!display ? ' dp-placeholder' : ''}`}>
-          {display || placeholder}
-        </span>
+        <input
+          type="text"
+          className={`dp-trigger-val${!inputValue ? ' dp-placeholder' : ''}`}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onBlur={commitInput}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitInput();
+              setOpen(false);
+            }
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
         {selected && !disabled && (
           <button className="dp-trigger-clear" onClick={handleClear} aria-label="Clear date" tabIndex={-1}>
             <X size={11} />
