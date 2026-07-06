@@ -210,13 +210,13 @@ export function PnLPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="toolbar-section">
             <label className="toolbar-label">From</label>
-            <div style={{ width: 140 }}>
+            <div style={{ width: 160 }}>
               <DatePicker value={fromDate} onChange={v => setFromDate(v)} />
             </div>
           </div>
           <div className="toolbar-section">
             <label className="toolbar-label">To</label>
-            <div style={{ width: 140 }}>
+            <div style={{ width: 160 }}>
               <DatePicker value={toDate} onChange={v => setToDate(v)} />
             </div>
           </div>
