@@ -7,10 +7,11 @@ import { useAuth } from '../../../core/context/AuthContext';
 import Modal from '../../../shared/components/Modal';
 import UserDrawer from './UserDrawer';
 import UserAuditHistoryModal from '../components/UserAuditHistoryModal';
+import AuditUserHistory from '../components/AuditUserHistory';
 import {
   Plus, Edit2, ToggleLeft, ToggleRight, Users, Search, Save,
   ShieldCheck, UserCheck, UserX, Shield, Trash2, Copy, Edit3, X,
-  ChevronDown, ChevronRight, CheckSquare, Square, Clock, Key,
+  ChevronDown, ChevronRight, CheckSquare, Square, Clock, Key, AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useResizableColumns from '../../../shared/hooks/useResizableColumns';
@@ -405,7 +406,7 @@ export default function UsersPage() {
 
   const loadAuditLog = useCallback(async (p = 1) => {
     try {
-      const res = await apiRef.current.get(`/api/roles/audit-log?page=${p}&pageSize=30`);
+      const res = await apiRef.current.get(`/api/audit-logs/overview?page=${p}&pageSize=30`);
       setAuditLog(res.data || []);
       setAuditTotal(res.total || 0);
       setAuditPage(res.page || 1);
@@ -937,7 +938,10 @@ export default function UsersPage() {
             ══════════════════════════════════════════ */}
             {pageTab === 'audit' && (
               <div>
-                <h3 style={{ margin: '0 0 12px', fontSize: 15, fontWeight: 700 }}>Permission Change Audit Log</h3>
+                <h3 style={{ margin: '0 0 12px', fontSize: 15, fontWeight: 700 }}>Global Audit Trail</h3>
+                <div style={{ padding: '10px 14px', background: '#FFF3E0', color: '#E65100', borderRadius: 6, marginBottom: 15, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500 }}>
+                  <AlertTriangle size={16} /> Data is protected. Deletions are strictly prohibited at the database level.
+                </div>
                 {auditLog.length === 0 ? (
                   <div className="empty-state"><Clock size={32} /><p>No audit entries yet</p></div>
                 ) : (
@@ -953,78 +957,82 @@ export default function UsersPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.values(auditLog.reduce((acc, entry) => {
-                          if (!acc[entry.user_id]) acc[entry.user_id] = { ...entry, total_actions: 1 };
-                          else acc[entry.user_id].total_actions += 1;
-                          return acc;
-                        }, {})).map(entry => (
-                          <tr key={entry.user_id} 
-                            onDoubleClick={() => {
-                              if (entry.user_id) setSelectedUserForHistory({ id: entry.user_id, full_name: entry.user_name || 'Unknown', username: `user_${entry.user_id}` });
-                            }}
-                            style={{ cursor: 'pointer' }}
-                          >
-                            <td>
-                              <div 
-                                style={{ display: 'flex', alignItems: 'center', gap: 10, transition: 'opacity 0.2s' }}
-                                onMouseEnter={e => e.currentTarget.style.opacity = 0.8}
-                                onMouseLeave={e => e.currentTarget.style.opacity = 1}
-                              >
-                                <div className="adm-avatar" style={{ 
-                                  background: (ROLE_META[entry.role] || ROLE_META.viewer)?.avatarBg || '#F5F5F5', 
-                                  color: (ROLE_META[entry.role] || ROLE_META.viewer)?.avatarColor || '#616161' 
-                                }}>
-                                  {String(entry.user_name || 'S').charAt(0).toUpperCase()}
-                                </div>
-                                <div>
-                                  <div style={{ fontWeight: 600, color: 'var(--g900)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    {String(entry.user_name || 'System')}
-                                    {entry.user_id === me?.id && <span style={{ fontSize: 9, background: 'var(--brand-50)', color: 'var(--brand-dark)', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>YOU</span>}
-                                    <span style={{ color: 'var(--g400)', fontWeight: 400, marginLeft: 2 }}>(ID: {String(entry.user_id)})</span>
+                        {auditLog.map(entry => (
+                          <React.Fragment key={entry.user_id}>
+                            <tr
+                              onClick={() => {
+                                if (selectedUserForHistory?.id === entry.user_id) {
+                                  setSelectedUserForHistory(null);
+                                } else {
+                                  setSelectedUserForHistory({ id: entry.user_id, full_name: entry.user_name || 'System', username: `user_${entry.user_id}` });
+                                }
+                              }}
+                              style={{ cursor: 'pointer', background: selectedUserForHistory?.id === entry.user_id ? 'var(--g50)' : 'transparent' }}
+                            >
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, transition: 'opacity 0.2s' }}>
+                                  <div className="adm-avatar" style={{ background: '#F5F5F5', color: '#616161' }}>
+                                    {String(entry.user_name || 'S').charAt(0).toUpperCase()}
                                   </div>
-                                  <div style={{ fontSize: 11, color: 'var(--g500)', marginTop: 1 }}>
-                                    @{String(entry.username || `user_${entry.user_id}`)}
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: 'var(--g900)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                      {String(entry.user_name || 'System')}
+                                      {entry.user_id === me?.id && <span style={{ fontSize: 9, background: 'var(--brand-50)', color: 'var(--brand-dark)', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>YOU</span>}
+                                      {entry.user_id && <span style={{ color: 'var(--g400)', fontWeight: 400, marginLeft: 2 }}>(ID: {String(entry.user_id)})</span>}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--g500)', marginTop: 1 }}>
+                                      @{String(entry.username || (entry.user_id ? `user_${entry.user_id}` : 'system'))}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div style={{
-                                  width: 24, height: 24, borderRadius: 4,
-                                  background: String(entry.action || '').includes('delete') ? '#FFEBEE' : String(entry.action || '').includes('create') ? '#E8F5E9' : '#E3F2FD',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                }}>
-                                  {String(entry.action || '').includes('delete') ? <Trash2 size={12} style={{ color: '#C62828' }} /> :
-                                  String(entry.action || '').includes('create') ? <Plus size={12} style={{ color: '#2E7D32' }} /> :
-                                  <Edit3 size={12} style={{ color: '#1565C0' }} />}
-                                </div>
-                                <div>
-                                  <div style={{ textTransform: 'capitalize', fontSize: 12, fontWeight: 500, color: 'var(--g800)' }}>
-                                    {String(entry.action || '').replace(/_/g, ' ')}
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{
+                                    width: 24, height: 24, borderRadius: 4,
+                                    background: String(entry.latest_action || '').includes('DELETE') ? '#FFEBEE' : String(entry.latest_action || '').includes('POST') ? '#E8F5E9' : '#E3F2FD',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                  }}>
+                                    {String(entry.latest_action || '').includes('DELETE') ? <Trash2 size={12} style={{ color: '#C62828' }} /> :
+                                    String(entry.latest_action || '').includes('POST') ? <Plus size={12} style={{ color: '#2E7D32' }} /> :
+                                    <Edit3 size={12} style={{ color: '#1565C0' }} />}
                                   </div>
-                                  <div style={{ fontSize: 11, color: 'var(--g500)' }}>
-                                    on {String(entry.target_type)} #{String(entry.target_id)}
+                                  <div>
+                                    <div style={{ fontWeight: 500, color: 'var(--g800)' }}>
+                                      {entry.latest_action}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--g500)' }}>
+                                      on {entry.latest_table} {entry.latest_record_id ? `#${entry.latest_record_id}` : ''}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td>
-                              <span style={{ fontSize: 12, color: 'var(--g700)', fontWeight: 600 }}>
-                                {Number(entry.total_actions)}
-                              </span>
-                            </td>
-                            <td>
-                              <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g600)' }}>
-                                {(entry.ip_address === '::1' || entry.ip_address === '127.0.0.1') ? '192.168.1.53' : String(entry.ip_address || '—')}
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ fontSize: 11, color: 'var(--g500)' }}>
-                                {entry.created_at ? new Date(entry.created_at).toLocaleString('en-IN') : '—'}
-                              </div>
-                            </td>
-                          </tr>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: 12, color: 'var(--g700)', fontWeight: 600 }}>
+                                  {Number(entry.total_actions)}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g600)' }}>
+                                  {entry.latest_ip || '-'}
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ fontSize: 11, color: 'var(--g500)' }}>
+                                  {entry.last_active ? new Date(entry.last_active).toLocaleString('en-IN') : '-'}
+                                </div>
+                              </td>
+                            </tr>
+                            {selectedUserForHistory?.id === entry.user_id && (
+                              <tr>
+                                <td colSpan={5} style={{ padding: 0 }}>
+                                  <div style={{ padding: '15px 20px', background: '#fafafa', borderBottom: '1px solid var(--g200)', boxShadow: 'inset 0 4px 6px -6px rgba(0,0,0,0.1)' }}>
+                                    <AuditUserHistory userId={entry.user_id} />
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))}
                       </tbody>
                     </table>

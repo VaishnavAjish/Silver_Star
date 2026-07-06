@@ -280,6 +280,7 @@ app.use('/api/admin', userRoutes);
 // permsRoutes has /:id/* prefix internally → mount at /api/admin/users
 app.use('/api/admin/users', permsRoutes);
 app.use('/api/roles', roleRoutes.router);
+app.use('/api/audit-logs', require('./routes/auditLogs'));
 app.use('/api/debug', debugAccRoutes);
 
 app.use('/api/process-master', processMasterRoutes);
