@@ -10,9 +10,10 @@ export const PERM_BITS = {
   reject:  128,
   import:  256,
   manage:  512,
+  sidebar: 1024,
 };
 
-export const FULL_ACCESS = 1023;
+export const FULL_ACCESS = 2047;
 
 export const ACTIONS = [
   { id: 'view',    label: 'VIEW' },
@@ -25,6 +26,7 @@ export const ACTIONS = [
   { id: 'import',  label: 'IMPORT' },
   { id: 'print',   label: 'PRINT' },
   { id: 'manage',  label: 'MANAGE' },
+  { id: 'sidebar', label: 'SIDEBAR' },
 ];
 
 /* ── Module / Submodule Tree ─────────────────────────────── */

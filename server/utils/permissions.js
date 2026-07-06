@@ -12,9 +12,10 @@ const PERM_BITS = {
   reject:  128,
   import:  256,
   manage:  512,
+  sidebar: 1024,
 };
 
-const FULL_ACCESS = 1023;
+const FULL_ACCESS = 2047;
 
 /**
  * Get effective permissions for a user on a given module+submodule.

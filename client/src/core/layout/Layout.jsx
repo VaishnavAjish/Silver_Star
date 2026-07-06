@@ -17,97 +17,97 @@ import { NotificationCenter } from '../../shared/components/NotificationCenter';
 import Modal from '../../shared/components/Modal';
 
 export const NAV = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/', module: 'dashboard' },
-  { label: 'Clipboard', icon: ClipboardList, path: '/clipboard' },
+  { label: 'Dashboard', icon: LayoutDashboard, path: '/', module: 'dashboard', submodule: 'dashboard' },
+  { label: 'Clipboard', icon: ClipboardList, path: '/clipboard', module: 'clipboard', submodule: 'clipboard' },
   {
     label: 'Inventory', icon: Warehouse, module: 'inventory', children: [
-      { label: 'All Inventory', path: '/inventory' },
+      { label: 'All Inventory', path: '/inventory', submodule: 'all_inventory' },
       { label: 'Opening Entry', path: '/inventory/opening', editorOnly: true },
       { label: 'Closing Entry', path: '/inventory/closing', editorOnly: true },
       { label: 'Mix Lots', path: '/inventory/mix', editorOnly: true },
       { label: 'Stock Transfer', path: '/inventory/stock-transfer', editorOnly: true },
-      { label: 'Lot Movements', path: '/lot-movements' },
-      { label: 'Process Issues', path: '/inventory/process-issues' },
+      { label: 'Lot Movements', path: '/lot-movements', submodule: 'lot_movements' },
+      { label: 'Process Issues', path: '/inventory/process-issues', submodule: 'process_issues' },
       { label: 'Start Process', path: '/inventory/process-issues/new', editorOnly: true },
     ]
   },
   {
     label: 'Rough Diamonds', icon: Gem, module: 'rough', children: [
-      { label: 'Rough Growth', path: '/rough-growth' },
-      { label: 'Growth Runs', path: '/growth-runs' },
+      { label: 'Rough Growth', path: '/rough-growth', submodule: 'rough_growth' },
+      { label: 'Growth Runs', path: '/growth-runs', submodule: 'rough_growth' },
       { label: 'Growth Output', path: '/manufacturing/growth-output', editorOnly: true },
     ]
   },
   {
     label: 'Manufacturing', icon: Cpu, module: 'manufacturing', children: [
-      { label: 'Control Tower', path: '/manufacturing/control-tower' },
+      { label: 'Control Tower', path: '/manufacturing/control-tower', submodule: 'control_tower' },
     ]
   },
   {
     label: 'Purchase', icon: ShoppingCart, module: 'purchase', children: [
-      { label: 'Vendors', path: '/vendors' },
-      { label: 'Vendor Bills', path: '/bills' },
-      { label: 'Purchase Notes', path: '/purchase-notes' },
+      { label: 'Vendors', path: '/vendors', submodule: 'vendors' },
+      { label: 'Vendor Bills', path: '/bills', submodule: 'purchase_notes' },
+      { label: 'Purchase Notes', path: '/purchase-notes', submodule: 'purchase_notes' },
       { label: 'New Purchase Note', path: '/purchase-notes/new', editorOnly: true },
-      { label: 'Expenses', path: '/expenses' },
+      { label: 'Expenses', path: '/expenses', submodule: 'expenses' },
     ]
   },
   {
     label: 'Sales', icon: FileText, module: 'sales', children: [
-      { label: 'Invoices', path: '/invoices' },
+      { label: 'Invoices', path: '/invoices', submodule: 'invoice' },
       { label: 'New Invoice', path: '/invoices/new', editorOnly: true },
-      { label: 'Customers', path: '/customers' },
+      { label: 'Customers', path: '/customers', submodule: 'customers' },
     ]
   },
   {
     label: 'Accounting', icon: Building2, module: 'accounting', children: [
-      { label: 'Chart of Accounts', path: '/accounts' },
-      { label: 'Payments', path: '/payments' },
-      { label: 'Receipts', path: '/receipts' },
-      { label: 'Bank Deposits', path: '/bank-deposits' },
-      { label: 'Journal Entries', path: '/journal-entries' },
-      { label: 'Bank Reconciliation', path: '/reports/bank-reconciliation' },
+      { label: 'Chart of Accounts', path: '/accounts', submodule: 'chart_of_accounts' },
+      { label: 'Payments', path: '/payments', submodule: 'payments' },
+      { label: 'Receipts', path: '/receipts', submodule: 'receipts' },
+      { label: 'Bank Deposits', path: '/bank-deposits', submodule: 'bank_deposits' },
+      { label: 'Journal Entries', path: '/journal-entries', submodule: 'journal_entries' },
+      { label: 'Bank Reconciliation', path: '/reports/bank-reconciliation', submodule: 'bank_reconciliation' },
     ]
   },
   {
     label: 'Fixed Assets', icon: Landmark, module: 'assets', children: [
-      { label: 'Asset List', path: '/assets' },
+      { label: 'Asset List', path: '/assets', submodule: 'asset_list' },
       { label: 'Manual Entry', path: '/assets/new', editorOnly: true },
-      { label: 'Depreciation Runs', path: '/depreciation-runs' },
+      { label: 'Depreciation Runs', path: '/depreciation-runs', submodule: 'depreciation_runs' },
       { label: 'New Depreciation Run', path: '/depreciation-runs/new', editorOnly: true },
-      { label: 'Fixed Asset Register', path: '/reports/fixed-asset-register' },
-      { label: 'Depreciation Schedule', path: '/reports/depreciation-schedule' },
+      { label: 'Fixed Asset Register', path: '/reports/fixed-asset-register', submodule: 'fixed_asset_register' },
+      { label: 'Depreciation Schedule', path: '/reports/depreciation-schedule', submodule: 'depreciation_schedule' },
     ]
   },
   {
     label: 'Reports', icon: BarChart3, module: 'reports', children: [
       { label: 'Fund Utilization', path: '/reports/fund-utilization' },
-      { label: 'Ledger', path: '/ledger' },
-      { label: 'Trial Balance', path: '/trial-balance' },
-      { label: 'Profit & Loss', path: '/pnl' },
-      { label: 'Balance Sheet', path: '/balance-sheet' },
-      { label: 'Costing Report', path: '/costing' },
-      { label: 'Accounts Receivable', path: '/reports/accounts-receivable' },
-      { label: 'Accounts Payable', path: '/reports/accounts-payable' },
-      { label: 'Cost Center P&L', path: '/reports/cost-center' },
+      { label: 'Ledger', path: '/ledger', submodule: 'ledger' },
+      { label: 'Trial Balance', path: '/trial-balance', submodule: 'trial_balance' },
+      { label: 'Profit & Loss', path: '/pnl', submodule: 'profit_loss' },
+      { label: 'Balance Sheet', path: '/balance-sheet', submodule: 'balance_sheet' },
+      { label: 'Costing Report', path: '/costing', submodule: 'costing_report' },
+      { label: 'Accounts Receivable', path: '/reports/accounts-receivable', submodule: 'accounts_receivable' },
+      { label: 'Accounts Payable', path: '/reports/accounts-payable', submodule: 'accounts_payable' },
+      { label: 'Cost Center P&L', path: '/reports/cost-center', submodule: 'cost_center_pl' },
       { label: 'Cost Centre Reports', path: '/cost-center-reports' },
     ]
   },
   {
     label: 'Management', icon: Database, module: 'management', children: [
-      { label: 'Process Master', path: '/manufacturing/process-master' },
-      { label: 'Items Master', path: '/items' },
-      { label: 'Machines', path: '/machines' },
-      { label: 'Departments', path: '/departments' },
-      { label: 'Locations', path: '/locations' },
-      { label: 'UOM', path: '/uom' },
-      { label: 'Expense Categories', path: '/expense-categories' },
-      { label: 'Asset Categories', path: '/fixed-asset-categories' },
+      { label: 'Process Master', path: '/manufacturing/process-master', submodule: 'process_master' },
+      { label: 'Items Master', path: '/items', submodule: 'items_master' },
+      { label: 'Machines', path: '/machines', submodule: 'machines' },
+      { label: 'Departments', path: '/departments', submodule: 'departments' },
+      { label: 'Locations', path: '/locations', submodule: 'locations' },
+      { label: 'UOM', path: '/uom', submodule: 'uom' },
+      { label: 'Expense Categories', path: '/expense-categories', submodule: 'expense_categories' },
+      { label: 'Asset Categories', path: '/fixed-asset-categories', submodule: 'asset_categories' },
       { label: 'Cost Centres', path: '/cost-centers' },
       { label: 'Cost Centre Corrections', path: '/cost-center-corrections' },
     ]
   },
-  { label: 'Admin Panel', icon: ShieldCheck, path: '/admin/users', adminOnly: true },
+  { label: 'Admin Panel', icon: ShieldCheck, path: '/admin/users', adminOnly: true, module: 'admin', submodule: 'users' },
 ];
 
 const ROOT_PATHS = new Set([
@@ -168,7 +168,11 @@ function SidebarItem({ item, onNavigate }) {
   const canMutate = !item.module ||
     hasPermission(item.module, 'create') ||
     hasPermission(item.module, 'edit');
-  const visibleChildren = item.children.filter(c => !c.editorOnly || canMutate);
+  const visibleChildren = item.children.filter(c => {
+    if (c.editorOnly) return canMutate;
+    if (c.submodule) return hasPermission(item.module, 'sidebar', c.submodule);
+    return !item.module || hasPermission(item.module, 'view');
+  });
   const isActive = visibleChildren.some(c =>
     c.path && (location.pathname === c.path || location.pathname.startsWith(c.path + '/'))
   );
@@ -411,7 +415,10 @@ function LayoutInner() {
               const r = String(user?.role || '').toLowerCase();
               return r === 'admin' || r === 'super_admin';
             })
-            .filter(item => !item.module || hasPermission(item.module, 'view'))
+            .filter(item => {
+              if (item.submodule) return hasPermission(item.module, 'sidebar', item.submodule);
+              return !item.module || hasPermission(item.module, 'view');
+            })
             .map((item, i) => <SidebarItem key={i} item={item} onNavigate={handleNavigate} />)}
           <div className="nav-item" style={{ marginTop: 8, borderTop: '1px solid var(--sidebar-border)', paddingTop: 4 }}>
             <div className="nav-hdr" onClick={() => setShowLogoutConfirm(true)}>

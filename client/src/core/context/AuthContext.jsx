@@ -172,7 +172,7 @@ export function AuthProvider({ children }) {
   };
   const canEdit = () => hasRole('super_admin', 'admin', 'operator');
 
-  const _PERM_BITS = { view: 1, create: 2, edit: 4, delete: 8, approve: 16, export: 32, print: 64 };
+  const _PERM_BITS = { view: 1, create: 2, edit: 4, delete: 8, approve: 16, export: 32, print: 64, reject: 128, import: 256, manage: 512, sidebar: 1024 };
 
   // Check permission — order: admin bypass → RBAC bitmask → legacy overrides → role defaults
   const hasPermission = (module, action, submodule = '') => {
