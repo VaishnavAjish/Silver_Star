@@ -324,7 +324,7 @@ export function InvoiceForm() {
                 {saving ? 'Creating…' : 'Save & New'}
               </button>
               <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving}>
-                <Save size={13} /> {saving ? 'Creating…' : 'Save & Post Revenue + COGS'}
+                <Save size={13} /> {saving ? 'Creating…' : 'Save & Close'}
               </button>
             </div>
           }

@@ -298,7 +298,7 @@ export const VendorBillForm = () => {
                 {loading ? 'Posting...' : 'Save & New'}
               </button>
               <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={loading}>
-                <Save size={13} /> {loading ? 'Posting...' : 'Save & Post JE'}
+                <Save size={13} /> {loading ? 'Posting...' : 'Save & Close'}
               </button>
             </div>
           }

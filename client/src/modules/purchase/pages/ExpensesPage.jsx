@@ -605,7 +605,7 @@ export function ExpenseForm() {
                 {saving ? 'Posting…' : 'Save & New'}
               </button>
               <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving || overAllocated}>
-                <Save size={13} /> {saving ? 'Posting…' : 'Save & Post JE'}
+                <Save size={13} /> {saving ? 'Posting…' : 'Save & Close'}
               </button>
             </div>
           }

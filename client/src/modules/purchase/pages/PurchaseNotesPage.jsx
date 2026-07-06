@@ -366,7 +366,7 @@ export function PurchaseNoteForm() {
                 {saving ? 'Saving…' : 'Save & New'}
               </button>
               <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving}>
-                <Save size={13} /> {saving ? 'Saving…' : 'Save & Post JE'}
+                <Save size={13} /> {saving ? 'Saving…' : 'Save & Close'}
               </button>
             </div>
           }
