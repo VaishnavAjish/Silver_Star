@@ -206,15 +206,28 @@ export function PnLPage() {
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
         onPrint={() => setTimeout(() => window.print(), 100)}
-      />
-
-      <div className="page-section page-actions-bar no-print">
-        <div className="fg"><label>From</label><DatePicker value={fromDate} onChange={v => setFromDate(v)} /></div>
-        <div className="fg"><label>To</label><DatePicker value={toDate} onChange={v => setToDate(v)} /></div>
-        <button className="btn" style={{ background: 'var(--g100)', color: 'var(--g700)' }} onClick={() => { setFromDate(''); setToDate(''); api.get('/api/reports/pnl').then(setData).catch(()=>{}); }}><X size={14} /> Clear</button>
-        <button className="btn btn-primary" onClick={load}><Search size={14} /> Generate</button>
-        <button className="btn" onClick={() => setTimeout(() => window.print(), 100)}><Printer size={14} /> Print</button>
-      </div>
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="toolbar-section">
+            <label className="toolbar-label">From</label>
+            <div style={{ width: 140 }}>
+              <DatePicker value={fromDate} onChange={v => setFromDate(v)} />
+            </div>
+          </div>
+          <div className="toolbar-section">
+            <label className="toolbar-label">To</label>
+            <div style={{ width: 140 }}>
+              <DatePicker value={toDate} onChange={v => setToDate(v)} />
+            </div>
+          </div>
+          <button className="btn" style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)', height: 32 }} onClick={() => { setFromDate(''); setToDate(''); api.get('/api/reports/pnl').then(setData).catch(()=>{}); }}>
+            <X size={14} /> Clear
+          </button>
+          <button className="btn btn-primary" onClick={load} style={{ height: 32, padding: '0 16px' }}>
+            <Search size={14} /> Generate
+          </button>
+        </div>
+      </ReportToolbar>
 
       <div className="page-section page-content">
 
@@ -563,16 +576,30 @@ export function TrialBalancePage() {
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
         onPrint={() => setTimeout(() => window.print(), 100)}
-      />
-
-      <div className="page-section page-actions-bar no-print">
-        <div className="fg"><label>From</label><DatePicker value={fromDate} onChange={v => setFromDate(v)} /></div>
-        <div className="fg"><label>To</label><DatePicker value={toDate} onChange={v => setToDate(v)} /></div>
-        {(fromDate || toDate) && (
-          <button className="btn" style={{ background: 'var(--g100)', color: 'var(--g700)' }} onClick={() => { setFromDate(''); setToDate(''); load('', ''); }}><X size={14} /> Clear</button>
-        )}
-        <button className="btn btn-primary" onClick={() => load()}><Search size={14} /> Generate</button>
-      </div>
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="toolbar-section">
+            <label className="toolbar-label">From</label>
+            <div style={{ width: 140 }}>
+              <DatePicker value={fromDate} onChange={v => setFromDate(v)} />
+            </div>
+          </div>
+          <div className="toolbar-section">
+            <label className="toolbar-label">To</label>
+            <div style={{ width: 140 }}>
+              <DatePicker value={toDate} onChange={v => setToDate(v)} />
+            </div>
+          </div>
+          {(fromDate || toDate) && (
+            <button className="btn" style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)', height: 32 }} onClick={() => { setFromDate(''); setToDate(''); load('', ''); }}>
+              <X size={14} /> Clear
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => load()} style={{ height: 32, padding: '0 16px' }}>
+            <Search size={14} /> Generate
+          </button>
+        </div>
+      </ReportToolbar>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
         {loading && <div className="empty-state"><div className="spinner" /></div>}
@@ -743,12 +770,19 @@ export function BalanceSheetPage() {
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
         onPrint={() => setTimeout(() => window.print(), 100)}
-      />
-
-      <div className="page-section page-actions-bar no-print">
-        <div className="fg"><label>As of Date</label><DatePicker value={asOfDate} onChange={handleDateChange} /></div>
-        <button className="btn btn-primary" onClick={() => load(asOfDate)}><Search size={14} /> Generate</button>
-      </div>
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="toolbar-section">
+            <label className="toolbar-label">As of Date</label>
+            <div style={{ width: 140 }}>
+              <DatePicker value={asOfDate} onChange={handleDateChange} />
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={() => load(asOfDate)} style={{ height: 32, padding: '0 16px' }}>
+            <Search size={14} /> Generate
+          </button>
+        </div>
+      </ReportToolbar>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
 

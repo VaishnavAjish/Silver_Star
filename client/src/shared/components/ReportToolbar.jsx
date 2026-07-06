@@ -6,7 +6,8 @@ export default function ReportToolbar({
   currency, onCurrencyChange,
   format, onFormatChange,
   decimals, onDecimalsChange,
-  onExportPDF, onExportExcel, onPrint
+  onExportPDF, onExportExcel, onPrint,
+  children
 }) {
   return (
     <div className="report-toolbar">
@@ -36,7 +37,13 @@ export default function ReportToolbar({
         </div>
       </div>
 
-      <div className="toolbar-actions">
+      {children && (
+        <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
+          {children}
+        </div>
+      )}
+
+      <div className="toolbar-actions" style={{ marginLeft: children ? '16px' : 'auto' }}>
         {onExportPDF && (
           <button className="btn-action" onClick={onExportPDF} title="Export PDF">
             <FileText size={16} />
