@@ -563,8 +563,9 @@ export default function VendorDetailsPage() {
                                         className="btn btn-sm"
                                         style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
                                         onClick={() => {
-                                          openTab({ id: `/purchase-notes/${t.id}`, name: t.ref_no || `#${t.id}`, path: `/purchase-notes/${t.id}`, closable: true });
-                                          navigate(`/purchase-notes/${t.id}`);
+                                          const path = t.category === 'Expense Bill' ? `/bills/${t.id}` : `/purchase-notes/${t.id}`;
+                                          openTab({ id: path, name: t.ref_no || `#${t.id}`, path: path, closable: true });
+                                          navigate(path);
                                         }}
                                       >
                                         View Details
@@ -575,6 +576,17 @@ export default function VendorDetailsPage() {
                                         onClick={() => handleDeleteBill(t.id)}
                                       >
                                         <Trash2 size={12} /> Delete
+                                      </span>
+                                      <span
+                                        className="btn btn-sm"
+                                        style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                                        onClick={() => {
+                                          const path = t.category === 'Expense Bill' ? `/bills/${t.id}` : `/purchase-notes/${t.id}`;
+                                          openTab({ id: path, name: `Edit ${t.ref_no || `#${t.id}`}`, path: path, closable: true });
+                                          navigate(path);
+                                        }}
+                                      >
+                                        <Edit2 size={12} /> Edit
                                       </span>
                                     </div>
                                   ) : t.type === 'JE Adjustment' && t.je_id ? (
