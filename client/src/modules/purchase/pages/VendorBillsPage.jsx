@@ -514,12 +514,23 @@ export const VendorBillForm = () => {
                   <td />
                 </tr>
               )}
+              {Math.abs(Math.round(subtotal + taxTotal) - (subtotal + taxTotal)) > 0.001 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'right', fontWeight: 500, paddingRight: 10, fontSize: 12, color: 'var(--g600)' }}>
+                    Round Off
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 12 }}>
+                    {Math.round(subtotal + taxTotal) - (subtotal + taxTotal) > 0 ? '+' : ''}{fmt(Math.round(subtotal + taxTotal) - (subtotal + taxTotal))}
+                  </td>
+                  <td />
+                </tr>
+              )}
               <tr>
                 <td colSpan={7} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12 }}>
                   Grand Total
                 </td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13 }}>
-                  ₹{fmt(grandTotal)}
+                  ₹{fmt(Math.round(subtotal + taxTotal))}
                 </td>
                 <td />
               </tr>
