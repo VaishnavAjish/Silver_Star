@@ -416,4 +416,244 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
 });
 
+// PUT /api/purchase-notes/:id (Update + inventory + JE)
+router.put('/:id', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+    const id = parseInt(req.params.id, 10);
+
+    const { doc_date, vendor_id, item_type, department_id, payment_term, currency,
+            reference_no, remark, lines, cost_center_id } = req.body;
+    const costCenterId = cost_center_id ? parseInt(cost_center_id) : null;
+
+    if (!lines || lines.length === 0) throw new Error('At least one line item required');
+
+    // Fetch existing purchase note
+    const pnR = await client.query('SELECT * FROM purchase_notes WHERE id = $1 FOR UPDATE', [id]);
+    if (!pnR.rows.length) throw new Error('Purchase Note not found');
+    const pn = pnR.rows[0];
+
+    if (parseFloat(pn.amount_paid) > 0) {
+      throw new Error('Cannot edit a purchase note with payments applied. Remove payments first.');
+    }
+
+    const oldLinesR = await client.query('SELECT * FROM purchase_note_lines WHERE purchase_note_id = $1', [id]);
+    const invIds = oldLinesR.rows.filter(l => l.inventory_id).map(l => l.inventory_id);
+    
+    if (invIds.length > 0) {
+      const invCheck = await client.query('SELECT id, status FROM inventory WHERE id = ANY($1::int[])', [invIds]);
+      for (const inv of invCheck.rows) {
+        if (inv.status !== 'IN STOCK') {
+          throw new Error('Cannot edit this purchase note because some of its inventory has already been moved, issued, or consumed.');
+        }
+      }
+    }
+
+    // REVERSE PREVIOUS DATA
+    // 1. Reverse Inventory from items master
+    for (const line of oldLinesR.rows) {
+      if (!line.is_capital && line.item_id && line.qty > 0 && line.amount > 0) {
+        await client.query(
+          `UPDATE items
+           SET quantity_on_hand = quantity_on_hand - $1,
+               inventory_value = GREATEST(0, inventory_value - $2),
+               avg_cost = CASE
+                 WHEN quantity_on_hand - $1 > 0 THEN ROUND((GREATEST(0, inventory_value - $2) / (quantity_on_hand - $1))::numeric, 4)
+                 ELSE 0
+               END
+           WHERE id = $3`,
+          [parseFloat(line.qty) || 0, parseFloat(line.amount) || 0, line.item_id]
+        );
+      }
+    }
+
+    // 2. Delete fixed_assets
+    await client.query('DELETE FROM fixed_assets WHERE purchase_note_id = $1', [id]);
+
+    // 3. Delete inventory
+    if (invIds.length > 0) {
+      await client.query('DELETE FROM inventory WHERE id = ANY($1::int[])', [invIds]);
+    }
+
+    // 4. Delete old purchase note lines
+    await client.query('DELETE FROM purchase_note_lines WHERE purchase_note_id = $1', [id]);
+
+    // 5. Delete Journal Entry
+    if (pn.je_id) {
+      await client.query('DELETE FROM je_lines WHERE je_id = $1', [pn.je_id]);
+      await client.query('DELETE FROM journal_entries WHERE id = $1', [pn.je_id]);
+    }
+
+    // ==========================================
+    // RECREATION LOGIC
+    // ==========================================
+    const docNumber = pn.doc_number;
+
+    const { lines: processedLines, totalTaxable: totalAmount, totalTax: taxAmount, grandTotal } = gstEngine.calculateDocumentGST(lines);
+    
+    let totalQty = 0;
+    for (const line of processedLines) {
+      totalQty += parseFloat(line.qty) || 0;
+    }
+
+    await client.query(
+      `UPDATE purchase_notes 
+       SET doc_date=$1, vendor_id=$2, item_type=$3, department_id=$4, payment_term=$5, currency=$6,
+           reference_no=$7, remark=$8, total_qty=$9, total_amount=$10, tax_amount=$11, grand_total=$12,
+           balance_due=$13, cost_center_id=$14
+       WHERE id = $15`,
+      [doc_date, vendor_id || null, item_type, department_id || null, payment_term || 'Immediate', currency || 'INR', 
+       reference_no, remark, totalQty, totalAmount, taxAmount, grandTotal, grandTotal, cost_center_id || null, id]
+    );
+
+    const insertedLines = [];
+    const createdAssets = [];
+    const drAccountMap = {}; 
+
+    const itemIds = [...new Set(lines.map(l => parseInt(l.item_id)))];
+    const itemsR = await client.query('SELECT id, code, name, category, is_capital_asset, fixed_asset_category_id FROM items WHERE id = ANY($1::int[])', [itemIds]);
+    const itemsById = {};
+    for (const row of itemsR.rows) itemsById[row.id] = row;
+
+    const capitalItemIds = itemsR.rows.filter(r => r.is_capital_asset && r.fixed_asset_category_id).map(r => r.fixed_asset_category_id);
+    const catIds = [...new Set(capitalItemIds)];
+    let catsById = {};
+    if (catIds.length > 0) {
+      const catR = await client.query('SELECT id, gl_asset_account_id FROM fixed_asset_categories WHERE id = ANY($1::int[])', [catIds]);
+      for (const row of catR.rows) catsById[row.id] = row;
+    }
+
+    for (let i = 0; i < processedLines.length; i++) {
+      const line = processedLines[i];
+      const amt = line.computed_amount;
+      const taxAmt = line.computed_tax_amount;
+      const lineTotal = line.computed_total;
+
+      const item = itemsById[parseInt(line.item_id)];
+      if (!item) throw new Error(`Item ID ${line.item_id} not found`);
+
+      if (item.is_capital_asset) {
+        if (!item.fixed_asset_category_id) throw new Error(`Item "${item.name}" is marked as capital asset but has no asset category assigned`);
+        const catRow = catsById[item.fixed_asset_category_id];
+        if (!catRow) throw new Error(`Asset category ${item.fixed_asset_category_id} not found`);
+        const assetAccId = catRow.gl_asset_account_id;
+        drAccountMap[assetAccId] = Math.round(((drAccountMap[assetAccId] || 0) + amt) * 100) / 100;
+
+        const lineR = await client.query(
+          `INSERT INTO purchase_note_lines
+             (purchase_note_id,line_no,item_id,description,batch_no,
+              qty,unit,rate,amount,tax_pct,tax_amount,total,is_capital)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING *`,
+          [id, i + 1, line.item_id, line.description, line.batch_no,
+           line.qty, line.unit || 'PCS', line.rate, amt, line.tax_pct || 0, taxAmt, lineTotal]
+        );
+
+        const assetCode = await reserveCode('fixed_asset', client, { date: doc_date });
+        const faR = await client.query(
+          `INSERT INTO fixed_assets
+             (asset_code,asset_name,category_id,purchase_note_id,purchase_note_line_id,
+              vendor_id,purchase_date,in_service_date,purchase_cost,salvage_value,created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,0,$9) RETURNING *`,
+          [assetCode, item.name, item.fixed_asset_category_id, id, lineR.rows[0].id,
+           vendor_id || null, doc_date, amt, req.user.id]
+        );
+        createdAssets.push(faR.rows[0]);
+        insertedLines.push(lineR.rows[0]);
+      } else {
+        let lotNumber, lotCode;
+        if (isSeedItem(item)) {
+          lotCode   = await nextPurchaseLotCode(client);
+          lotNumber = lotCode;
+        } else {
+          const catPrefix = item.category === 'gas' ? 'GAS' : 'CON';
+          lotNumber = `${catPrefix}-${docNumber.replace('PN-', '')}-${i + 1}`;
+          lotCode   = null;
+        }
+
+        const isSeed = isSeedItem(item);
+        const dimLength = isSeed && line.dim_length !== '' && line.dim_length != null ? parseFloat(line.dim_length) : null;
+        const dimDepth  = isSeed && line.dim_depth  !== '' && line.dim_depth  != null ? parseFloat(line.dim_depth)  : null;
+        const dimHeight = isSeed && line.dim_height !== '' && line.dim_height != null ? parseFloat(line.dim_height) : null;
+        const dimUnit   = isSeed ? (line.dim_unit || 'mm') : null;
+
+        const lotOpId = await nextLotOpId(client);
+
+        const invR = await client.query(
+          `INSERT INTO inventory
+             (item_id,lot_number,lot_name,batch_no,qty,unit,weight,rate,total_value,
+              location_id,department_id,vendor_id,purchase_date,status,remarks,
+              lot_code,operation_type,split_level,lot_op_id,dim_length,dim_depth,dim_height,dim_unit,
+              source_module)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'IN STOCK',$14,
+                   $15,'purchase',0,$16,$17,$18,$19,$20,
+                   'Purchase Notes') RETURNING id`,
+          [line.item_id, lotNumber, `${item.code}-${lotNumber}`, line.batch_no,
+           line.qty, line.unit || 'PCS', parseFloat(line.weight) || 0, line.rate, amt,
+           line.location_id || null, department_id || null, vendor_id || null, doc_date,
+           line.description, lotCode, lotOpId, dimLength, dimDepth, dimHeight, dimUnit]
+        );
+
+        if (isSeedItem(item)) {
+          const newId = invR.rows[0].id;
+          await client.query('UPDATE inventory SET root_lot_id = $1, genealogy_path = $2 WHERE id = $1', [newId, lotCode]);
+        }
+
+        const lineR = await client.query(
+          `INSERT INTO purchase_note_lines
+             (purchase_note_id,line_no,item_id,description,batch_no,
+              qty,unit,rate,amount,tax_pct,tax_amount,total,inventory_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+          [id, i + 1, line.item_id, line.description, line.batch_no,
+           line.qty, line.unit || 'PCS', line.rate, amt, line.tax_pct || 0, taxAmt, lineTotal, invR.rows[0].id]
+        );
+        insertedLines.push(lineR.rows[0]);
+
+        const invAccId = await FinancialMappingService.resolveInventoryAccount(item.category, client);
+        drAccountMap[invAccId] = Math.round(((drAccountMap[invAccId] || 0) + amt) * 100) / 100;
+        await applyPurchase(client, line.item_id, line.qty, line.rate, amt);
+      }
+    }
+
+    const vendorNameR = vendor_id ? await client.query('SELECT name FROM vendors WHERE id=$1', [vendor_id]) : { rows: [{ name: 'Unknown Vendor' }] };
+    if (vendor_id && !vendorNameR.rows[0]) throw new Error(`Vendor ID ${vendor_id} not found`);
+
+    const jeLines = await buildPurchaseJournal({
+      client,
+      docNumber,
+      date: doc_date,
+      vendorName: vendorNameR.rows[0]?.name,
+      itemType: item_type,
+      debitLines: Object.entries(drAccountMap).map(([accId, amount]) => ({ accountId: parseInt(accId), amount })),
+      taxAmount,
+      grandTotal,
+      globalCostCenterId: costCenterId
+    });
+
+    const je = await journalEngine.createEntry({
+      date: doc_date,
+      description: `Purchase Note ${docNumber} - ${item_type} (Edited)`,
+      sourceType: 'purchase',
+      sourceId: id,
+      lines: jeLines,
+      autoPost: true,
+      createdBy: req.user.id,
+      client,
+    });
+
+    await client.query('UPDATE purchase_notes SET je_id = $1 WHERE id = $2', [je.id, id]);
+    await client.query('COMMIT');
+
+    res.status(200).json({
+      ...pn, doc_number: docNumber, lines: insertedLines, je_number: je.je_number,
+      capital_assets: createdAssets, capital_assets_count: createdAssets.length,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

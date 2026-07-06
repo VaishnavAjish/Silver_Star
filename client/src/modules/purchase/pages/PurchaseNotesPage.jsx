@@ -202,7 +202,10 @@ export function PurchaseNoteForm() {
   const api = useApi();
   const navigate = useNavigate();
   const { id } = useParams();
-  const isView = !!id;
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole('super_admin', 'admin');
+  const isExisting = !!id;
+  const isView = isExisting && !isAdmin;
 
   const [vendors, setVendors] = useState([]);
   const [items, setItems] = useState([]);
@@ -211,7 +214,7 @@ export function PurchaseNoteForm() {
   const [cats, setCats] = useState([]);
   const [saving, setSaving] = useState(false);
   const [viewData, setViewData] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(isView);
+  const [detailLoading, setDetailLoading] = useState(isExisting);
 
   const [form, setForm] = useState({
     doc_date: new Date().toISOString().split('T')[0],
@@ -236,7 +239,7 @@ export function PurchaseNoteForm() {
     api.get('/api/departments?limit=200').then(r => { if (!ignore) setDepts(r.data || []) }).catch(() => { });
     api.get('/api/cost-centers').then(r => { if (!ignore) setCostCenters(r.data || []) }).catch(() => { });
     api.get('/api/fixed-asset-categories').then(r => { if (!ignore) setCats(r.data || []) }).catch(() => { });
-    if (isView) {
+    if (isExisting) {
       setDetailLoading(true);
       api.get(`/api/purchase-notes/${id}`).then(data => {
         if (ignore) return;
@@ -325,9 +328,11 @@ export function PurchaseNoteForm() {
     if (!form.vendor_id) return toast.error('Select a vendor');
     setSaving(true);
     try {
-      const r = await api.post('/api/purchase-notes', { ...form, lines: validLines });
+      const r = isExisting
+        ? await api.put(`/api/purchase-notes/${id}`, { ...form, lines: validLines })
+        : await api.post('/api/purchase-notes', { ...form, lines: validLines });
       const assetMsg = r.capital_assets_count > 0 ? ` ${r.capital_assets_count} fixed asset(s) created.` : ' Inventory updated.';
-      toast.success(`Purchase Note created!${assetMsg} JE posted.`);
+      toast.success(isExisting ? `Purchase Note updated!${assetMsg} JE reposted.` : `Purchase Note created!${assetMsg} JE posted.`);
       if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
       else navigate('/purchase-notes');
     } catch (err) {
@@ -337,7 +342,7 @@ export function PurchaseNoteForm() {
     }
   };
 
-  const docTitle = isView ? `Purchase Note: ${viewData?.doc_number || '…'}` : 'New Purchase Note';
+  const docTitle = isExisting ? `Purchase Note: ${viewData?.doc_number || '…'}` : 'New Purchase Note';
   const badge = viewData ? { label: viewData.status, className: `b-${viewData.status}` } : undefined;
 
   return (
