@@ -163,6 +163,7 @@ export function PurchaseNotesPage() {
         fetchExportData={fetchExportData}
         columns={[
           { key: 'doc_number', label: 'Doc ID', width: 100, render: v => <span className="cell-link">{v}</span> },
+          { key: 'reference_no', label: 'Ref No', width: 120 },
           { key: 'je_number', label: 'JE ID', width: 100 },
           { key: 'doc_date', label: 'Date', width: 100, render: v => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
           { key: 'vendor_name', label: 'Vendor' },

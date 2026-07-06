@@ -94,6 +94,7 @@ export const VendorBillsPage = () => {
         storageKey="vendor_bills_cols"
         columns={[
           { key: 'doc_number', label: 'Bill No', width: 110, sticky: true, render: (v, r) => <Link to={`/bills/${r.id}`} className="cell-link">{v}</Link> },
+          { key: 'reference_no', label: 'Ref No', width: 120 },
           { key: 'doc_date',   label: 'Date',    width: 90,  render: v => fmtDate(v) },
           { key: 'vendor_name',label: 'Vendor',  width: 180 },
           { key: 'grand_total',label: 'Amount (₹)', width: 110, numeric: true, render: v => `₹${fmt(v)}` },
