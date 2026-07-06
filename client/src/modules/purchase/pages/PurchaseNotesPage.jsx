@@ -334,7 +334,8 @@ export function PurchaseNoteForm() {
       const assetMsg = r.capital_assets_count > 0 ? ` ${r.capital_assets_count} fixed asset(s) created.` : ' Inventory updated.';
       toast.success(isExisting ? `Purchase Note updated!${assetMsg} JE reposted.` : `Purchase Note created!${assetMsg} JE posted.`);
       if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else navigate('/purchase-notes');
+      else if (action === 'close') navigate('/purchase-notes');
+      else if (action === 'save' && !isExisting) navigate(`/purchase-notes/${r.id}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -367,6 +368,9 @@ export function PurchaseNoteForm() {
           left={<button className="btn" onClick={() => navigate('/purchase-notes')}>Cancel</button>}
           right={
             <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('save')} disabled={saving} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
               <button className="btn" onClick={() => handleSave('new')} disabled={saving} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
                 {saving ? 'Saving…' : 'Save & New'}
               </button>

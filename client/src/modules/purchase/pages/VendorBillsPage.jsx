@@ -236,12 +236,13 @@ export const VendorBillForm = () => {
         await api.put(`/api/expense-bills/${id}`, { ...form, lines: validLines });
         toast.success('Bill updated');
         if (action === 'new') window.location.href = '/bills/new';
-        else navigate('/bills');
+        else if (action === 'close') navigate('/bills');
       } else {
-        await api.post('/api/expense-bills', { ...form, lines: validLines });
+        const res = await api.post('/api/expense-bills', { ...form, lines: validLines });
         toast.success('Bill saved');
         if (action === 'new') window.location.href = '/bills/new';
-        else navigate('/bills');
+        else if (action === 'close') navigate('/bills');
+        else if (action === 'save') navigate(`/bills/${res.id}`);
       }
     } catch (err) {
       toast.error(err.message || 'Failed to save bill');
@@ -294,6 +295,9 @@ export const VendorBillForm = () => {
           ) : undefined}
           right={
             <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('save')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {loading ? 'Posting...' : 'Save'}
+              </button>
               <button className="btn" onClick={() => handleSave('new')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
                 {loading ? 'Posting...' : 'Save & New'}
               </button>
