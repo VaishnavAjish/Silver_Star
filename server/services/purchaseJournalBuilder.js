@@ -26,6 +26,15 @@ async function buildPurchaseJournal({
 }) {
   const jeLines = [];
 
+  const rawDebits = debitLines.reduce((sum, line) => sum + line.amount, 0);
+  const roundedGST = Math.round(taxAmount * 100) / 100;
+  const roundedGrandTotal = Math.round(grandTotal * 100) / 100;
+  const diff = roundedGrandTotal - (rawDebits + roundedGST);
+  
+  if (Math.abs(diff) > 0.001 && debitLines.length > 0) {
+    debitLines[0].amount = Math.round((debitLines[0].amount + diff) * 100) / 100;
+  }
+
   // 1. Debit lines (Inventory, Expense, Asset, etc.)
   for (const line of debitLines) {
     jeLines.push({

@@ -49,7 +49,7 @@ function calculateDocumentGST(lines) {
     lines: processedLines,
     totalTaxable,
     totalTax,
-    grandTotal: totalTaxable + totalTax
+    grandTotal: Math.round(totalTaxable + totalTax)
   };
 }
 
