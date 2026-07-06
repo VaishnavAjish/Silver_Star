@@ -11,8 +11,8 @@ async function migrateSidebarPermissions() {
     // Grant sidebar permission (1024) to any role that currently has view permission (1)
     const query = `
       UPDATE role_permissions 
-      SET permission_bitmask = permission_bitmask | 1024 
-      WHERE (permission_bitmask & 1) = 1;
+      SET permissions = permissions | 1024 
+      WHERE (permissions & 1) = 1;
     `;
     
     const result = await client.query(query);
