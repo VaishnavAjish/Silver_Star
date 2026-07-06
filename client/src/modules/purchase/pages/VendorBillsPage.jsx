@@ -225,7 +225,7 @@ export const VendorBillForm = () => {
     setShowVendorModal(false);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (action = 'close') => {
     if (!form.doc_date || !form.vendor_id) return toast.error('Date and Vendor are required');
     const validLines = lines.filter(l => l.expense_account_id && parseFloat(l.amount) > 0);
     if (validLines.length === 0) return toast.error('At least one valid line is required (Category and Amount > 0)');
@@ -235,11 +235,13 @@ export const VendorBillForm = () => {
       if (isEdit) {
         await api.put(`/api/expense-bills/${id}`, { ...form, lines: validLines });
         toast.success('Bill updated');
-        navigate('/bills');
+        if (action === 'new') window.location.href = '/bills/new';
+        else navigate('/bills');
       } else {
         await api.post('/api/expense-bills', { ...form, lines: validLines });
         toast.success('Bill saved');
-        navigate('/bills');
+        if (action === 'new') window.location.href = '/bills/new';
+        else navigate('/bills');
       }
     } catch (err) {
       toast.error(err.message || 'Failed to save bill');
@@ -291,9 +293,14 @@ export const VendorBillForm = () => {
             </span>
           ) : undefined}
           right={
-            <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
-              <Save size={13} /> {loading ? 'Posting...' : 'Save & Post JE'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('new')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {loading ? 'Posting...' : 'Save & New'}
+              </button>
+              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={loading}>
+                <Save size={13} /> {loading ? 'Posting...' : 'Save & Post JE'}
+              </button>
+            </div>
           }
         />
       )}

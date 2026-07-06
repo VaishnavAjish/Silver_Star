@@ -234,9 +234,8 @@ export default function PaymentEntryPage() {
         : `Payment ${result.doc_number} posted! JE: ${result.je_number}`
       );
 
-      if (action === 'close')     navigate(-1);
-      else if (action === 'new')  resetForm();
-      // 'stay': do nothing — form stays visible
+      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+      else navigate(-1);
     } catch (err) {
       toast.error(err.error || err.message || 'Failed to save payment');
     } finally {
@@ -321,17 +320,23 @@ export default function PaymentEntryPage() {
             <button className="btn" onClick={handleBack} disabled={isSaving}>Cancel</button>
           }
           right={
-            <>
-              <button className="btn" onClick={() => handleSave('new')} disabled={isSaving}>
-                {saving === 'new' ? 'Posting…' : 'Save & New'}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn"
+                onClick={() => handleSave('new')}
+                disabled={isSaving}
+                style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}
+              >
+                {isSaving ? 'Processing…' : 'Save & New'}
               </button>
-              <button className="btn" onClick={() => handleSave('stay')} disabled={isSaving}>
-                {saving === 'stay' ? 'Posting…' : 'Save'}
+              <button
+                className="btn btn-primary"
+                onClick={() => handleSave('close')}
+                disabled={isSaving}
+              >
+                <Save size={13} /> {isSaving ? 'Processing…' : editMode ? 'Update & Close' : 'Save & Close'}
               </button>
-              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={isSaving}>
-                {saving === 'close' ? 'Posting…' : 'Save & Close'}
-              </button>
-            </>
+            </div>
           }
         />
       }

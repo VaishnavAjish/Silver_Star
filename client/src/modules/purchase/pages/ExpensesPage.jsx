@@ -480,7 +480,7 @@ export function ExpenseForm() {
     return null;
   };
 
-  const handleSave = async () => {
+  const handleSave = async (action = 'close') => {
     const err = validate();
     if (err) return toast.error(err);
     setSaving(true);
@@ -509,7 +509,8 @@ export function ExpenseForm() {
       };
       const result = await api.post('/api/expenses', payload);
       toast.success(`Expense ${result.doc_number} posted! JE: ${result.je_number}`);
-      navigate('/expenses');
+      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+      else navigate('/expenses');
     } catch (err) {
       toast.error(err.error || err.message || 'Failed to save expense');
     } finally {
@@ -599,9 +600,14 @@ export function ExpenseForm() {
             </span>
           ) : undefined}
           right={
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || overAllocated}>
-              <Save size={13} /> {saving ? 'Posting…' : 'Save & Post JE'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('new')} disabled={saving || overAllocated} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {saving ? 'Posting…' : 'Save & New'}
+              </button>
+              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving || overAllocated}>
+                <Save size={13} /> {saving ? 'Posting…' : 'Save & Post JE'}
+              </button>
+            </div>
           }
         />
       }

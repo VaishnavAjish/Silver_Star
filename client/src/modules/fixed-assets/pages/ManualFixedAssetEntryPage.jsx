@@ -473,7 +473,7 @@ export default function ManualFixedAssetEntry() {
     ];
   }, [selectedCat, form.purchase_cost]);
 
-  const handleSave = async () => {
+  const handleSave = async (action = 'close') => {
     if (!form.asset_name)    return toast.error('Asset name required — select a template or enter manually');
     if (!form.category_id)   return toast.error('Asset category required');
     if (!form.purchase_cost) return toast.error('Purchase cost required');
@@ -485,11 +485,13 @@ export default function ManualFixedAssetEntry() {
       if (isEditing) {
         const r = await patch(`/api/fixed-assets/${id}`, form);
         toast.success(`Asset ${r.asset_code} updated`);
-        navigate(`/assets/${id}`);
+        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/manual');
+        else navigate(`/assets/${id}`);
       } else {
         const r = await post('/api/fixed-assets', form);
         toast.success(`Asset ${r.asset_code} created — JE ${r.je_number} posted`);
-        navigate('/assets');
+        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/manual');
+        else navigate('/assets');
       }
     } catch (err) {
       toast.error(err.message || (isEditing ? 'Failed to update asset' : 'Failed to create asset'));
@@ -915,9 +917,14 @@ export default function ManualFixedAssetEntry() {
             </button>
           )}
         </div>
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          <Save size={13} /> {saving ? 'Saving…' : (isEditing ? 'Update Asset' : 'Save Changes')}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => handleSave('new')} disabled={saving} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+            {saving ? 'Saving…' : 'Save & New'}
+          </button>
+          <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving}>
+            <Save size={13} /> {saving ? 'Saving…' : (isEditing ? 'Update & Close' : 'Save & Close')}
+          </button>
+        </div>
       </div>
 
       {showVendorModal && (

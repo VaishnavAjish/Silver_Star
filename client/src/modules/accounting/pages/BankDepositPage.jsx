@@ -132,7 +132,7 @@ export default function BankDepositPage() {
     return lines.some(l => l.account_id && parseFloat(l.amount) > 0);
   }, [form, lines]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (action = 'close') => {
     if (!form.date)           { toast.error('Date is required'); return; }
     if (!form.bank_account_id){ toast.error('Bank account is required'); return; }
     const validLines = lines.filter(l => l.account_id && parseFloat(l.amount) > 0);
@@ -159,11 +159,14 @@ export default function BankDepositPage() {
       if (editMode) {
         await api.put(`/api/bank-deposits/${depositId}`, payload);
         toast.success('Deposit updated');
+        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+        else navigate('/bank-deposits');
       } else {
         const res = await api.post('/api/bank-deposits', payload);
         toast.success(`Deposit saved — ${res.je_number || 'JE posted'}`);
+        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+        else navigate('/bank-deposits');
       }
-      navigate('/bank-deposits');
     } catch (err) {
       toast.error(err.message || 'Failed to save bank deposit');
     } finally {
@@ -260,13 +263,23 @@ export default function BankDepositPage() {
               </>
             }
             right={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn"
+                onClick={() => handleSubmit('new')}
+                disabled={saving || !canEdit() || !isValid}
+                style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}
+              >
+                {saving ? 'Saving…' : 'Save & New'}
+              </button>
               <button
                 className="btn btn-primary"
-                onClick={handleSubmit}
+                onClick={() => handleSubmit('close')}
                 disabled={saving || !canEdit() || !isValid}
               >
-                {saving ? 'Saving…' : editMode ? 'Update Deposit' : 'Save & Post JE'}
+                {saving ? 'Saving…' : editMode ? 'Update & Close' : 'Save & Close'}
               </button>
+            </div>
             }
           />
         }

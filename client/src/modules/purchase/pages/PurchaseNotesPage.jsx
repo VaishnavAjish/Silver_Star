@@ -319,7 +319,7 @@ export function PurchaseNoteForm() {
 
   const filteredItems = items.filter(i => i.is_capital_asset || !form.item_type || i.category === form.item_type);
 
-  const handleSave = async () => {
+  const handleSave = async (action = 'close') => {
     const validLines = lines.filter(l => l.item_id && l.qty && l.rate);
     if (validLines.length === 0) return toast.error('Add at least one line item');
     if (!form.vendor_id) return toast.error('Select a vendor');
@@ -328,7 +328,8 @@ export function PurchaseNoteForm() {
       const r = await api.post('/api/purchase-notes', { ...form, lines: validLines });
       const assetMsg = r.capital_assets_count > 0 ? ` ${r.capital_assets_count} fixed asset(s) created.` : ' Inventory updated.';
       toast.success(`Purchase Note created!${assetMsg} JE posted.`);
-      navigate('/purchase-notes');
+      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+      else navigate('/purchase-notes');
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -360,9 +361,14 @@ export function PurchaseNoteForm() {
         <StickyActionFooter
           left={<button className="btn" onClick={() => navigate('/purchase-notes')}>Cancel</button>}
           right={
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              <Save size={13} /> {saving ? 'Saving…' : 'Save & Post JE'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('new')} disabled={saving} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {saving ? 'Saving…' : 'Save & New'}
+              </button>
+              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving}>
+                <Save size={13} /> {saving ? 'Saving…' : 'Save & Post JE'}
+              </button>
+            </div>
           }
         />
       )}

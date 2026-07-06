@@ -260,7 +260,7 @@ export function InvoiceForm() {
   const grossProfit = subTotal - totalCogs;
 
   // ── Save ────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
+  const handleSave = async (action = 'close') => {
     if (!form.customer_id) return toast.error('Select a customer');
     const validLines = lines.filter(l => parseFloat(l.weight) > 0 && parseFloat(l.rate_per_carat) > 0);
     if (validLines.length === 0) {
@@ -270,7 +270,8 @@ export function InvoiceForm() {
     try {
       await api.post('/api/invoices', { ...form, lines: validLines });
       toast.success('Invoice created! Revenue + COGS journal entries posted.');
-      navigate('/invoices');
+      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
+      else navigate('/invoices');
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -318,9 +319,14 @@ export function InvoiceForm() {
         <StickyActionFooter
           left={<button className="btn" onClick={() => { if (activeTabId) closeTab(activeTabId); navigate('/invoices'); }}>Cancel</button>}
           right={
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              <Save size={13} /> {saving ? 'Creating…' : 'Save — Post Revenue + COGS'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => handleSave('new')} disabled={saving} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                {saving ? 'Creating…' : 'Save & New'}
+              </button>
+              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={saving}>
+                <Save size={13} /> {saving ? 'Creating…' : 'Save & Post Revenue + COGS'}
+              </button>
+            </div>
           }
         />
       )}
