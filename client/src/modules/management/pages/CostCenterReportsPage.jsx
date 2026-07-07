@@ -297,12 +297,7 @@ function CostCentreReportCategoryTable({ rows }) {
     const ccKey = `${r.cost_center_code} - ${r.cost_center_name}`;
     if (!groupedByCC[ccKey]) groupedByCC[ccKey] = { items: [], total: 0 };
     
-    let category = 'Other Assets / Expenses';
-    const p = r.path || '';
-    if (p.includes('/2000A')) category = 'Fixed Assets';
-    else if (p.includes('/2000')) category = 'Inventory';
-    else if (p.includes('/1000C') || r.type === 'asset') category = 'Other Assets';
-    else if (r.type === 'expense') category = 'Pre-operative Expenses';
+    const category = r.group_name || 'Uncategorized';
     
     r.category = category;
     groupedByCC[ccKey].items.push(r);
@@ -326,7 +321,7 @@ function CostCentreReportCategoryTable({ rows }) {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>
                 <th style={th}>Account</th>
-                <th style={th}>Type</th>
+                <th style={th}>Account Group</th>
                 <th style={{ ...th, textAlign: 'right' }}>Addition (Net)</th>
               </tr></thead>
               <tbody>
@@ -334,7 +329,7 @@ function CostCentreReportCategoryTable({ rows }) {
                   const accountGroups = {};
                   items.forEach(r => {
                     const accKey = `${r.account_code} ${r.account_name}`;
-                    if (!accountGroups[accKey]) accountGroups[accKey] = { type: r.type, net: 0 };
+                    if (!accountGroups[accKey]) accountGroups[accKey] = { group_name: r.group_name || '-', net: 0 };
                     accountGroups[accKey].net += Number(r.net || 0);
                   });
 
@@ -348,7 +343,7 @@ function CostCentreReportCategoryTable({ rows }) {
                       {Object.entries(accountGroups).map(([accName, accData], i) => (
                         <tr key={i}>
                           <td style={td}>{accName}</td>
-                          <td style={td}>{accData.type}</td>
+                          <td style={td}>{accData.group_name}</td>
                           <td style={tdNum}>{money(accData.net)}</td>
                         </tr>
                       ))}

@@ -132,14 +132,16 @@ router.get('/report', authenticate, async (req, res) => {
       query = `
         SELECT cc.code AS cost_center_code, cc.name AS cost_center_name,
                a.code  AS account_code, a.name AS account_name, a.type, a.sub_type, a.path,
+               p.name  AS group_name,
                COALESCE(SUM(jl.debit - jl.credit),0)::numeric AS net
           FROM je_lines jl
           JOIN journal_entries je ON je.id = jl.je_id AND je.status = 'posted'
           JOIN cost_centers    cc ON cc.id = jl.cost_center_id
           JOIN accounts        a  ON a.id  = jl.account_id
+          LEFT JOIN accounts   p  ON p.id  = a.parent_id
          WHERE cc.status = 'active'
            ${ccFilter} ${sqlFilters} ${d.sql}
-         GROUP BY cc.code, cc.name, a.code, a.name, a.type, a.sub_type, a.path
+         GROUP BY cc.code, cc.name, a.code, a.name, a.type, a.sub_type, a.path, p.name
          ORDER BY cc.code, a.path, a.code
       `;
     }
