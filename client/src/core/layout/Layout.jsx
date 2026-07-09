@@ -62,10 +62,11 @@ export const NAV = [
   {
     label: 'Accounting', icon: Building2, module: 'accounting', children: [
       { label: 'Chart of Accounts', path: '/accounts', submodule: 'chart_of_accounts' },
+      { label: 'Journal Entries', path: '/journal-entries', submodule: 'journal_entries' },
       { label: 'Payments', path: '/payments', submodule: 'payments' },
       { label: 'Receipts', path: '/receipts', submodule: 'receipts' },
       { label: 'Bank Deposits', path: '/bank-deposits', submodule: 'bank_deposits' },
-      { label: 'Journal Entries', path: '/journal-entries', submodule: 'journal_entries' },
+      { label: 'Transfers', path: '/transfers', submodule: 'transfers' },
       { label: 'Bank Reconciliation', path: '/reports/bank-reconciliation', submodule: 'bank_reconciliation' },
     ]
   },

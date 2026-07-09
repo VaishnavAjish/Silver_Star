@@ -13,6 +13,8 @@ const PaymentEntryPage    = lazy(() => import('./pages/PaymentEntryPage'));
 const ReceiptEntryPage    = lazy(() => import('./pages/ReceiptEntryPage'));
 const DepreciationRuns    = lazy(() => import('./pages/DepreciationRunsPage'));
 const NewDepreciationRun  = lazy(() => import('./pages/NewDepreciationRunPage'));
+const TransfersListPage   = lazy(() => import('./pages/TransfersListPage'));
+const TransferEntryPage   = lazy(() => import('./pages/TransferEntryPage'));
 
 export default [
   { path: 'accounts',               Component: AccountsPage },
@@ -29,4 +31,7 @@ export default [
   { path: 'receipts/new',           Component: ReceiptEntryPage },
   { path: 'depreciation-runs',      Component: DepreciationRuns },
   { path: 'depreciation-runs/new',  Component: NewDepreciationRun },
+  { path: 'transfers',              Component: TransfersListPage },
+  { path: 'transfers/new',          Component: TransferEntryPage },
+  { path: 'transfers/:id',          Component: TransferEntryPage },
 ];

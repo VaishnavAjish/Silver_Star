@@ -91,6 +91,7 @@ export const MODULE_TREE = [
       { key: 'payments',             label: 'Payments' },
       { key: 'receipts',             label: 'Receipts' },
       { key: 'bank_deposits',        label: 'Bank Deposits' },
+      { key: 'transfers',            label: 'Transfers' },
       { key: 'depreciation_runs',    label: 'Depreciation Runs' },
       { key: 'new_depreciation_run', label: 'New Depreciation Run' },
     ],

@@ -194,12 +194,14 @@ const jobRoutes = require('./routes/jobs');
 const stockTransferRoutes = require('./routes/stockTransfer');
 const roleRoutes = require('./routes/roles');
 const reportingPreferencesRoutes = require('./routes/reportingPreferences');
+const transferRoutes = require('./routes/transfers');
 
 
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountsRoutes);
 // Journal entries: canonical path + legacy alias, single handler via array mount
 app.use(['/api/journal', '/api/journal-entries', '/api/general-ledger'], journalRoutes);
+app.use('/api/transfers', transferRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/inventory', inventoryRoutes);
 // Purchase notes: canonical path + legacy alias
