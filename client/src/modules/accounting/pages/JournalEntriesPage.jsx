@@ -9,7 +9,7 @@ import ColumnSettings from '../../../shared/components/ColumnSettings';
 import ExportMenu from '../../../shared/components/ExportMenu';
 import FilterBar from '../../../shared/components/FilterBar';
 import Paginator from '../../../shared/components/Paginator';
-import { Plus, BookOpen, Eye, Edit3, RotateCcw, Printer, RefreshCw } from 'lucide-react';
+import { Plus, BookOpen, Eye, Edit3, RotateCcw, Printer, RefreshCw, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const JE_PAGE_SIZE = 500;
@@ -89,6 +89,15 @@ export default function JournalEntriesPage() {
     try {
       await api.post(`/api/journal-entries/${row.id}/reverse`, { reason });
       toast.success('Journal entry reversed');
+      load(page, filters);
+    } catch (err) { toast.error(err.message); }
+  }, [api, load, page, filters]);
+
+  const deleteEntry = useCallback(async (row) => {
+    if (!window.confirm(`Are you sure you want to delete ${row.je_number}?`)) return;
+    try {
+      await api.delete(`/api/journal-entries/${row.id}`);
+      toast.success('Journal entry deleted');
       load(page, filters);
     } catch (err) { toast.error(err.message); }
   }, [api, load, page, filters]);
@@ -196,12 +205,13 @@ export default function JournalEntriesPage() {
         <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
           <button className="icon-btn" title="View" onClick={() => navigate(`/journal-entries/${row.id}`)}><Eye size={13} /></button>
           {canEdit() && <button className="icon-btn" title="Edit" onClick={() => navigate(`/journal-entries/${row.id}?mode=edit`)}><Edit3 size={13} /></button>}
+          {canEdit() && <button className="icon-btn" title="Delete" onClick={() => deleteEntry(row)}><Trash2 size={13} /></button>}
           {canEdit() && row.status === 'posted' && <button className="icon-btn" title="Reverse" onClick={() => reverseEntry(row)}><RotateCcw size={13} /></button>}
           <button className="icon-btn" title="Print" onClick={() => handlePrint(row)}><Printer size={13} /></button>
         </div>
       ),
     },
-  ], [canEdit, navigate, reverseEntry, handlePrint]);
+  ], [canEdit, navigate, reverseEntry, deleteEntry, handlePrint]);
 
   const fromRow = total === 0 ? 0 : (page - 1) * JE_PAGE_SIZE + 1;
   const toRow = Math.min(page * JE_PAGE_SIZE, total);
