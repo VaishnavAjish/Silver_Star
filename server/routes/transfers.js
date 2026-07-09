@@ -20,7 +20,7 @@ router.get('/', authenticate, authorize('admin', 'operator', 'viewer'), async (r
       SELECT t.*, 
              fa.name as from_account_name, fa.code as from_account_code,
              ta.name as to_account_name, ta.code as to_account_code,
-             u.name as created_by_name
+             u.full_name as created_by_name
       FROM transfers t
       JOIN accounts fa ON t.from_account_id = fa.id
       JOIN accounts ta ON t.to_account_id = ta.id
