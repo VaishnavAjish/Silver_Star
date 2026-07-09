@@ -98,8 +98,21 @@ export default function TransferEntryPage() {
         const data = await api.post('/api/transfers', payload);
         
         toast.success(`Transfer saved — ${data.transfer_no}`);
-        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-        else navigate('/transfers');
+        if (action === 'new') {
+          setForm({
+            transfer_date: new Date().toISOString().split('T')[0],
+            from_account_id: '',
+            from_account_obj: null,
+            to_account_id: '',
+            to_account_obj: null,
+            amount: '',
+            reference_no: '',
+            memo: '',
+          });
+          if (editMode) navigate('/transfers/new');
+        } else {
+          navigate('/transfers');
+        }
       }
     } catch (err) {
       toast.error(err.message || 'Failed to save transfer');
