@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../core/context/AuthContext';
+import { useApi } from '../../../shared/hooks/useApi';
 import DataGrid from '../../../shared/components/DataGrid';
 import { Plus, Eye, RotateCcw } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getTransfers, reverseTransfer } from '../services/transferService';
 
 const fmt = v => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = d => {
@@ -15,6 +15,7 @@ const fmtDate = d => {
 };
 
 export default function TransfersListPage() {
+  const api = useApi();
   const navigate = useNavigate();
   const { canEdit } = useAuth();
 
@@ -30,13 +31,11 @@ export default function TransfersListPage() {
   const loadTransfers = async (pg = 1) => {
     setLoading(true);
     try {
-      const res = await getTransfers({ page: pg, limit: PAGE_SIZE });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch transfers');
-      setTransfers(data.data || []);
-      setTotal(data.meta?.total || 0);
+      const res = await api.get(`/api/transfers?page=${pg}&limit=${PAGE_SIZE}`);
+      setTransfers(res.data || []);
+      setTotal(res.meta?.total || 0);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to fetch transfers');
     } finally {
       setLoading(false);
     }
@@ -49,13 +48,11 @@ export default function TransfersListPage() {
     if (!window.confirm(`Reverse transfer ${row.transfer_no}? This will create a reversing Journal Entry.`)) return;
     setReversing(row.id);
     try {
-      const res = await reverseTransfer(row.id);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to reverse transfer');
+      await api.delete(`/api/transfers/${row.id}`);
       toast.success('Transfer reversed successfully');
       loadTransfers(page);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to reverse transfer');
     } finally {
       setReversing(null);
     }
@@ -117,9 +114,8 @@ export default function TransfersListPage() {
         exportTitle="Transfers"
         storageKey="transfers_cols"
         fetchExportData={async () => {
-          const r = await getTransfers({ limit: 10000 });
-          const json = await r.json();
-          return json.data || [];
+          const r = await api.get('/api/transfers?limit=10000');
+          return r.data || [];
         }}
         columns={columns}
         data={transfers}

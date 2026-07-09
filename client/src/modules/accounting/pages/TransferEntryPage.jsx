@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../../core/context/AuthContext';
+import { useApi } from '../../../shared/hooks/useApi';
 import DatePicker from '../../../shared/components/DatePicker';
 import { ArrowRightLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import SearchableSelect from '../../../shared/components/SearchableSelect';
-import { getTransfer, createTransfer } from '../services/transferService';
 import {
   TransactionPageLayout, TransactionHeader, StickyActionFooter,
   FormSectionCard, SideSummaryPanel, NotesAttachmentsPanel,
@@ -14,6 +14,7 @@ import {
 const fmt = v => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function TransferEntryPage() {
+  const api = useApi();
   const navigate = useNavigate();
   const { id: transferId } = useParams();
   const editMode = !!transferId;
@@ -36,11 +37,9 @@ export default function TransferEntryPage() {
   useEffect(() => {
     if (!editMode) return;
     setLoading(true);
-    getTransfer(transferId)
+    api.get(`/api/transfers/${transferId}`)
       .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        const tr = data;
+        const tr = res.data || res;
         if (tr.status === 'reversed') {
           toast.error('Cannot edit a reversed transfer.');
           navigate(`/transfers/${transferId}`);
@@ -59,19 +58,17 @@ export default function TransferEntryPage() {
       })
       .catch(err => { toast.error(err.message || 'Failed to load transfer'); navigate('/transfers'); })
       .finally(() => setLoading(false));
-  }, [transferId, navigate, editMode]);
+  }, [transferId, navigate, editMode, api]);
 
   // Exclude groups, revenue, expense, cogs, control, system. Show only postable asset/liab/equity.
-  const searchAccounts = useCallback(async (q, api) => {
+  const searchAccounts = useCallback(async (q) => {
     try {
-      const res = await fetch(`/api/accounts/search?q=${encodeURIComponent(q)}&is_group=false&exclude_sub_types=revenue,expenses,cogs,system,control,accounts_receivable,accounts_payable,inventory&limit=20`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
-      return await res.json();
+      const res = await api.get(`/api/accounts/search?q=${encodeURIComponent(q)}&is_group=false&exclude_sub_types=revenue,expenses,cogs,system,control,accounts_receivable,accounts_payable,inventory&limit=20`);
+      return res.data || res || [];
     } catch(e) {
       return [];
     }
-  }, []);
+  }, [api]);
 
   const handleFromSelect = (obj) => setForm(p => ({ ...p, from_account_obj: obj, from_account_id: obj ? String(obj.id) : '' }));
   const handleToSelect = (obj) => setForm(p => ({ ...p, to_account_obj: obj, to_account_id: obj ? String(obj.id) : '' }));
@@ -98,9 +95,7 @@ export default function TransferEntryPage() {
           reference_no: form.reference_no,
           memo: form.memo,
         };
-        const res = await createTransfer(payload);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        const data = await api.post('/api/transfers', payload);
         
         toast.success(`Transfer saved — ${data.transfer_no}`);
         if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
