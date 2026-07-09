@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS transfers (
   cost_center_id INTEGER REFERENCES cost_centers(id),
   attachment VARCHAR(255),
   status VARCHAR(20) DEFAULT 'posted',
-  je_id INTEGER REFERENCES journal_entries(id) ON DELETE SET NULL,
+  je_id INTEGER,
   created_by INTEGER REFERENCES users(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
