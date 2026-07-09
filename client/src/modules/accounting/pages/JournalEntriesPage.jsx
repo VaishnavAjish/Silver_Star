@@ -96,7 +96,7 @@ export default function JournalEntriesPage() {
   const deleteEntry = useCallback(async (row) => {
     if (!window.confirm(`Are you sure you want to delete ${row.je_number}?`)) return;
     try {
-      await api.delete(`/api/journal-entries/${row.id}`);
+      await api.del(`/api/journal-entries/${row.id}`);
       toast.success('Journal entry deleted');
       load(page, filters);
     } catch (err) { toast.error(err.message); }
