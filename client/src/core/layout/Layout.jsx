@@ -114,7 +114,7 @@ export const NAV = [
 const ROOT_PATHS = new Set([
   '/', '/inventory', '/invoices', '/purchase-notes', '/expenses',
   '/rough-growth', '/accounts', '/journal-entries',
-  '/payments', '/receipts', '/bank-deposits', '/depreciation-runs',
+  '/payments', '/receipts', '/bank-deposits', '/depreciation-runs', '/transfers',
   '/lot-movements', '/inventory/process-issues',
   '/vendors', '/customers', '/assets',
   '/ledger', '/trial-balance', '/pnl', '/costing', '/balance-sheet',
@@ -244,6 +244,7 @@ function LayoutInner() {
     '/asset-templates': 'Asset Templates',
     '/assets': 'Fixed Assets', '/assets/new': 'Manual Asset Entry',
     '/depreciation-runs': 'Depreciation Runs', '/depreciation-runs/new': 'New Depreciation Run',
+    '/transfers': 'Transfers', '/transfers/new': 'New Transfer',
     '/reports/fixed-asset-register': 'Fixed Asset Register',
     '/reports/depreciation-schedule': 'Depreciation Schedule',
     '/reports/accounts-receivable': 'Accounts Receivable',
