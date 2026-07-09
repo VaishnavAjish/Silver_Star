@@ -453,11 +453,11 @@ router.post('/:id/reverse', authenticate, authorize('admin', 'operator'), async 
   } finally { client.release(); }
 });
 
-// DELETE /api/journal-entries/:id (draft only)
+// DELETE /api/journal-entries/:id
 router.delete('/:id', authenticate, authorize('admin', 'operator'), async (req, res) => {
   try {
-    const result = await pool.query("DELETE FROM journal_entries WHERE id = $1 AND status = 'draft' RETURNING id", [req.params.id]);
-    if (!result.rows.length) return res.status(400).json({ error: 'Only draft entries can be deleted' });
+    const result = await pool.query("DELETE FROM journal_entries WHERE id = $1 RETURNING id", [req.params.id]);
+    if (!result.rows.length) return res.status(400).json({ error: 'Journal entry not found' });
     dispatchEvent('journal.deleted', { id: parseInt(req.params.id) });
     res.json({ success: true });
   } catch (err) {

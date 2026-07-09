@@ -205,7 +205,7 @@ export default function JournalEntriesPage() {
         <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
           <button className="icon-btn" title="View" onClick={() => navigate(`/journal-entries/${row.id}`)}><Eye size={13} /></button>
           {canEdit() && <button className="icon-btn" title="Edit" onClick={() => navigate(`/journal-entries/${row.id}?mode=edit`)}><Edit3 size={13} /></button>}
-          {canEdit() && row.status === 'draft' && <button className="icon-btn" title="Delete" onClick={() => deleteEntry(row)}><Trash2 size={13} /></button>}
+          {canEdit() && <button className="icon-btn" title="Delete" onClick={() => deleteEntry(row)}><Trash2 size={13} /></button>}
           {canEdit() && row.status === 'posted' && <button className="icon-btn" title="Reverse" onClick={() => reverseEntry(row)}><RotateCcw size={13} /></button>}
           <button className="icon-btn" title="Print" onClick={() => handlePrint(row)}><Printer size={13} /></button>
         </div>
