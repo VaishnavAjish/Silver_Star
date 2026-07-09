@@ -336,7 +336,7 @@ export default function ReceiptEntryPage() {
                 onClick={() => handleSave('close')}
                 disabled={isSaving}
               >
-                <Save size={13} /> {isSaving ? 'Processing…' : editMode ? 'Update & Close' : 'Save & Close'}
+                <Save size={13} /> {isSaving ? 'Processing…' : 'Save & Close'}
               </button>
             </div>
           }
