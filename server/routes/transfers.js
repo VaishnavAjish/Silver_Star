@@ -81,8 +81,8 @@ router.get('/:id', authenticate, authorize('admin', 'operator', 'viewer'), async
     const { id } = req.params;
     const result = await pool.query(`
       SELECT t.*, 
-             fa.name as from_account_name, fa.code as from_account_code, fa.current_balance as from_account_balance,
-             ta.name as to_account_name, ta.code as to_account_code, ta.current_balance as to_account_balance,
+             fa.name as from_account_name, fa.code as from_account_code, fa.balance as from_account_balance,
+             ta.name as to_account_name, ta.code as to_account_code, ta.balance as to_account_balance,
              d.name as department_name, c.name as cost_center_name
       FROM transfers t
       JOIN accounts fa ON t.from_account_id = fa.id
