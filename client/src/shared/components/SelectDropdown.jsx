@@ -51,7 +51,7 @@ export default function SelectDropdown({
     });
 
   const realCount  = options.filter(o => o.value !== '' && o.value != null).length;
-  const showSearch = realCount > 3; // Enable search if there are more than 3 options
+  const showSearch = true; // Always enable search so users can quickly type
 
   const idPrefix = useId();
 
@@ -276,6 +276,7 @@ export default function SelectDropdown({
                 <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#bbb', pointerEvents: 'none' }} />
                 <input
                   ref={searchRef}
+                  autoFocus
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
