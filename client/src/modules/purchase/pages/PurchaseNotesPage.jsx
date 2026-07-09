@@ -334,9 +334,15 @@ export function PurchaseNoteForm() {
         : await api.post('/api/purchase-notes', { ...form, lines: validLines });
       const assetMsg = r.capital_assets_count > 0 ? ` ${r.capital_assets_count} fixed asset(s) created.` : ' Inventory updated.';
       toast.success(isExisting ? `Purchase Note updated!${assetMsg} JE reposted.` : `Purchase Note created!${assetMsg} JE posted.`);
-      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else if (action === 'close') navigate('/purchase-notes');
-      else if (action === 'save' && !isExisting) navigate(`/purchase-notes/${r.id}`);
+      if (action === 'new') {
+        setForm({ doc_date: new Date().toISOString().split('T')[0], vendor_id: '', reference_no: '', remark: '' });
+        setLines([{ ...INITIAL_LINE }]);
+        navigate('/purchase-notes/new');
+      } else if (action === 'close') {
+        navigate('/purchase-notes');
+      } else if (action === 'save' && !isExisting) {
+        navigate(`/purchase-notes/${r.id}`);
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {

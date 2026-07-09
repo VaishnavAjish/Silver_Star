@@ -234,8 +234,13 @@ export default function PaymentEntryPage() {
         : `Payment ${result.doc_number} posted! JE: ${result.je_number}`
       );
 
-      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else navigate(-1);
+      if (action === 'new') {
+        setForm(blankForm(fromVendorId));
+        setPaymentAmount('');
+        setAllocations([]);
+        setManualLines([newManualLine()]);
+        if (editMode) navigate('/payments/new');
+      } else navigate('/payments');
     } catch (err) {
       toast.error(err.error || err.message || 'Failed to save payment');
     } finally {

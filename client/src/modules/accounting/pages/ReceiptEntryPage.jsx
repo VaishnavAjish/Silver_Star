@@ -236,8 +236,13 @@ export default function ReceiptEntryPage() {
 
       const result = await api.post('/api/receipts', payload);
       toast.success(editMode ? 'Receipt updated!' : 'Receipt posted!');
-      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else navigate(-1);
+      if (action === 'new') {
+        setForm(blankForm());
+        setReceiptAmount('');
+        setAllocations([]);
+        setManualLines([newManualLine()]);
+        if (editMode) navigate('/receipts/new');
+      } else navigate('/receipts');
     } catch (err) {
       toast.error(err.message || 'Failed to save receipt');
     } finally {

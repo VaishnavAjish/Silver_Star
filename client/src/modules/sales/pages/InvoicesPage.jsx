@@ -270,8 +270,13 @@ export function InvoiceForm() {
     try {
       await api.post('/api/invoices', { ...form, lines: validLines });
       toast.success('Invoice created! Revenue + COGS journal entries posted.');
-      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else navigate('/invoices');
+      if (action === 'new') {
+        setForm({ date: today(), due_date: today(), customer_id: '', payment_term: 'Net 30', reference_no: '', memo: '' });
+        setLines([blankLine()]);
+        if (editMode) navigate('/invoices/new');
+      } else {
+        navigate('/invoices');
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {

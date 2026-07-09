@@ -509,8 +509,14 @@ export function ExpenseForm() {
       };
       const result = await api.post('/api/expenses', payload);
       toast.success(`Expense ${result.doc_number} posted! JE: ${result.je_number}`);
-      if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-      else navigate('/expenses');
+      if (action === 'new') {
+        setForm({ date: today(), vendor_id: '', payment_account_id: '', payment_mode: 'Bank Transfer', reference_no: '', memo: '' });
+        setLines([newLine()]);
+        setAllocations([]);
+        if (editMode) navigate('/expenses/new');
+      } else {
+        navigate('/expenses');
+      }
     } catch (err) {
       toast.error(err.error || err.message || 'Failed to save expense');
     } finally {

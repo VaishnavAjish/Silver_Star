@@ -485,13 +485,17 @@ export default function ManualFixedAssetEntry() {
       if (isEditing) {
         const r = await patch(`/api/fixed-assets/${id}`, form);
         toast.success(`Asset ${r.asset_code} updated`);
-        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/manual');
-        else navigate(`/assets/${id}`);
+        if (action === 'new') {
+          setForm({ template_id: '', asset_name: '', category_id: '', serial_no: '', model_no: '', brand: '', manufacturer: '', asset_tag: '', condition: 'new', qty: '1', uom_id: '', vendor_id: '', invoice_no: '', purchase_date: today, in_service_date: today, invoice_date: today, installation_date: '', warranty_expiry: '', taxable_value: '', gst_rate: '18', gst_type: 'intra', cgst_amount: '0', sgst_amount: '0', igst_amount: '0', gst_treatment: 'non_claimable', gst_claimable_amount: '0', gst_non_claimable_amount: '0', total_invoice_value: '', purchase_cost: '', salvage_value: '0', accumulated_depreciation: '0', location_id: '', department_id: '', custodian: '', remarks: '', cost_center_id: '' });
+          if (isEditing) navigate('/assets/manual');
+        } else navigate(`/assets/${id}`);
       } else {
         const r = await post('/api/fixed-assets', form);
         toast.success(`Asset ${r.asset_code} created — JE ${r.je_number} posted`);
-        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/manual');
-        else navigate('/assets');
+        if (action === 'new') {
+          setForm({ template_id: '', asset_name: '', category_id: '', serial_no: '', model_no: '', brand: '', manufacturer: '', asset_tag: '', condition: 'new', qty: '1', uom_id: '', vendor_id: '', invoice_no: '', purchase_date: today, in_service_date: today, invoice_date: today, installation_date: '', warranty_expiry: '', taxable_value: '', gst_rate: '18', gst_type: 'intra', cgst_amount: '0', sgst_amount: '0', igst_amount: '0', gst_treatment: 'non_claimable', gst_claimable_amount: '0', gst_non_claimable_amount: '0', total_invoice_value: '', purchase_cost: '', salvage_value: '0', accumulated_depreciation: '0', location_id: '', department_id: '', custodian: '', remarks: '', cost_center_id: '' });
+          if (isEditing) navigate('/assets/manual');
+        } else navigate('/assets');
       }
     } catch (err) {
       toast.error(err.message || (isEditing ? 'Failed to update asset' : 'Failed to create asset'));

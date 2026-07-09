@@ -159,13 +159,19 @@ export default function BankDepositPage() {
       if (editMode) {
         await api.put(`/api/bank-deposits/${depositId}`, payload);
         toast.success('Deposit updated');
-        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-        else navigate('/bank-deposits');
+        if (action === 'new') {
+          setForm({ date: new Date().toISOString().split('T')[0], bank_account_obj: null, bank_account_id: '', memo: '' });
+          setLines([emptyLine()]);
+          navigate('/bank-deposits/new');
+        } else navigate('/bank-deposits');
       } else {
         const res = await api.post('/api/bank-deposits', payload);
         toast.success(`Deposit saved — ${res.je_number || 'JE posted'}`);
-        if (action === 'new') window.location.href = window.location.pathname.replace(/\/[^/]+(\/edit)?$/, '/new');
-        else navigate('/bank-deposits');
+        if (action === 'new') {
+          setForm({ date: new Date().toISOString().split('T')[0], bank_account_obj: null, bank_account_id: '', memo: '' });
+          setLines([emptyLine()]);
+          if (editMode) navigate('/bank-deposits/new');
+        } else navigate('/bank-deposits');
       }
     } catch (err) {
       toast.error(err.message || 'Failed to save bank deposit');
