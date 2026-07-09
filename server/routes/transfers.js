@@ -151,13 +151,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     // For a transfer: Debit the TO account, Credit the FROM account
     const jeLines = [
       {
-        account_id: to_account_id, // Debit
+        accountId: to_account_id, // Debit
         debit: amount,
         credit: 0,
         narration: memo || `Transfer from ${accQuery.rows.find(a => String(a.id) === String(from_account_id)).name}`
       },
       {
-        account_id: from_account_id, // Credit
+        accountId: from_account_id, // Credit
         debit: 0,
         credit: amount,
         narration: memo || `Transfer to ${accQuery.rows.find(a => String(a.id) === String(to_account_id)).name}`
