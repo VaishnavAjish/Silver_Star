@@ -154,13 +154,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         account_id: to_account_id, // Debit
         debit: amount,
         credit: 0,
-        narration: memo || `Transfer from ${accQuery.rows.find(a => a.id === from_account_id).name}`
+        narration: memo || `Transfer from ${accQuery.rows.find(a => String(a.id) === String(from_account_id)).name}`
       },
       {
         account_id: from_account_id, // Credit
         debit: 0,
         credit: amount,
-        narration: memo || `Transfer to ${accQuery.rows.find(a => a.id === to_account_id).name}`
+        narration: memo || `Transfer to ${accQuery.rows.find(a => String(a.id) === String(to_account_id)).name}`
       }
     ];
 
