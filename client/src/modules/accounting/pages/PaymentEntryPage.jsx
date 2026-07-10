@@ -487,9 +487,11 @@ export default function PaymentEntryPage() {
 
             {payAmt > 0 && (
               <div style={{
+                position: 'sticky', bottom: 0, zIndex: 10,
                 display: 'flex', gap: 20, padding: '9px 14px',
                 background: advanceAmt > 0.005 ? 'var(--brand-50)' : 'var(--g50)',
                 borderTop: '1px solid var(--g200)', fontSize: 12, alignItems: 'center', flexWrap: 'wrap',
+                boxShadow: '0 -2px 10px rgba(0,0,0,0.05)',
               }}>
                 <span>Applied: <strong>₹{fmt(appliedToBills)}</strong></span>
                 <span>Total: <strong>₹{fmt(payAmt)}</strong></span>
