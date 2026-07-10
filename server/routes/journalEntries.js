@@ -454,15 +454,104 @@ router.post('/:id/reverse', authenticate, authorize('admin', 'operator'), async 
   } finally { client.release(); }
 });
 
-// DELETE /api/journal-entries/:id
-router.delete('/:id', authenticate, authorize('admin', 'operator'), async (req, res) => {
+// PUT /api/journal-entries/:id (Edit Manual JEs)
+router.put('/:id', authenticate, authorize('admin', 'operator', 'finance'), async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query("DELETE FROM journal_entries WHERE id = $1 RETURNING id", [req.params.id]);
-    if (!result.rows.length) return res.status(400).json({ error: 'Journal entry not found' });
-    dispatchEvent('journal.deleted', { id: parseInt(req.params.id) });
-    res.json({ success: true });
+    const { date, description, lines, referenceNo } = req.body;
+    await client.query('BEGIN');
+
+    // 1. Fetch existing JE
+    const jeR = await client.query('SELECT * FROM journal_entries WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!jeR.rows.length) throw new Error('Journal entry not found');
+    const je = jeR.rows[0];
+
+    // 2. Validate it's manual
+    if (je.source_type !== 'manual') throw new Error('Only manual journal entries can be edited directly');
+
+    // 3. Fetch old lines and revert balances if posted
+    const oldLinesR = await client.query('SELECT account_id as "accountId", debit, credit FROM je_lines WHERE je_id = $1', [je.id]);
+    if (je.status === 'posted') {
+      await updateBalances(client, oldLinesR.rows, -1);
+    }
+
+    // 4. Delete old lines
+    await client.query('DELETE FROM je_lines WHERE je_id = $1', [je.id]);
+
+    // 5. Validate new lines
+    const { lines: cleanLines, totalDebit, totalCredit } = validateLines(lines);
+
+    // 6. Update journal_entries
+    await client.query(
+      `UPDATE journal_entries 
+       SET date = $1, description = $2, reference_no = $3, total_debit = $4, total_credit = $5, updated_at = NOW()
+       WHERE id = $6`,
+      [date, description, referenceNo || null, totalDebit, totalCredit, je.id]
+    );
+
+    // 7. Insert new lines
+    for (const line of cleanLines) {
+      await client.query(
+        `INSERT INTO je_lines (je_id, account_id, debit, credit, narration, cost_center_id, entity_type, entity_id, reference_no)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [je.id, line.accountId, line.debit, line.credit, line.narration, line.costCenterId || null,
+         line.entityType || null, line.entityId || null, line.referenceNo || null]
+      );
+    }
+
+    // 8. Re-apply balances if posted
+    if (je.status === 'posted') {
+      await updateBalances(client, cleanLines, 1);
+    }
+
+    await client.query('COMMIT');
+    dispatchEvent('journal.updated', { id: je.id, je_number: je.je_number });
+    res.json({ success: true, message: 'Journal entry updated successfully' });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/journal-entries/:id (Delete Manual JEs)
+router.delete('/:id', authenticate, authorize('admin', 'operator', 'finance'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch existing JE
+    const jeR = await client.query('SELECT * FROM journal_entries WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!jeR.rows.length) throw new Error('Journal entry not found');
+    const je = jeR.rows[0];
+
+    // 2. Validate it's manual
+    if (je.source_type !== 'manual' && je.source_type !== 'opening_balance') {
+      throw new Error('Only manual journal entries can be deleted directly. Please cancel the source document instead.');
+    }
+
+    // 3. Revert balances if posted
+    if (je.status === 'posted') {
+      const linesR = await client.query('SELECT account_id as "accountId", debit, credit FROM je_lines WHERE je_id = $1', [je.id]);
+      await updateBalances(client, linesR.rows, -1);
+    }
+
+    // 4. Delete allocations if any (though manual JEs usually don't have them, safe measure)
+    await client.query('DELETE FROM je_allocations WHERE je_id = $1', [je.id]);
+
+    // 5. Delete lines & JE
+    await client.query('DELETE FROM je_lines WHERE je_id = $1', [je.id]);
+    await client.query('DELETE FROM journal_entries WHERE id = $1', [je.id]);
+
+    await client.query('COMMIT');
+    dispatchEvent('journal.deleted', { id: parseInt(req.params.id), je_number: je.je_number });
+    res.json({ success: true, message: 'Journal entry deleted successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

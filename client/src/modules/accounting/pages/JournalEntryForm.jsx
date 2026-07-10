@@ -585,11 +585,11 @@ export default function JournalEntryForm() {
     } catch (err) { toast.error(err.message); }
   };
 
-  const deleteDraft = async () => {
-    if (!window.confirm('Delete this draft journal entry?')) return;
+  const deleteEntry = async () => {
+    if (!window.confirm('Delete this journal entry? This action cannot be undone.')) return;
     try {
       await api.del(`/api/journal-entries/${id}`);
-      toast.success('Draft deleted');
+      toast.success('Journal entry deleted');
       navigate('/journal-entries');
     } catch (err) { toast.error(err.message); }
   };
@@ -599,21 +599,31 @@ export default function JournalEntryForm() {
   // ── More menu items ───────────────────────────────────────────────────────────
   const isReversalEntry = ['reversal', 'edit_reversal'].includes(viewData?.source_type);
   const isReversedEntry = viewData?.is_reversed === true;
+  const isManual = viewData?.source_type === 'manual' || viewData?.source_type === 'opening_balance';
 
   const moreItems = readOnly ? [
-    // Only allow Edit on posted JEs that are NOT reversed and NOT a reversal
-    canEdit() && !isReversedEntry && !isReversalEntry && {
+    // Only allow Edit on manual JEs that are NOT reversed and NOT a reversal
+    canEdit() && isManual && !isReversedEntry && !isReversalEntry && {
       label: 'Edit', icon: <Edit3 size={13} />, onClick: () => navigate(`/journal-entries/${id}?mode=edit`),
     },
     // Reverse only available if posted, not already reversed, not itself a reversal
     viewData?.status === 'posted' && canEdit() && !isReversedEntry && !isReversalEntry && {
       label: 'Reverse Entry', icon: <RotateCcw size={13} />, onClick: reverseEntry,
     },
+    // Allow Delete on manual JEs that are not reversed
+    canEdit() && isManual && !isReversedEntry && !isReversalEntry && {
+      label: 'Delete Entry', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
+    },
+    // If it's a draft, allow deleting the draft regardless of type
+    viewData?.status === 'draft' && canEdit() && {
+      label: 'Delete Draft', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
+    },
     null,
     { label: 'Print', icon: <Printer size={13} />, onClick: () => window.print() },
   ].filter(Boolean) : [
-    viewData?.status === 'draft' && canEdit() && {
-      label: 'Delete Draft', icon: <Trash2 size={13} />, danger: true, onClick: deleteDraft,
+    // In edit mode of an existing entry, allow delete
+    isExisting && canEdit() && {
+      label: viewData?.status === 'draft' ? 'Delete Draft' : 'Delete Entry', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
     },
     { label: 'Print', icon: <Printer size={13} />, onClick: () => window.print() },
   ].filter(Boolean);
