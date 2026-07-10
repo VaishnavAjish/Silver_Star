@@ -43,6 +43,12 @@ export default function AllocationModal({
   const isVendor = entityType === 'vendor';
   const docLabel = isVendor ? 'bill' : 'invoice';
 
+  const getDocId = d => d.source_id || d.id;
+  const getDocNum = d => d.voucher_no || d.doc_number;
+  const getDocDate = d => d.voucher_date || d.doc_date;
+  const getDocTotal = d => parseFloat(d.original_amount || d.grand_total || 0);
+  const getDocOutstanding = d => parseFloat(d.outstanding_amount || d.outstanding || d.balance_due || 0);
+
   // ── Load open documents ───────────────────────────────────────────────────
   const loadDocs = useCallback(async () => {
     if (!entityId) return;
@@ -81,8 +87,9 @@ export default function AllocationModal({
 
   // ── Quick-fill helpers ────────────────────────────────────────────────────
   const allocateFull = (doc) => {
-    const available = Math.min(parseFloat(doc.outstanding), remaining + (parseFloat(amounts[doc.id]) || 0));
-    setAmounts(p => ({ ...p, [doc.id]: available > 0 ? String(available) : '' }));
+    const docId = getDocId(doc);
+    const available = Math.min(getDocOutstanding(doc), remaining + (parseFloat(amounts[docId]) || 0));
+    setAmounts(p => ({ ...p, [docId]: available > 0 ? String(available) : '' }));
   };
 
   const allocateAll = () => {
@@ -90,8 +97,8 @@ export default function AllocationModal({
     const next = {};
     for (const doc of docs) {
       if (left <= 0.005) break;
-      const take = Math.min(parseFloat(doc.outstanding), left);
-      if (take > 0) next[doc.id] = String(take);
+      const take = Math.min(getDocOutstanding(doc), left);
+      if (take > 0) next[getDocId(doc)] = String(take);
       left -= take;
     }
     setAmounts(next);
@@ -104,14 +111,14 @@ export default function AllocationModal({
     if (isOverAllocated) return;
 
     const result = docs
-      .filter(d => parseFloat(amounts[d.id] || 0) > 0)
+      .filter(d => parseFloat(amounts[getDocId(d)] || 0) > 0)
       .map(d => ({
         target_type:      docLabel,
-        target_id:        d.id,
-        doc_number:       d.doc_number,
-        doc_date:         d.doc_date,
-        grand_total:      parseFloat(d.grand_total),
-        allocated_amount: parseFloat(amounts[d.id]),
+        target_id:        getDocId(d),
+        doc_number:       getDocNum(d),
+        doc_date:         getDocDate(d),
+        grand_total:      getDocTotal(d),
+        allocated_amount: parseFloat(amounts[getDocId(d)]),
       }));
 
     onSave(result);
@@ -205,33 +212,34 @@ export default function AllocationModal({
               </thead>
               <tbody>
                 {paginatedItems.map(doc => {
-                  const allocated = parseFloat(amounts[doc.id] || 0);
-                  const overDoc   = allocated > parseFloat(doc.outstanding) + 0.005;
+                  const docId = getDocId(doc);
+                  const allocated = parseFloat(amounts[docId] || 0);
+                  const overDoc   = allocated > getDocOutstanding(doc) + 0.005;
                   return (
-                    <tr key={doc.id} style={{ borderBottom: '1px solid var(--g100)' }}>
+                    <tr key={docId} style={{ borderBottom: '1px solid var(--g100)' }}>
                       <td style={{ padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--brand)', fontWeight: 600 }}>
-                        {doc.doc_number}
+                        {getDocNum(doc)} {doc.source_type && <span style={{fontSize: 9, opacity: 0.6}}>({doc.source_type === 'expense' ? 'EXP' : 'PO'})</span>}
                       </td>
                       <td style={{ padding: '8px 12px', color: 'var(--g600)' }}>
-                        {fmtD(doc.doc_date)}
+                        {fmtD(getDocDate(doc))}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--mono)' }}>
-                        {fmt(doc.grand_total)}
+                        {fmt(getDocTotal(doc))}
                       </td>
                       <td style={{
                         padding: '8px 12px', textAlign: 'right',
                         fontFamily: 'var(--mono)', fontWeight: 600,
-                        color: parseFloat(doc.outstanding) > 0 ? '#1565C0' : 'var(--g400)',
+                        color: getDocOutstanding(doc) > 0 ? '#1565C0' : 'var(--g400)',
                       }}>
-                        {fmt(doc.outstanding)}
+                        {fmt(getDocOutstanding(doc))}
                       </td>
                       <td style={{ padding: '4px 8px', textAlign: 'right' }}>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
-                          value={amounts[doc.id] || ''}
-                          onChange={e => setAmounts(p => ({ ...p, [doc.id]: e.target.value }))}
+                          value={amounts[docId] || ''}
+                          onChange={e => setAmounts(p => ({ ...p, [docId]: e.target.value }))}
                           placeholder="0.00"
                           style={{
                             width: 110, textAlign: 'right',

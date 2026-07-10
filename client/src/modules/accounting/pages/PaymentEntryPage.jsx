@@ -91,7 +91,7 @@ export default function PaymentEntryPage() {
   const remainingAdvance   = Math.max(0, Math.round((advanceAmt - manualLinesTotal) * 100) / 100);
 
   const selectedAccount  = bankAccounts.find(a => String(a.id) === String(form.bank_account_id));
-  const unappliedBills   = openBills.filter(b => !allocatedIds.has(b.id));
+  const unappliedBills   = openBills.filter(b => !allocatedIds.has(b.source_id));
   const showManualSection = !!form.vendor_id;
 
   // ── JE preview (text) ──────────────────────────────────────────────────────
@@ -127,20 +127,20 @@ export default function PaymentEntryPage() {
 
   // ── Bill allocation handlers ───────────────────────────────────────────────
   const addBill = bill => {
-    if (allocatedIds.has(bill.id)) return;
+    if (allocatedIds.has(bill.source_id)) return;
     setAllocations(prev => [...prev, {
-      purchase_note_id: bill.id, doc_number: bill.doc_number, doc_date: bill.doc_date,
-      grand_total: parseFloat(bill.grand_total || 0), balance_due: parseFloat(bill.balance_due || 0),
-      amount: String(parseFloat(bill.balance_due || 0).toFixed(2)),
+      purchase_note_id: bill.source_id, doc_number: bill.voucher_no, doc_date: bill.voucher_date,
+      grand_total: parseFloat(bill.original_amount || 0), balance_due: parseFloat(bill.outstanding_amount || 0),
+      amount: String(parseFloat(bill.outstanding_amount || 0).toFixed(2)),
     }]);
   };
   const addAllBills = () => {
     const toAdd = unappliedBills;
     if (!toAdd.length) return;
     setAllocations(prev => [...prev, ...toAdd.map(b => ({
-      purchase_note_id: b.id, doc_number: b.doc_number, doc_date: b.doc_date,
-      grand_total: parseFloat(b.grand_total || 0), balance_due: parseFloat(b.balance_due || 0),
-      amount: String(parseFloat(b.balance_due || 0).toFixed(2)),
+      purchase_note_id: b.source_id, doc_number: b.voucher_no, doc_date: b.voucher_date,
+      grand_total: parseFloat(b.original_amount || 0), balance_due: parseFloat(b.outstanding_amount || 0),
+      amount: String(parseFloat(b.outstanding_amount || 0).toFixed(2)),
     }))]);
   };
   const removeLine      = idx => setAllocations(prev => prev.filter((_, i) => i !== idx));
@@ -282,7 +282,7 @@ export default function PaymentEntryPage() {
                 <Plus size={11} /> Add all
               </button>
             )}
-            maxHeight={360}
+            maxHeight="400px"
           >
             {!form.vendor_id ? (
               <div className="empty-state" style={{ padding: '24px 16px' }}>
@@ -298,17 +298,17 @@ export default function PaymentEntryPage() {
               </div>
             ) : (
               openBills.map(bill => {
-                const isAdded = allocatedIds.has(bill.id);
+                const isAdded = allocatedIds.has(bill.source_id);
                 return (
-                  <div key={bill.id} className={`bill-card${isAdded ? ' bill-card-added' : ''}`}>
-                    <div className="bill-card-num">{bill.doc_number}</div>
-                    <div className="bill-card-date">{fmtDate(bill.doc_date)}</div>
-                    <div className="bill-card-amt">₹{fmt(bill.balance_due)}</div>
+                  <div key={`${bill.source_type}-${bill.source_id}`} className={`bill-card${isAdded ? ' bill-card-added' : ''}`}>
+                    <div className="bill-card-num">{bill.voucher_no} <span style={{ fontSize: 9, opacity: 0.6 }}>({bill.source_type === 'expense' ? 'EXP' : 'PO'})</span></div>
+                    <div className="bill-card-date">{fmtDate(bill.voucher_date)}</div>
+                    <div className="bill-card-amt">₹{fmt(bill.outstanding_amount)}</div>
                     <div className="bill-card-actions">
                       <button className={`btn btn-sm${isAdded ? '' : ' btn-primary'}`} onClick={() => addBill(bill)} disabled={isAdded}>
                         {isAdded ? 'Added' : 'Add'}
                       </button>
-                      <Link to={`/purchase-notes/${bill.id}`} className="btn btn-sm" target="_blank" rel="noopener noreferrer">Open</Link>
+                      <Link to={`/purchase-notes/${bill.source_id}`} className="btn btn-sm" target="_blank" rel="noopener noreferrer">Open</Link>
                     </div>
                   </div>
                 );

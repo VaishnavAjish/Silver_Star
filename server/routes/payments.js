@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const FinancialMappingService = require('../services/FinancialMappingService');
+const { getVendorOpenItems } = require('../services/vendorOpenItemsService');
 
 const router = express.Router();
 
@@ -80,38 +81,9 @@ router.get('/open', authenticate, async (req, res) => {
     if (!vendorId || isNaN(vendorId)) {
       return res.status(400).json({ error: 'vendor_id is required' });
     }
-    let rows;
-    try {
-      const result = await pool.query(
-        `SELECT id, doc_number, doc_date, grand_total,
-                COALESCE(amount_paid, 0)          AS amount_paid,
-                COALESCE(balance_due, grand_total) AS balance_due,
-                COALESCE(payment_status, 'UNPAID') AS payment_status,
-                reference_no, remark
-         FROM purchase_notes
-         WHERE vendor_id = $1
-           AND status != 'cancelled'
-           AND COALESCE(payment_status, 'UNPAID') != 'PAID'
-         ORDER BY doc_date ASC, id ASC`,
-        [vendorId]
-      );
-      rows = result.rows;
-    } catch (_colErr) {
-      logger.warn('[payments /open] phase9 columns missing, using fallback query. Run sql/phase9-payment-allocations.sql to enable full tracking.');
-      const result = await pool.query(
-        `SELECT id, doc_number, doc_date, grand_total,
-                0            AS amount_paid,
-                grand_total  AS balance_due,
-                'UNPAID'     AS payment_status,
-                reference_no, remark
-         FROM purchase_notes
-         WHERE vendor_id = $1 AND status != 'cancelled'
-         ORDER BY doc_date ASC, id ASC`,
-        [vendorId]
-      );
-      rows = result.rows;
-    }
-
+    const excludeJeId = req.query.exclude_je_id ? parseInt(req.query.exclude_je_id) : null;
+    const rows = await getVendorOpenItems(vendorId, null, excludeJeId);
+    
     res.json({ data: rows });
   } catch (err) {
     logger.error('[payments GET /open]', { error: err.message, stack: err.stack });
