@@ -444,6 +444,7 @@ export default function JournalEntryForm() {
   // ── save handlers ─────────────────────────────────────────────────────────────
   // Returns navigation path (string) for existing edits, or new JE object for new entries, or null on failure.
   const doSave = async (autoPost) => {
+    if (saving) return null;
     if (!validate()) return null;
     setSaving(true);
     try {

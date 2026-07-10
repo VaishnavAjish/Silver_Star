@@ -244,6 +244,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     dispatchEvent('journal.created', { id: je.id, je_number: je.je_number, source_type: je.source_type, status: je.status });
     res.status(201).json(je);
   } catch (err) {
+    logger.error(`[journalEntries POST /] 400 Bad Request: ${err.message}`, { body: req.body, stack: err.stack });
     res.status(400).json({ error: err.message });
   }
 });
