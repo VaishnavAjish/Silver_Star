@@ -12,6 +12,7 @@ const LotIssueListPage     = lazy(() => import('./pages/LotIssueListPage'));
 const LotIssuePage         = lazy(() => import('./pages/LotIssuePage'));
 const LotReturnPage        = lazy(() => import('./pages/LotReturnPage'));
 const StockTransferPage    = lazy(() => import('./pages/StockTransferPage'));
+const NewTransferPage      = lazy(() => import('./pages/NewTransferPage'));
 
 export default [
   { path: 'inventory',                           Component: InventoryPage },
@@ -27,4 +28,5 @@ export default [
   { path: 'inventory/process-issues/new',        Component: LotIssuePage },
   { path: 'inventory/process-issues/:id/return', Component: LotReturnPage },
   { path: 'inventory/stock-transfer',            Component: StockTransferPage },
+  { path: 'inventory/stock-transfer/new',        Component: NewTransferPage },
 ];

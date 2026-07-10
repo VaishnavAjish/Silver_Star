@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
 import toast from 'react-hot-toast';
@@ -87,12 +88,12 @@ function TransferDetailModal({ transfer, onClose }) {
                 background: 'var(--g100)', border: '1px solid var(--g200)',
                 borderRadius: 8, padding: '5px 10px',
               }}>
-                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--g400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>From</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--g400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>From Dept</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--g800)' }}>
                   {transfer.source_location_name || '—'}
                 </span>
                 <ArrowRight size={12} style={{ color: 'var(--brand)', flexShrink: 0 }} />
-                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--g400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>To</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--g400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>To Dept</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
                   {transfer.destination_location_name || '—'}
                 </span>
@@ -240,6 +241,7 @@ function TransferDetailModal({ transfer, onClose }) {
 export default function StockTransferPage() {
   const api      = useApi();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [transfers,      setTransfers]      = useState([]);
   const [loading,        setLoading]        = useState(true);
@@ -426,6 +428,13 @@ export default function StockTransferPage() {
               </button>
               <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('print')}>
                 <Printer size={13} /> Print
+              </button>
+              <button 
+                className="btn btn-sm btn-primary" 
+                onClick={() => navigate('/inventory/stock-transfer/new')}
+                style={{ marginLeft: 8 }}
+              >
+                + New Transfer
               </button>
               <button
                 className="icon-btn"

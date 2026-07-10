@@ -1011,7 +1011,6 @@ export default function InventoryPage() {
                       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={12} />, fn: () => setActiveModal({ type: 'issue', lotId: lot.id }), accent: true },
                       perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={12} />, fn: () => navigate('/manufacturing/control-tower'), accent: true },
                       perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={12} />, fn: () => navigate('/manufacturing/growth-output'), accent: true },
-                      perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={12} />, fn: () => openStockTransferModal([lot], () => { setSelectedTransferRows([]); load(); }), accent: true },
                       perms.canSplit && { label: 'Split Lot', icon: <GitBranch size={12} />, fn: () => setActiveModal({ type: 'split', lotId: lot.id }), accent: true },
                       perms.canMix && { label: 'Mix Into…', icon: <GitMerge size={12} />, fn: () => setActiveModal({ type: 'mix', lotIds: lot.id }), accent: true },
                       perms.canCompleteGrowthRun && { label: 'Complete Growth Run', icon: <CheckCircle size={12} />, fn: () => toast('Please open lot workspace to complete Growth Run'), accent: true },
@@ -1021,7 +1020,6 @@ export default function InventoryPage() {
                       { label: 'Issue to Process', icon: <Send size={12} />, fn: () => {}, disabled: true },
                       { label: 'Split Lot', icon: <GitBranch size={12} />, fn: () => {}, disabled: true },
                       { label: 'Mix Lots', icon: <GitMerge size={12} />, fn: () => setActiveModal({ type: 'mix', lotIds: selectedTransferRows.map(r => r.id).join(',') }), disabled: selectedTransferRows.length < 1, accent: true },
-                      { label: 'Stock Transfer', icon: <Send size={12} />, fn: () => openStockTransferModal(selectedTransferRows, () => { setSelectedTransferRows([]); load(); }), disabled: selectedTransferRows.length < 1, accent: true },
                     ];
                   }
                 })().map(({ label, icon, fn, disabled, accent }) => (

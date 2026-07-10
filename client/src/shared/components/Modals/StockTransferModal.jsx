@@ -48,12 +48,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
 
   const [locations, setLocations] = useState([]);
   const [departments, setDepartments] = useState([]);
-  const [sourceLocationId, setSourceLocationId] = useState('');
-  const [destLocationId, setDestLocationId] = useState('');
-  const [sourceLocationName, setSourceLocationName] = useState('');
-  const [destLocationName, setDestLocationName] = useState('');
-  const [sourceAccountName, setSourceAccountName] = useState('');
-  const [destAccountName, setDestAccountName] = useState('');
+  const [destDepartmentId, setDestDepartmentId] = useState('');
   const [lotSelected, setLotSelected] = useState(new Set());
   const [notes, setNotes] = useState('');
   const [preview, setPreview] = useState(null);
@@ -101,13 +96,6 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
         setLocations(locs);
         setDepartments(depts);
         if (rows.length > 0) {
-          const locCounts = {};
-          rows.forEach(r => {
-            const lid = r.location_id;
-            if (lid != null) locCounts[lid] = (locCounts[lid] || 0) + 1;
-          });
-          const best = Object.entries(locCounts).sort((a, b) => b[1] - a[1])[0];
-          if (best) setSourceLocationId(String(best[0]));
           setLotSelected(new Set(rows.map(r => r.id)));
           const qtys = {};
           rows.forEach(r => qtys[r.id] = effQty(r));
@@ -121,12 +109,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
 
   useEffect(() => {
     if (!open) {
-      setSourceLocationId('');
-      setDestLocationId('');
-      setSourceLocationName('');
-      setDestLocationName('');
-      setSourceAccountName('');
-      setDestAccountName('');
+      setDestDepartmentId('');
       setLotSelected(new Set());
       setNotes('');
       setPreview(null);
@@ -150,7 +133,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
     [selectedRows, lotSelected]
   );
 
-  const valid = lotSelected.size > 0 && destLocationId;
+  const valid = lotSelected.size > 0 && destDepartmentId;
 
   const toggleLot = id => {
     setLotSelected(prev => {
@@ -174,43 +157,13 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
     });
   };
 
-  const sourceLocName = locations.find(l => String(l.id) === String(sourceLocationId))?.name || '';
-  const destLocName = locations.find(l => String(l.id) === String(destLocationId))?.name || '';
-
-  const activeLocations = useMemo(
-    () => locations.filter(l => l.status === 'active'),
-    [locations]
-  );
-
-  const accountNameOptions = useMemo(() => {
-    if (!departments) return [];
-    const names = new Set();
-    departments.forEach(d => {
-      if (d.location_name && d.location_name.trim()) {
-        names.add(d.location_name.trim());
-      }
-    });
-    return Array.from(names).sort().map(name => ({ label: name, value: name }));
-  }, [departments]);
-
-  const getDepartmentsByLocation = useCallback((location) => {
-    if (!location || !departments) return [];
-    const filtered = departments.filter(d => (d.location_name || '').trim() === location.trim() && d.name);
-    return Array.from(new Set(filtered.map(d => d.name))).sort();
-  }, [departments]);
-
-  const destLocationNameOptions = useMemo(() => {
-    return getDepartmentsByLocation(destAccountName).map(name => ({ label: name, value: name }));
-  }, [destAccountName, getDepartmentsByLocation]);
-
-  const deptByLocation = useMemo(() => {
-    const map = {};
-    departments.forEach(d => {
-      const lid = String(d.location_id);
-      if (!map[lid]) map[lid] = [];
-      map[lid].push(d.name);
-    });
-    return map;
+  const deptOptions = useMemo(() => {
+    return (departments || [])
+      .filter(d => d.status === 'active' || d.status === 'Active')
+      .map(d => ({
+        label: `${d.code || ''} - ${d.name}`.replace(/^- /, ''),
+        value: String(d.id),
+      }));
   }, [departments]);
 
   const totalValue = selectedLots.reduce((s, l) => s + parseFloat(l.total_value || 0), 0);
@@ -225,8 +178,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
     try {
       const data = await api.post('/api/stock-transfer/preview', {
         lots: getPayloadLots(),
-        source_location_id: parseInt(sourceLocationId),
-        destination_location_id: parseInt(destLocationId),
+        destination_department_id: parseInt(destDepartmentId),
       });
       setPreview(data);
       setShowPreview(true);
@@ -236,8 +188,8 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
   const handleConfirm = async () => {
     if (!valid || saving) return;
 
-    const dstId = parseInt(destLocationId);
-    if (!dstId) { toast.error('Please select a destination location.'); return; }
+    const dstId = parseInt(destDepartmentId);
+    if (!dstId) { toast.error('Please select a destination department.'); return; }
 
     // Build real lot IDs and qtys (handle blank-mode lookup)
     const selectedLotIds = [];
@@ -265,11 +217,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
     try {
       await api.post('/api/stock-transfer/pending', {
         transferId,
-        sourceLocationId: sourceLocationId || null,
-        destLocationId: dstId,
-        sourceAccountName: sourceAccountName || null,
-        destAccountName: destAccountName || null,
-        destLocationName: destLocationName || null,
+        destination_department_id: dstId,
         selectedLotIds,
         transferQtys: transferQtysPayload,
       });
@@ -285,10 +233,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
     }
   };
 
-  const handleSourceChange = v => {
-    setSourceLocationId(v);
-    setDestLocationId('');
-  };
+
 
   const updateBlankRow = useCallback((index, field, value) => {
     setBlankRows(prev => {
@@ -324,69 +269,21 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
         }
       >
 
-        {/* ── Location Selection ── */}
+        {/* ── Department Selection ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--g200)' }}>
-          {/* Destination */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#f0fdf4', padding: '12px 16px', borderRadius: 8, border: '1px solid #bbf7d0' }}>
-              <div style={{ width: 45, fontWeight: 700, fontSize: 11, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>To</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '28%' }}>
-                  <label style={{ fontSize: 11, color: 'var(--g600)', whiteSpace: 'nowrap', fontWeight: 500 }}>Location ID</label>
-                  <input
-                    value={activeLocations.find(l => String(l.id) === String(destLocationId))?.code || destLocationId}
-                    onChange={e => {
-                      const val = e.target.value;
-                      const matched = activeLocations.find(l => (l.code || '').toLowerCase() === val.toLowerCase() || String(l.id) === val);
-                      setDestLocationId(matched ? String(matched.id) : val);
-                    }}
-                    placeholder="Enter ID"
-                    style={{ width: '100%', height: 28, fontSize: 12, padding: '0 8px', border: '1px solid var(--g300)', borderRadius: 4, outline: 'none' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '28%' }}>
-                  <label style={{ fontSize: 11, color: 'var(--g600)', whiteSpace: 'nowrap', fontWeight: 500 }}>Location Name</label>
-                  <SelectDropdown 
-                    size="sm" 
-                    value={destLocationName} 
-                    onChange={e => {
-                      setDestLocationName(e.target.value);
-                      const dept = departments.find(d => d.name === e.target.value && (d.location_name || '').trim() === destAccountName.trim());
-                      if (dept && dept.location_id) {
-                        setDestLocationId(String(dept.location_id));
-                      } else {
-                        setDestLocationId('');
-                      }
-                    }} 
-                    style={{ width: '100%' }}
-                  >
-                    <option value="">-- Select Location Name --</option>
-                    {destLocationNameOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </SelectDropdown>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                  <label style={{ fontSize: 11, color: 'var(--g600)', whiteSpace: 'nowrap', fontWeight: 500 }}>Department Name</label>
-                  <SelectDropdown 
-                    size="sm" 
-                    value={destAccountName} 
-                    onChange={e => {
-                      setDestAccountName(e.target.value);
-                      setDestLocationName('');
-                      setDestLocationId('');
-                    }} 
-                    style={{ width: '100%' }}
-                  >
-                    <option value="">-- Select Department Name --</option>
-                    {accountNameOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </SelectDropdown>
-                </div>
-              </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#f0fdf4', padding: '12px 16px', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+            <div style={{ width: 140, fontWeight: 700, fontSize: 11, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transfer To Dept</div>
+            <div style={{ flex: 1, maxWidth: 400 }}>
+              <SelectDropdown 
+                size="sm" 
+                value={destDepartmentId} 
+                onChange={e => setDestDepartmentId(e.target.value)} 
+                style={{ width: '100%' }}
+              >
+                <option value="">-- Select Department --</option>
+                {deptOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </SelectDropdown>
             </div>
-            {destLocationId && deptByLocation[destLocationId] && (
-              <div style={{ fontSize: 9, color: 'var(--g500)', paddingLeft: 81 }}>
-                Departments: {deptByLocation[destLocationId].join(', ')}
-              </div>
-            )}
           </div>
         </div>
 

@@ -72,19 +72,19 @@ async function genTransferNum(client) {
 
 router.post('/preview', authenticate, async (req, res) => {
   try {
-    const { lots: payloadLots, source_location_id, destination_location_id } = req.body;
-    if (!payloadLots?.length || !source_location_id || !destination_location_id)
-      return res.status(400).json({ error: 'lots[], source_location_id, and destination_location_id required' });
+    const { lots: payloadLots, destination_department_id } = req.body;
+    if (!payloadLots?.length || !destination_department_id)
+      return res.status(400).json({ error: 'lots[] and destination_department_id required' });
 
     const lot_ids = payloadLots.map(l => l.lot_id);
     const { rows: lots } = await pool.query(
       `SELECT inv.id, inv.lot_number, inv.lot_code, inv.qty, inv.weight, inv.unit,
-              inv.total_value, inv.rate, inv.status, inv.location_id,
+              inv.total_value, inv.rate, inv.status, inv.location_id, inv.department_id,
               i.name as item_name, i.category,
-              l.name as source_location_name
+              d.name as source_department_name
        FROM inventory inv
        JOIN items i ON inv.item_id = i.id
-       LEFT JOIN locations l ON inv.location_id = l.id
+       LEFT JOIN departments d ON inv.department_id = d.id
        WHERE inv.id = ANY($1)`,
       [lot_ids]
     );
@@ -97,14 +97,14 @@ router.post('/preview', authenticate, async (req, res) => {
         error: `Cannot transfer lots not IN STOCK: ${invalid.map(l => l.lot_number).join(', ')}`
       });
 
-    const wrongLoc = lots.filter(l => l.location_id !== parseInt(source_location_id));
-    if (wrongLoc.length)
+    const wrongDept = lots.filter(l => l.department_id === parseInt(destination_department_id));
+    if (wrongDept.length)
       return res.status(409).json({
-        error: `Lots not at source location: ${wrongLoc.map(l => l.lot_number).join(', ')}`
+        error: `Source and destination department cannot be the same. Lots already in this department: ${wrongDept.map(l => l.lot_number).join(', ')}`
       });
 
     const { rows: [dest] } = await pool.query(
-      'SELECT name FROM locations WHERE id = $1', [destination_location_id]
+      'SELECT name FROM departments WHERE id = $1', [destination_department_id]
     );
 
     const previewLots = lots.map(l => {
@@ -125,7 +125,7 @@ router.post('/preview', authenticate, async (req, res) => {
       lots: previewLots,
       total_lots: previewLots.length,
       total_value: previewLots.reduce((s, l) => s + l.total_value, 0),
-      source_location_name: lots[0].source_location_name,
+      source_location_name: lots[0].source_department_name,
       destination_location_name: dest?.name || 'Unknown',
     });
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[stockTransfer.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
@@ -134,22 +134,27 @@ router.post('/preview', authenticate, async (req, res) => {
 router.post('/pending', authenticate, async (req, res) => {
   const client = await pool.primaryPool.connect();
   try {
-    const { transferId, sourceLocationId, destLocationId, sourceAccountName, destAccountName, destLocationName, selectedLotIds, transferQtys } = req.body;
+    const { transferId, destination_department_id, selectedLotIds, transferQtys } = req.body;
 
     await client.query('BEGIN');
 
+    const { rows: [destDept] } = await client.query(
+      'SELECT d.name as dest_department_name, d.location_id FROM departments d WHERE d.id = $1', [destination_department_id]
+    );
+    if (!destDept) throw new Error('Invalid destination department');
+    const destLocationId = destDept.location_id;
+    const destDeptName = destDept.dest_department_name;
+
     const { rows: [pt] } = await client.query(`
-      INSERT INTO pending_transfers (transfer_id, source_location_id, destination_location_id, source_account_name, dest_account_name, dest_location_name, created_by, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending')
+      INSERT INTO pending_transfers (transfer_id, destination_location_id, destination_department_id, dest_location_name, created_by, status)
+      VALUES ($1, $2, $3, $4, $5, 'Pending')
       ON CONFLICT (transfer_id) DO UPDATE SET
-        source_location_id = EXCLUDED.source_location_id,
         destination_location_id = EXCLUDED.destination_location_id,
-        source_account_name = EXCLUDED.source_account_name,
-        dest_account_name = EXCLUDED.dest_account_name,
+        destination_department_id = EXCLUDED.destination_department_id,
         dest_location_name = EXCLUDED.dest_location_name,
         status = 'Pending'
       RETURNING id
-    `, [transferId, sourceLocationId || null, destLocationId || null, sourceAccountName, destAccountName, destLocationName || null, req.user?.id || null]);
+    `, [transferId, destLocationId || null, destination_department_id || null, destDeptName || null, req.user?.id || null]);
     
     await client.query('DELETE FROM pending_transfer_lots WHERE pending_transfer_id = $1', [pt.id]);
     
@@ -214,7 +219,7 @@ router.get('/pending', authenticate, async (req, res) => {
       SELECT
         pt.*,
         sl.name  AS source_location_name,
-        dl.name  AS destination_location_name,
+        COALESCE(d.name, dl.name)  AS destination_location_name,
         u.full_name AS created_by_name,
         approver.full_name AS approved_by_name,
         (
@@ -235,6 +240,7 @@ router.get('/pending', authenticate, async (req, res) => {
       FROM pending_transfers pt
       LEFT JOIN locations sl ON sl.id = pt.source_location_id
       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
+      LEFT JOIN departments d ON d.id = pt.destination_department_id
       LEFT JOIN users     u  ON u.id  = pt.created_by
       LEFT JOIN users     approver ON approver.id = pt.approved_by
       ${statusFilter}
@@ -258,10 +264,10 @@ router.post('/pending/:id/approve', authenticate, async (req, res) => {
 
     // ── 1. Lock + fetch pending_transfer ────────────────────────────────────
     const { rows: [pt] } = await client.query(
-      `SELECT pt.*, sl.name AS src_name, dl.name AS dst_name
+      `SELECT pt.*, sl.name AS src_name, d.name AS dst_name
        FROM pending_transfers pt
        LEFT JOIN locations sl ON sl.id = pt.source_location_id
-       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
+       LEFT JOIN departments d ON d.id = pt.destination_department_id
        WHERE pt.id = $1
        FOR UPDATE OF pt`,
       [transferId]
@@ -443,12 +449,18 @@ router.post('/pending/:id/approve', authenticate, async (req, res) => {
       const available = lot.unit === 'CT' ? parseFloat(lot.weight || 0) : parseFloat(lot.qty || 0);
       return requested < available && requested > 0;
     });
+    const { rows: [srcDept] } = await client.query(
+      `SELECT d.name FROM departments d WHERE d.id = $1 LIMIT 1`,
+      [lots[0]?.department_id]
+    );
+    const srcDeptName = srcDept?.name || 'Unknown';
+
     const { rows: [mv] } = await client.query(
       `INSERT INTO lot_movements (movement_number, movement_type, movement_date, notes, created_by)
        VALUES ($1, 'transfer', NOW(), $2, $3) RETURNING id`,
       [
         transferNumber,
-        `Transfer from ${pt.src_name || '?'} to ${pt.dst_name || '?'}${hasPartial ? ' (Partial)' : ''}`,
+        `Transfer -> ${srcDeptName} -> ${pt.dst_name || '?'}${hasPartial ? ' (Partial)' : ''}`,
         userId,
       ]
     );
@@ -618,13 +630,10 @@ router.delete('/pending/:id', authenticate, async (req, res) => {
 });
 
 router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) => {
-  const { lots: payloadLots, source_location_id, destination_location_id, notes } = req.body;
+  const { lots: payloadLots, destination_department_id, notes } = req.body;
 
-  if (!payloadLots?.length || !source_location_id || !destination_location_id)
-    return res.status(400).json({ error: 'lots[], source_location_id, and destination_location_id required' });
-
-  if (parseInt(source_location_id) === parseInt(destination_location_id))
-    return res.status(400).json({ error: 'Source and destination must be different' });
+  if (!payloadLots?.length || !destination_department_id)
+    return res.status(400).json({ error: 'lots[] and destination_department_id required' });
 
   const client = await pool.primaryPool.connect();
   try {
@@ -632,8 +641,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     const lot_ids = payloadLots.map(l => l.lot_id);
     const { rows: lots } = await client.query(
-      `SELECT inv.*, i.name as item_name, i.category
-       FROM inventory inv JOIN items i ON inv.item_id = i.id
+      `SELECT inv.*, i.name as item_name, i.category, d.name as department_name
+       FROM inventory inv 
+       JOIN items i ON inv.item_id = i.id
+       LEFT JOIN departments d ON inv.department_id = d.id
        WHERE inv.id = ANY($1) FOR UPDATE`,
       [lot_ids]
     );
@@ -642,20 +653,20 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     if (invalid.length)
       throw new Error(`Cannot transfer lots not IN STOCK: ${invalid.map(l => l.lot_number).join(', ')}`);
 
-    const wrongLoc = lots.filter(l => l.location_id !== parseInt(source_location_id));
-    if (wrongLoc.length)
-      throw new Error(`Lots not at source location: ${wrongLoc.map(l => l.lot_number).join(', ')}`);
+    const wrongDept = lots.filter(l => l.department_id === parseInt(destination_department_id));
+    if (wrongDept.length)
+      throw new Error(`Source and destination department cannot be the same. Lots already in this department: ${wrongDept.map(l => l.lot_number).join(', ')}`);
 
     const transferNumber = await genTransferNum(client);
-
     const userId = req.user?.id || null;
 
-    const { rows: [destLoc] } = await client.query(
-      'SELECT name FROM locations WHERE id = $1', [destination_location_id]
+    const { rows: [destDept] } = await client.query(
+      'SELECT d.name as dest_department_name, d.location_id FROM departments d WHERE d.id = $1', [destination_department_id]
     );
-    const { rows: [srcLoc] } = await client.query(
-      'SELECT name FROM locations WHERE id = $1', [source_location_id]
-    );
+    if (!destDept) throw new Error('Invalid destination department');
+    const destination_location_id = destDept.location_id;
+    const destDeptName = destDept.dest_department_name;
+    const srcDeptName = lots[0]?.department_name || 'Unknown';
 
     // Insert one lot_movement record for the whole transfer (movement_number is UNIQUE)
     const hasPartialDirect = lots.some(lot => {
@@ -669,7 +680,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
        VALUES ($1, 'transfer', NOW(), $2, $3) RETURNING id`,
       [
         transferNumber,
-        `Transfer from ${srcLoc.name} to ${destLoc.name}${notes ? ': ' + notes : ''}${hasPartialDirect ? ' (Partial)' : ''}`,
+        `Transfer -> ${srcDeptName} -> ${destDeptName}${notes ? ': ' + notes : ''}${hasPartialDirect ? ' (Partial)' : ''}`,
         userId,
       ]
     );
@@ -727,9 +738,9 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         destLotId = newLot.id;
       } else {
         await client.query(
-          `UPDATE inventory SET location_id = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [destination_location_id, lot.id]
+          `UPDATE inventory SET location_id = $1, department_id = $2, updated_at = NOW()
+           WHERE id = $3`,
+          [destination_location_id, destination_department_id, lot.id]
         );
       }
 
