@@ -599,19 +599,18 @@ export default function JournalEntryForm() {
   // ── More menu items ───────────────────────────────────────────────────────────
   const isReversalEntry = ['reversal', 'edit_reversal'].includes(viewData?.source_type);
   const isReversedEntry = viewData?.is_reversed === true;
-  const isManual = viewData?.source_type === 'manual' || viewData?.source_type === 'opening_balance';
 
   const moreItems = readOnly ? [
-    // Only allow Edit on manual JEs that are NOT reversed and NOT a reversal
-    canEdit() && isManual && !isReversedEntry && !isReversalEntry && {
+    // Allow Edit on all JEs that are NOT reversed and NOT a reversal
+    canEdit() && !isReversedEntry && !isReversalEntry && {
       label: 'Edit', icon: <Edit3 size={13} />, onClick: () => navigate(`/journal-entries/${id}?mode=edit`),
     },
     // Reverse only available if posted, not already reversed, not itself a reversal
     viewData?.status === 'posted' && canEdit() && !isReversedEntry && !isReversalEntry && {
       label: 'Reverse Entry', icon: <RotateCcw size={13} />, onClick: reverseEntry,
     },
-    // Allow Delete on manual JEs that are not reversed
-    canEdit() && isManual && !isReversedEntry && !isReversalEntry && {
+    // Allow Delete on all JEs that are not reversed
+    canEdit() && !isReversedEntry && !isReversalEntry && {
       label: 'Delete Entry', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
     },
     // If it's a draft, allow deleting the draft regardless of type

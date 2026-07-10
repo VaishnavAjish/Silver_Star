@@ -466,8 +466,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator', 'finance'), asyn
     if (!jeR.rows.length) throw new Error('Journal entry not found');
     const je = jeR.rows[0];
 
-    // 2. Validate it's manual
-    if (je.source_type !== 'manual') throw new Error('Only manual journal entries can be edited directly');
+    // 2. Removed manual check as requested by user
 
     // 3. Fetch old lines and revert balances if posted
     const oldLinesR = await client.query('SELECT account_id as "accountId", debit, credit FROM je_lines WHERE je_id = $1', [je.id]);
@@ -526,10 +525,7 @@ router.delete('/:id', authenticate, authorize('admin', 'operator', 'finance'), a
     if (!jeR.rows.length) throw new Error('Journal entry not found');
     const je = jeR.rows[0];
 
-    // 2. Validate it's manual
-    if (je.source_type !== 'manual' && je.source_type !== 'opening_balance') {
-      throw new Error('Only manual journal entries can be deleted directly. Please cancel the source document instead.');
-    }
+    // 2. Removed manual check as requested by user
 
     // 3. Revert balances if posted
     if (je.status === 'posted') {
