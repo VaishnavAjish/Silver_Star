@@ -77,7 +77,9 @@ export default function NewTransferPage() {
         .filter(t => t.status?.toLowerCase() === 'pending')
         .forEach(t => (t.lots || []).forEach(l => ids.add(l.lot_id)));
       setPendingLotIds(ids);
-    } catch {}
+    } catch (err) {
+      console.error('[NewTransferPage] loadPending failed:', err);
+    }
   }, [api]);
 
   useEffect(() => {

@@ -257,7 +257,8 @@ export default function StockTransferPage() {
     try {
       const res = await api.get('/api/stock-transfer/pending');
       setTransfers(res.data || res || []);
-    } catch {
+    } catch (err) {
+      console.error('[StockTransferPage] fetchTransfers failed:', err);
       toast.error('Failed to load transfers');
     } finally {
       setLoading(false);
@@ -379,7 +380,9 @@ export default function StockTransferPage() {
       } else {
         printTable('Stock Transfers', subtitle, headers, rows);
       }
-    } catch {}
+    } catch (err) {
+      console.error('[StockTransferPage] export failed:', err);
+    }
     finally { setExporting(false); }
   };
 

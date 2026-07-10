@@ -39,6 +39,7 @@ async function genTransferNum(client) {
         ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
         ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
         ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);
+        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS destination_department_id INTEGER REFERENCES departments(id);
 
         CREATE TABLE IF NOT EXISTS pending_transfer_lots (
           id SERIAL PRIMARY KEY,
@@ -66,6 +67,23 @@ async function genTransferNum(client) {
     }
   } catch (e) {
     logger.error('stockTransfer DB init failed', { error: e.message, stack: e.stack });
+  }
+})();
+
+// ── Startup Schema Validation ──
+// Verifies the column added by the hardening migration exists before
+// the module accepts any requests. Logs a precise developer error if not.
+(async () => {
+  try {
+    await pool.query(`SELECT destination_department_id FROM pending_transfers LIMIT 0`);
+    logger.info('stockTransfer: schema validation passed — all required columns present');
+  } catch (e) {
+    logger.error(
+      'stockTransfer: SCHEMA VALIDATION FAILED — destination_department_id is missing from ' +
+      'pending_transfers. Run: ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS ' +
+      'destination_department_id INTEGER REFERENCES departments(id);',
+      { error: e.message }
+    );
   }
 })();
 
@@ -128,7 +146,7 @@ router.post('/preview', authenticate, async (req, res) => {
       source_location_name: lots[0].source_department_name,
       destination_location_name: dest?.name || 'Unknown',
     });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[stockTransfer.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[stockTransfer] /preview error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 router.post('/pending', authenticate, async (req, res) => {
@@ -802,7 +820,7 @@ router.get('/', authenticate, async (req, res) => {
     );
 
     res.json({ data: rows, total: parseInt(countR.rows[0].count) });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[stockTransfer.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[stockTransfer] GET / error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 router.get('/history', authenticate, async (req, res) => {
@@ -875,7 +893,7 @@ router.get('/history', authenticate, async (req, res) => {
       page: parseInt(page),
       pageSize: limit,
     });
-  } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[stockTransfer.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
+  } catch (err) { logger.error('[stockTransfer] /history error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;

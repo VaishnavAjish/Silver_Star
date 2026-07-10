@@ -8,15 +8,15 @@
 module.exports = {
   apps: [
     {
-      name: 'silverstar-grow',
+      name: 'silverstar-api',
       cwd: './server',
       script: 'index.js',
 
-      // Cluster mode: one worker per CPU core for full throughput.
-      // Socket.IO horizontal scaling requires REDIS_URL to be set
-      // so all workers share the same adapter.
-      instances: process.env.PM2_INSTANCES || 'max',
-      exec_mode: 'cluster',
+      // Fork mode: single process. The server does not call process.send('ready')
+      // so cluster mode with wait_ready would cause PM2 to hang and retry.
+      // To enable multi-core clustering in future, add process.send('ready') after
+      // server.listen() callback and set exec_mode back to 'cluster'.
+      exec_mode: 'fork',
 
       watch: false,
       max_memory_restart: '768M',

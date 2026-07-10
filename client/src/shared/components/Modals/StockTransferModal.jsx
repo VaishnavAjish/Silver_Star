@@ -102,7 +102,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
           setTransferQtys(qtys);
         }
       })
-      .catch(() => {})
+      .catch((err) => { console.error('[StockTransferModal] failed to load locations/departments:', err); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open]);
@@ -381,7 +381,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
                                   code: lot.item_name || '',
                                   _lot: lot,
                                 }));
-                              } catch { return []; }
+                              } catch (err) { console.error('[StockTransferModal] lot search failed:', err); return []; }
                             }}
                             placeholder="Search lot…"
                             style={{ minWidth: 0, width: '100%' }}
