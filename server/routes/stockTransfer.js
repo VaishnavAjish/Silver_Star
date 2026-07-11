@@ -19,11 +19,10 @@ async function genTransferNum(client) {
     const client = await pool.primaryPool.connect();
     try {
       // Step 1: Sequences and tables (app user has permission for these)
-      await client.query(`
-        CREATE SEQUENCE IF NOT EXISTS st_seq START 1;
-        CREATE SEQUENCE IF NOT EXISTS lot_op_id_seq START 1;
-
-        CREATE TABLE IF NOT EXISTS pending_transfers (
+      const queries = [
+        `CREATE SEQUENCE IF NOT EXISTS st_seq START 1;`,
+        `CREATE SEQUENCE IF NOT EXISTS lot_op_id_seq START 1;`,
+        `CREATE TABLE IF NOT EXISTS pending_transfers (
           id SERIAL PRIMARY KEY,
           transfer_id VARCHAR(50) UNIQUE NOT NULL,
           source_location_id INTEGER REFERENCES locations(id),
@@ -35,19 +34,26 @@ async function genTransferNum(client) {
           created_by INTEGER REFERENCES users(id),
           approved_by INTEGER REFERENCES users(id),
           approved_at TIMESTAMP
-        );
-        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
-        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
-        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);
-        ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS destination_department_id INTEGER REFERENCES departments(id);
-
-        CREATE TABLE IF NOT EXISTS pending_transfer_lots (
+        );`,
+        `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);`,
+        `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;`,
+        `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);`,
+        `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS destination_department_id INTEGER REFERENCES departments(id);`,
+        `CREATE TABLE IF NOT EXISTS pending_transfer_lots (
           id SERIAL PRIMARY KEY,
           pending_transfer_id INTEGER REFERENCES pending_transfers(id) ON DELETE CASCADE,
           lot_id INTEGER REFERENCES inventory(id),
           transfer_qty NUMERIC(15,4)
-        );
-      `);
+        );`
+      ];
+
+      for (const q of queries) {
+        try {
+          await client.query(q);
+        } catch (queryErr) {
+          logger.warn(`stockTransfer init query failed: ${q.substring(0, 50)}...`, { error: queryErr.message });
+        }
+      }
       logger.info('stockTransfer DB init complete (sequences + tables ready)');
     } finally {
       client.release();
@@ -230,7 +236,7 @@ router.get('/pending/:id/debug', authenticate, async (req, res) => {
 router.get('/pending', authenticate, async (req, res) => {
   try {
     const { status } = req.query;
-    const statusFilter = status ? `AND pt.status = $1` : '';
+    const statusFilter = status ? `WHERE pt.status = $1` : '';
     const params = status ? [status] : [];
 
     const { rows } = await pool.query(`
