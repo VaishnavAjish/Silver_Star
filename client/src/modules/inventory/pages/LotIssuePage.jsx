@@ -196,7 +196,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const showConsumables = isGrowth || (selectedProcess ? !!selectedProcess.allows_consumables : false);
 
   // Phase 35: Enforce inventory filtering and machine type filtering based on process group
-  let allowedCategories = selectedProcess?.input_item_category ? [selectedProcess.input_item_category.trim()] : [];
+  let allowedCategories = selectedProcess?.input_item_category ? [selectedProcess.input_item_category.trim().toLowerCase()] : [];
   let eligType = (selectedProcess?.eligible_machine_type || '').trim().toLowerCase();
 
   if (isGrowth) {
@@ -388,7 +388,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
         if (!found) { skipped++; continue; }
 
         // Respect category filter for current process
-        if (allowedCategories.length > 0 && !allowedCategories.includes(found.category)) {
+        if (allowedCategories.length > 0 && !allowedCategories.includes((found.category || '').toLowerCase())) {
           skipped++;
           continue;
         }
@@ -415,7 +415,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     let base = lots.filter(l => !selectedLotIds.has(l.id));
     // Phase 34: restrict to the process group's eligible input category
     if (allowedCategories.length > 0) {
-      base = base.filter(l => allowedCategories.includes(l.category));
+      base = base.filter(l => allowedCategories.includes((l.category || '').toLowerCase()));
     }
     if (!activeSearch) return base;
     const s = activeSearch.toLowerCase();
@@ -743,7 +743,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                           <th style={{ width: 90 }}>Barcode</th>
                           <th style={{ width: 110 }}>Available</th>
                           {/* TASK 2 / TASK 3: Dimension shown instead of Rate/Value */}
-                          <th style={{ width: 110 }}>Dimension</th>
+                          <th style={{ width: 140 }}>Dimension</th>
                           <th style={{ width: 130 }}>Issue Qty *</th>
                           <th style={{ width: 28 }}></th>
                         </tr>
