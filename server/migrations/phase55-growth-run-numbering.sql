@@ -21,6 +21,6 @@ SET run_no = 1 + (
     FROM lot_op_log l 
     WHERE l.lot_id = i.id AND l.operation_type = 'growth_again'
 )
-WHERE category = 'growth_run';
+WHERE item_id IN (SELECT id FROM items WHERE category = 'growth_run');
 
 COMMIT;
