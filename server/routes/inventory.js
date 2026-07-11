@@ -143,6 +143,7 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
       weight_gain: 'inv.weight_gain',
       growth_pct: 'inv.growth_pct',
       batch_no: 'inv.batch_no',
+      run_no: 'inv.run_no',
       remarks: 'inv.remarks',
       // Item fields
       item_id: 'inv.item_id',

@@ -15,7 +15,7 @@ import GlobalScanInput from '@features/scan/GlobalScanInput';
 import { resolveRouteMatch } from '../../router';
 import { NotificationCenter } from '../../shared/components/NotificationCenter';
 import Modal from '../../shared/components/Modal';
-
+import packageJson from '../../../../package.json';
 export const NAV = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/', module: 'dashboard', submodule: 'dashboard' },
   { label: 'Clipboard', icon: ClipboardList, path: '/clipboard', module: 'clipboard', submodule: 'clipboard' },
@@ -427,6 +427,10 @@ function LayoutInner() {
               <LogOut className="icon" size={16} />
               Logout
             </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ padding: '12px 16px', fontSize: 10, color: 'var(--g400)', textAlign: 'center', borderTop: '1px solid var(--sidebar-border)', fontFamily: 'var(--mono)' }}>
+            v{packageJson.version}
           </div>
         </div>
       </nav>
