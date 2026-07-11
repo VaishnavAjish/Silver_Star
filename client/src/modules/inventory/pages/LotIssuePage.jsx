@@ -633,13 +633,13 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                         <tr>
                           <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
-                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
+                          <th style={{ width: 130, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
                           <th style={{ width: 100, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
                           <th style={{ width: 62, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Cat</th>
                           <th style={{ width: 75, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Process</th>
                           <th style={{ width: 96, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
                           <th style={{ width: 50, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Unit</th>
-                          <th style={{ width: 120, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension (mm)</th>
+                          <th style={{ width: 170, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension (mm)</th>
                           <th style={{ width: 34, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
                         </tr>
                       </thead>
@@ -662,7 +662,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                           <td className="num">{effQty(lot).toFixed(4)}</td>
                           <td>{lot.unit}</td>
                           {/* TASK 2: Display dimensions; '—' when unavailable */}
-                          <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g700)' }}>
+                          <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g700)', whiteSpace: 'nowrap' }}>
                             {fmtDim(lot)}
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -737,11 +737,11 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                         <tr>
                           <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
-                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
+                          <th style={{ width: 140, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
                           <th style={{ width: 90, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
                           <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
                           {/* TASK 2 / TASK 3: Dimension shown instead of Rate/Value */}
-                          <th style={{ width: 140, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension</th>
+                          <th style={{ width: 170, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension</th>
                           <th style={{ width: 130, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Issue Qty *</th>
                           <th style={{ width: 28, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
                         </tr>
@@ -763,7 +763,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                                 {avail.toFixed(4)} {lot.unit}
                               </td>
                               {/* TASK 2: Dimension in selected panel */}
-                              <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g600)' }}>
+                              <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g600)', whiteSpace: 'nowrap' }}>
                                 {fmtDim(lot)}
                               </td>
                               <td>
