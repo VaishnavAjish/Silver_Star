@@ -680,11 +680,13 @@ export default function InventoryPage() {
         return row.lot_op_id != null
           ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--g600)', letterSpacing: 1 }}>{row.lot_op_id}</span>
           : '—';
-      case 'lot_code':
+      case 'lot_code': {
+        const isGrowth = row.category === 'growth_run' || row.item_category === 'growth_run';
+        const runBadge = (isGrowth && row.run_no && row.run_no > 1) ? ` (R${row.run_no})` : '';
         return (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <span className="cell-link" style={{ fontFamily: 'var(--mono)', fontSize: 11.5 }}>
-              {row.lot_code || row.lot_number}
+              {(row.lot_code || row.lot_number) + runBadge}
             </span>
             {pendingLotIds.has(row.id) && (
               <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 8, background: '#FEF3C7', color: '#92400E', border: '1px solid #FCD34D', fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -693,6 +695,7 @@ export default function InventoryPage() {
             )}
           </span>
         );
+      }
       case 'parent_lot_name':
         return row.parent_lot_name
           ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--g600)' }}>{row.parent_lot_name}</span>

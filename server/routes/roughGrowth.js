@@ -315,9 +315,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     const effectiveMachineId = linkedProcess ? linkedProcess.machine_id : null;
 
-    // Generate growth number
-    const seqR = await client.query("SELECT nextval('gr_seq') as num");
-    const growthNumber = `GR-${String(seqR.rows[0].num).padStart(4, '0')}`;
+    // Inherit the true Manufacturing Batch Number (Growth Number) from the Biscuit
+    const growthNumber = biscuit.lot_number;
 
     // Calculate totals
     let totalLots = lines.length;

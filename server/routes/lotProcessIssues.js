@@ -628,6 +628,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         growthRun = await createGrowthRun(client, machProc.id, { createdBy: req.user.id });
         if (growthRun) {
           if (isGrowthAgain) {
+            await client.query('UPDATE inventory SET run_no = run_no + 1 WHERE id = $1', [growthRun.id]);
             await logOp(client, growthRun.id, 'growth_again', 'machine_process', machProc.id,
               0, 'IN PROCESS',
               `Growth Run ${growthRun.lot_number} re-issued into Growth Process ${processNum} (IN STOCK -> IN PROCESS)`, req.user.id);

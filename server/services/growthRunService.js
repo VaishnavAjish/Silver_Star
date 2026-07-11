@@ -15,17 +15,29 @@ const { nextLotOpId } = require('./seedLotCodeService');
 
 /**
  * Generate the next Growth Run number.
- * Format (Phase 34): GR-YYYYMM-NNNN  e.g. GR-202606-0001
- * The numeric part is drawn from the global growth_run_seq for guaranteed
- * uniqueness (lot_number is UNIQUE); the YYYYMM prefix makes runs sortable
- * and human-readable by month without risking a concurrent-reset collision.
- * @param {object} client  active transaction client
+ * Format (Phase 55): MachineCode-MMMYY-XXX  e.g. SSD02-MAY26-001
+ * Sequence resets every month per machine.
+ * @param {object} client      active transaction client
+ * @param {string} machineCode the machine's short code (e.g., 'SSD02')
+ * @param {Date}   dateObj     the date for the sequence (defaults to now)
  */
-async function nextGrowthRunNumber(client) {
-  const { rows } = await client.query("SELECT nextval('growth_run_seq') AS n");
-  const d  = new Date();
-  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
-  return `GR-${ym}-${String(rows[0].n).padStart(4, '0')}`;
+async function nextGrowthRunNumber(client, machineCode, dateObj = new Date()) {
+  const shortMonth = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  const shortYear  = String(dateObj.getFullYear()).slice(-2);
+  const ym         = `${shortMonth}${shortYear}`; // e.g., 'MAY26'
+
+  // Upsert the sequence for this machine and month
+  const { rows } = await client.query(
+    `INSERT INTO growth_monthly_seqs (machine_code, year_month, last_val)
+     VALUES ($1, $2, 1)
+     ON CONFLICT (machine_code, year_month) 
+     DO UPDATE SET last_val = growth_monthly_seqs.last_val + 1
+     RETURNING last_val`,
+    [machineCode, ym]
+  );
+  
+  const seq = String(rows[0].last_val).padStart(3, '0');
+  return `${machineCode}-${ym}-${seq}`;
 }
 
 /**
@@ -130,7 +142,7 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   }
 
   // 3. Allocate identifiers
-  const growthRunNumber = await nextGrowthRunNumber(client);
+  const growthRunNumber = await nextGrowthRunNumber(client, mp.machine_code);
   const lotOpId         = await nextLotOpId(client);
   const biscuitItemId   = await getBiscuitItemId(client);
 

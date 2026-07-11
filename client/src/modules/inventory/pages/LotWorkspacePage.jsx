@@ -231,7 +231,10 @@ export default function LotWorkspacePage() {
 
   const isActive    = lot.status === 'IN STOCK';
   const isInProcess = lot.status === 'IN PROCESS';
-  const displayCode = lot.lot_code || lot.lot_number;
+  
+  const isGrowthRun = lot.category === 'growth_run' || lot.item_category === 'growth_run';
+  const runBadge = (isGrowthRun && lot.run_no && lot.run_no > 1) ? ` (R${lot.run_no})` : '';
+  const displayCode = (lot.lot_code || lot.lot_number) + runBadge;
   const { bg, color, border } = sc(lot.status);
   const eff = lot.unit === 'CT' ? parseFloat(lot.weight || 0) : parseFloat(lot.qty || 0);
 
@@ -244,7 +247,6 @@ export default function LotWorkspacePage() {
   // Correction 2,3,4: Determine if this is a Growth Run (biscuit) that is IN PROCESS.
   // Growth Runs must complete via the Growth Run Return dialog on the Control Tower,
   // NOT through the legacy Seed Return path. We direct operators to Manufacturing.
-  const isGrowthRun = lot.category === 'growth_run';
   
   // Find the active process issue to determine the actual machine process type
   const activeProcessIssue = processData?.issues?.find(i => i.status === 'OPEN');
