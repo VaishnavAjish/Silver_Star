@@ -13,8 +13,9 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
+import Barcode from '../../../shared/components/Barcode';
 
-const CANNOT_ISSUE = ['CONSUMED', 'SOLD', 'DISPOSED', 'DAMAGED', 'ARCHIVED'];
+const CANNOT_ISSUE = ['CONSUMED', 'SOLD', 'DISPOSED', 'DAMAGED', 'ARCHIVED', 'IN PROCESS'];
 
 // Category color for process type badge in section header
 const CATEGORY_COLORS = {
@@ -417,7 +418,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   useEffect(() => {
     const lotId = initialLotId || searchParams.get('lot_id');
     if (!lotId || !lots.length) return;
-    const found = lots.find(l => String(l.id) === lotId);
+    const found = lots.find(l => String(l.id) === String(lotId));
     if (found && !selectedLotIds.has(found.id)) {
       setSelectedLots([{ lot: found, issuedQty: '' }]);
     }
@@ -625,6 +626,22 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                     placeholder="Search lots or scan barcode…"
                     value={search}
                     onChange={e => { setSearch(e.target.value); setBarcodeQuery(''); setPage(1); }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && search.trim()) {
+                        const sq = search.trim().toLowerCase();
+                        setBarcodeQuery(sq);
+                        setPage(1);
+                        const match = lots.find(l =>
+                          l.lot_number?.toLowerCase() === sq ||
+                          l.lot_code?.toLowerCase() === sq
+                        );
+                        if (match && !selectedLotIds.has(match.id)) {
+                          addLot(match);
+                          setSearch('');
+                          setBarcodeQuery('');
+                        }
+                      }
+                    }}
                   />
                   {(search || barcodeQuery) && (
                     <button
@@ -663,6 +680,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   disabled={clipboardInvCount === 0}
                 >
                   <Clipboard size={13} />
+                  <span style={{ marginLeft: 4 }}>Load from Clip</span>
                   {clipboardInvCount > 0 && (
                     <span style={{
                       marginLeft: 4, background: 'var(--brand)', color: '#fff',
@@ -686,6 +704,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       <tr>
                         <th>Lot Code</th>
                         <th>Item</th>
+                        <th style={{ width: 100 }}>Barcode</th>
                         <th style={{ width: 62 }}>Cat</th>
                         <th style={{ width: 75 }}>Process</th>
                         <th style={{ width: 96 }}>Available</th>
@@ -704,6 +723,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                             <span className="cell-link">{lot.lot_code || lot.lot_number}</span>
                           </td>
                           <td style={{ fontSize: 11 }}>{lot.item_name}</td>
+                          <td>
+                            <Barcode value={lot.lot_code || lot.lot_number || 'UNKNOWN'} width={1} height={20} displayValue={false} />
+                          </td>
                           <td>
                             <span className="badge b-stock" style={{ fontSize: 9 }}>{lot.category}</span>
                           </td>
@@ -730,7 +752,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       ))}
                       {filteredLots.length === 0 && !loading && (
                         <tr>
-                          <td colSpan={8} style={{
+                          <td colSpan={9} style={{
                             textAlign: 'center', color: 'var(--g400)',
                             padding: 40, fontStyle: 'italic', fontSize: 12,
                           }}>
@@ -789,6 +811,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                         <tr>
                           <th>Lot Code</th>
                           <th>Item</th>
+                          <th style={{ width: 90 }}>Barcode</th>
                           <th style={{ width: 110 }}>Available</th>
                           {/* TASK 2 / TASK 3: Dimension shown instead of Rate/Value */}
                           <th style={{ width: 110 }}>Dimension</th>
@@ -806,6 +829,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                                 {lot.lot_code || lot.lot_number}
                               </td>
                               <td style={{ fontSize: 11 }}>{lot.item_name}</td>
+                              <td>
+                                <Barcode value={lot.lot_code || lot.lot_number || 'UNKNOWN'} width={1} height={20} displayValue={false} />
+                              </td>
                               <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
                                 {avail.toFixed(4)} {lot.unit}
                               </td>
@@ -840,7 +866,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, fontSize: 11, paddingRight: 8 }}>
+                          <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700, fontSize: 11, paddingRight: 8 }}>
                             Total to issue:
                           </td>
                           {/* TASK 3: No total value / cost column */}
