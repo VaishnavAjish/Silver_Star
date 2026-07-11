@@ -387,11 +387,11 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
         const found = lots.find(l => l.id === lotId || String(l.id) === String(lotId));
         if (!found) { skipped++; continue; }
 
-        // Respect category filter for current process
-        if (allowedCategories.length > 0 && !allowedCategories.includes((found.category || '').toLowerCase())) {
-          skipped++;
-          continue;
-        }
+        // Respect category filter for current process (temporarily disabled)
+        // if (allowedCategories.length > 0 && !allowedCategories.includes((found.category || '').toLowerCase())) {
+        //   skipped++;
+        //   continue;
+        // }
 
         if (CANNOT_ISSUE.includes(found.status)) { skipped++; continue; }
 
@@ -414,9 +414,10 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const filteredLots = useMemo(() => {
     let base = lots.filter(l => !selectedLotIds.has(l.id));
     // Phase 34: restrict to the process group's eligible input category
-    if (allowedCategories.length > 0) {
-      base = base.filter(l => allowedCategories.includes((l.category || '').toLowerCase()));
-    }
+    // (temporarily disabled to allow issuing any lot to any process)
+    // if (allowedCategories.length > 0) {
+    //   base = base.filter(l => allowedCategories.includes((l.category || '').toLowerCase()));
+    // }
     if (!activeSearch) return base;
     const s = activeSearch.toLowerCase();
     return base.filter(l =>
