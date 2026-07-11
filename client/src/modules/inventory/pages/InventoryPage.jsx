@@ -31,6 +31,7 @@ const ALL_COLS = [
   { key: 'parent_lot_name', label: 'Parent Lot', width: 110 },
   { key: 'root_lot_name', label: 'Root Lot', width: 110 },
   { key: 'category', label: 'Category', width: 90 },
+  { key: 'run_no', label: 'Run No', width: 80, num: true },
   { key: 'current_process_name', label: 'Process', width: 130 },
   { key: 'operation_type', label: 'Op. Type', width: 80 },
   { key: 'split_level', label: 'Level', width: 55 },
