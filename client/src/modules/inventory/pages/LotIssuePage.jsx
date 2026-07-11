@@ -297,15 +297,6 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     return () => { cancelled = true; };
   }, []); // intentional empty deps — one-time load on mount
 
-  // When process type changes, prefill default runtime if available.
-  // TASK 4: Never silently clear lots — show a dialog when lots are selected.
-  const handleProcessChange = useCallback((code) => {
-    if (code === processType) return; // no-op
-
-    // No warning dialog, just keep selection
-    applyProcessChange(code, true);
-  }, [processType, applyProcessChange]);
-
   const applyProcessChange = useCallback((code, keepLots) => {
     setProcessType(code);
     const proc = processes.find(p => p.process_code === code);
@@ -321,6 +312,15 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
       setSelectedLots([]);
     }
   }, [processes]);
+
+  // When process type changes, prefill default runtime if available.
+  // TASK 4: Never silently clear lots — show a dialog when lots are selected.
+  const handleProcessChange = useCallback((code) => {
+    if (code === processType) return; // no-op
+
+    // No warning dialog, just keep selection
+    applyProcessChange(code, true);
+  }, [processType, applyProcessChange]);
 
 
 
