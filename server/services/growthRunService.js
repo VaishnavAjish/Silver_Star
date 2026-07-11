@@ -22,6 +22,7 @@ const { nextLotOpId } = require('./seedLotCodeService');
  * @param {Date}   dateObj     the date for the sequence (defaults to now)
  */
 async function nextGrowthRunNumber(client, machineCode, dateObj = new Date()) {
+  const cleanMachineCode = machineCode.replace(/-/g, '');
   const shortMonth = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
   const shortYear  = String(dateObj.getFullYear()).slice(-2);
   const ym         = `${shortMonth}${shortYear}`; // e.g., 'MAY26'
@@ -33,11 +34,11 @@ async function nextGrowthRunNumber(client, machineCode, dateObj = new Date()) {
      ON CONFLICT (machine_code, year_month) 
      DO UPDATE SET last_val = growth_monthly_seqs.last_val + 1
      RETURNING last_val`,
-    [machineCode, ym]
+    [cleanMachineCode, ym]
   );
   
   const seq = String(rows[0].last_val).padStart(3, '0');
-  return `${machineCode}-${ym}-${seq}`;
+  return `${cleanMachineCode}-${ym}-${seq}`;
 }
 
 /**
@@ -66,6 +67,7 @@ async function getBiscuitItemId(client) {
 async function loadProcessSeedContext(client, machineProcessId) {
   const { rows } = await client.query(
     `SELECT pi.id           AS issue_id,
+            pi.issue_date,
             pi.source_lot_id,
             pi.process_lot_id,
             pi.issued_qty,
@@ -142,7 +144,10 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   }
 
   // 3. Allocate identifiers
-  const growthRunNumber = await nextGrowthRunNumber(client, mp.machine_code);
+  const issueDateObj = seedCtx.primarySeed && seedCtx.primarySeed.issue_date 
+    ? new Date(seedCtx.primarySeed.issue_date) 
+    : new Date();
+  const growthRunNumber = await nextGrowthRunNumber(client, mp.machine_code, issueDateObj);
   const lotOpId         = await nextLotOpId(client);
   const biscuitItemId   = await getBiscuitItemId(client);
 
