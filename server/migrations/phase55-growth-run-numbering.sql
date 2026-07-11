@@ -19,7 +19,7 @@ UPDATE inventory i
 SET run_no = 1 + (
     SELECT COUNT(*) 
     FROM lot_op_log l 
-    WHERE l.lot_id = i.id AND l.operation_type = 'growth_again'
+    WHERE l.lot_id = i.id AND l.operation = 'growth_again'
 )
 WHERE item_id IN (SELECT id FROM items WHERE category = 'growth_run');
 
