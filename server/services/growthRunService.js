@@ -116,6 +116,7 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   const mpRes = await client.query(
     `SELECT mp.*, m.department_id AS machine_department_id, m.location_id AS machine_location_id,
             m.code AS machine_code,
+            m.name AS machine_name,
             pm.process_group
        FROM machine_processes mp
        JOIN machines m ON m.id = mp.machine_id
@@ -147,7 +148,8 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   const issueDateObj = seedCtx.primarySeed && seedCtx.primarySeed.issue_date 
     ? new Date(seedCtx.primarySeed.issue_date) 
     : new Date();
-  const growthRunNumber = await nextGrowthRunNumber(client, mp.machine_code, issueDateObj);
+  const machineIdentifier = mp.machine_name || mp.machine_code;
+  const growthRunNumber = await nextGrowthRunNumber(client, machineIdentifier, issueDateObj);
   const lotOpId         = await nextLotOpId(client);
   const biscuitItemId   = await getBiscuitItemId(client);
 
