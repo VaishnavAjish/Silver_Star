@@ -630,19 +630,19 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   <div className="empty-state" style={{ padding: 60 }}><div className="spinner" /></div>
                 ) : (
                   <table className="dgrid">
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
-                      <tr>
-                        <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
-                        <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
-                        <th style={{ width: 100, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
-                        <th style={{ width: 62, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Cat</th>
-                        <th style={{ width: 75, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Process</th>
-                        <th style={{ width: 96, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
-                        <th style={{ width: 50, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Unit</th>
-                        <th style={{ width: 120, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension (mm)</th>
-                        <th style={{ width: 34, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
-                      </tr>
-                    </thead>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
+                        <tr>
+                          <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
+                          <th style={{ width: 100, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
+                          <th style={{ width: 62, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Cat</th>
+                          <th style={{ width: 75, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Process</th>
+                          <th style={{ width: 96, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
+                          <th style={{ width: 50, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Unit</th>
+                          <th style={{ width: 120, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension (mm)</th>
+                          <th style={{ width: 34, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
+                        </tr>
+                      </thead>
                     <tbody>
                       {paginatedItems.map(lot => (
                         <tr key={lot.id} style={{ cursor: 'pointer' }} onClick={() => addLot(lot)}>
@@ -736,7 +736,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                     <table className="je-lines-table">
                       <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                         <tr>
-                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
+                          <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
                           <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
                           <th style={{ width: 90, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
                           <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
