@@ -2,6 +2,8 @@
   "name": "silverstar-grow",
   "version": "1.2.0",
   "private": true,
+  "author": "VaishnavAjish <vaishnavajish23@gmail.com>",
+  "license": "MIT",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "cd server && node --watch index.js",
