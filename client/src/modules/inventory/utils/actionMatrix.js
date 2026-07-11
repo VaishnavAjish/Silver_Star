@@ -194,11 +194,6 @@ export function getAllowedActions(lot) {
     granted = [C.TRANSFER, C.SPLIT, C.ISSUE_PROCESS];
   }
   const flags = toFlags(granted);
-  
-  if (category === CATEGORY.SEED && status === 'IN STOCK') {
-    flags.canViewHistory = false;
-  }
-  
   return flags;
 }
 
