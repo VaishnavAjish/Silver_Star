@@ -630,20 +630,17 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   <div className="empty-state" style={{ padding: 60 }}><div className="spinner" /></div>
                 ) : (
                   <table className="dgrid">
-                    <thead>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                       <tr>
-                        <th>Lot Code</th>
-                        <th>Item</th>
-                        <th style={{ width: 100 }}>Barcode</th>
-                        <th style={{ width: 62 }}>Cat</th>
-                        <th style={{ width: 75 }}>Process</th>
-                        <th style={{ width: 96 }}>Available</th>
-                        <th style={{ width: 50 }}>Unit</th>
-                        {/* TASK 2: Dimension column replaces Rate (₹).
-                            TASK 3: Rate / cost fields removed — operators should
-                            never see accounting values. */}
-                        <th style={{ width: 120 }}>Dimension (mm)</th>
-                        <th style={{ width: 34 }}></th>
+                        <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
+                        <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
+                        <th style={{ width: 100, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
+                        <th style={{ width: 62, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Cat</th>
+                        <th style={{ width: 75, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Process</th>
+                        <th style={{ width: 96, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
+                        <th style={{ width: 50, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Unit</th>
+                        <th style={{ width: 120, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension (mm)</th>
+                        <th style={{ width: 34, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -737,16 +734,16 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                 {selectedLots.length > 0 && (
                   <div style={{ overflow: 'auto', maxHeight: 230, padding: '0 12px 10px' }}>
                     <table className="je-lines-table">
-                      <thead>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                         <tr>
-                          <th>Lot Code</th>
-                          <th>Item</th>
-                          <th style={{ width: 90 }}>Barcode</th>
-                          <th style={{ width: 110 }}>Available</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
+                          <th style={{ width: 90, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
+                          <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Available</th>
                           {/* TASK 2 / TASK 3: Dimension shown instead of Rate/Value */}
-                          <th style={{ width: 140 }}>Dimension</th>
-                          <th style={{ width: 130 }}>Issue Qty *</th>
-                          <th style={{ width: 28 }}></th>
+                          <th style={{ width: 140, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Dimension</th>
+                          <th style={{ width: 130, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Issue Qty *</th>
+                          <th style={{ width: 28, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
                         </tr>
                       </thead>
                       <tbody>
