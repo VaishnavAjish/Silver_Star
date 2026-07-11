@@ -272,7 +272,23 @@ export default function LotWorkspacePage() {
     // here. A biscuit in a laser/cut process must complete via Growth Output, not this
     // dimension-measurement dialog.
     perms.canCompleteGrowthRun && isCurrentlyInCvdGrowth && { label: 'Complete Growth Run', icon: <CheckCircle size={12} />, fn: () => setShowGrowthReturn(true), accent: true },
+    // TASK 5: Return from Process — navigates directly to LotReturnPage using the
+    // open process issue id. Operator does not need to search Process Issues manually.
+    // Only available for IN PROCESS lots via actionMatrix (seed / rough / gas / consumable).
+    // growth_run IN PROCESS uses canCompleteGrowthRun (above) instead.
+    perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => {
+      const openIssue = processData?.issues?.find(i => i.status === 'OPEN');
+      if (openIssue) {
+        navigate(`/inventory/process-issues/${openIssue.id}/return`);
+      } else if (processLoaded) {
+        toast.error('No open process issue found for this lot');
+      } else {
+        // Process data not yet loaded — navigate to process issues filtered by lot
+        navigate(`/inventory/process-issues?search=${encodeURIComponent(displayCode)}`);
+      }
+    }, accent: true },
   ].filter(Boolean);
+
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

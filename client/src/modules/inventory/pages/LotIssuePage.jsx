@@ -5,9 +5,12 @@ import Paginator from '../../../shared/components/Paginator';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import OperatorSelect from '../../../features/operator/OperatorSelect';
+import { useClipboard } from '../../../core/context/ClipboardContext';  // TASK 1
 import toast from 'react-hot-toast';
 import {
-  Play, Search, Plus, X, Package, AlertCircle, Info,
+  Play, Search, Plus, X, Package, AlertCircle, Info, Clipboard,
+  ScanLine,   // TASK 7: barcode scan trigger
+  AlertTriangle,
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 
@@ -25,14 +28,28 @@ function effQty(l) {
   return l.unit === 'CT' ? parseFloat(l.weight || 0) : parseFloat(l.qty || 0);
 }
 
+// ── TASK 2: Format dimension for display ──────────────────────────────────────
+// Shows Length × Width × Height in mm when at least one value is present.
+// Returns '—' when all dimension fields are null/0 so we never show empty strings.
+function fmtDim(lot) {
+  const l = parseFloat(lot.dim_length || 0);
+  const w = parseFloat(lot.dim_depth  || lot.dim_width || 0);
+  const h = parseFloat(lot.dim_height || 0);
+  if (!l && !w && !h) return '—';
+  const fmt = v => v ? v.toFixed(2) : '—';
+  return `${fmt(l)} × ${fmt(w)} × ${fmt(h)}`;
+}
+
 // ── Machine status badge ──────────────────────────────────────────────────────
 const STATUS_CFG = {
-  idle:        { label: 'Idle',        color: '#757575', bg: '#F5F5F5' },
-  running:     { label: 'Running',     color: '#2E7D32', bg: '#E8F5E9' },
-  hold:        { label: 'Hold',        color: '#E65100', bg: '#FFF3E0' },
-  maintenance: { label: 'Maintenance', color: '#F57F17', bg: '#FFF8E1' },
-  breakdown:   { label: 'Breakdown',   color: '#C62828', bg: '#FFEBEE' },
-  cleaning:    { label: 'Cleaning',    color: '#6A1B9A', bg: '#F3E5F5' },
+  idle:            { label: 'Idle',            color: '#757575', bg: '#F5F5F5' },
+  running:         { label: 'Running',         color: '#2E7D32', bg: '#E8F5E9' },
+  hold:            { label: 'Hold',            color: '#E65100', bg: '#FFF3E0' },
+  maintenance:     { label: 'Maintenance',     color: '#F57F17', bg: '#FFF8E1' },
+  breakdown:       { label: 'Breakdown',       color: '#C62828', bg: '#FFEBEE' },
+  cleaning:        { label: 'Cleaning',        color: '#6A1B9A', bg: '#F3E5F5' },
+  awaiting_output: { label: 'Awaiting Output', color: '#1565C0', bg: '#E3F2FD' },
+  completed:       { label: 'Completed',       color: '#1B5E20', bg: '#E8F5E9' },
 };
 
 function MachineStatusBadge({ status }) {
@@ -60,6 +77,107 @@ function SectionHeader({ children }) {
   );
 }
 
+// ── TASK 4: Process Change Confirmation Dialog ────────────────────────────────
+// Never silently drops the lot selection when the operator changes process type.
+function ProcessChangeDialog({ onKeep, onClear }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 500,
+        background: 'rgba(0,0,0,.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={onKeep}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 10, padding: '24px 28px',
+          boxShadow: '0 8px 32px rgba(0,0,0,.18)', maxWidth: 420, width: '90%',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <AlertTriangle size={18} color="#E65100" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#E65100' }}>
+            Process Changed
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: '#424242', marginBottom: 20, lineHeight: 1.5 }}>
+          Changing the process type may invalidate the current lot selection
+          (category or machine type may differ).
+          Do you want to keep the current selection or clear it?
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            className="btn btn-primary"
+            style={{ fontSize: 13 }}
+            onClick={onKeep}
+          >
+            Keep Selection
+          </button>
+          <button
+            className="btn"
+            style={{ fontSize: 13, background: '#FFEBEE', color: '#C62828', border: '1px solid #EF9A9A' }}
+            onClick={onClear}
+          >
+            Clear Selection
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── TASK 6: Non-Idle Machine Warning Dialog ───────────────────────────────────
+// Warning only — does not block selection.
+function MachineWarningDialog({ machine, onContinue, onCancel }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 500,
+        background: 'rgba(0,0,0,.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 10, padding: '24px 28px',
+          boxShadow: '0 8px 32px rgba(0,0,0,.18)', maxWidth: 420, width: '90%',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <AlertTriangle size={18} color="#E65100" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#E65100' }}>
+            Machine Not Idle
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: '#424242', marginBottom: 6, lineHeight: 1.5 }}>
+          Machine <strong>{machine?.code} — {machine?.name}</strong> currently has
+          an active process (<MachineStatusBadge status={machine?.machine_status} />).
+        </p>
+        <p style={{ fontSize: 12, color: '#757575', marginBottom: 20, lineHeight: 1.5 }}>
+          You can still continue, but confirm with the operator before starting a
+          new process on this machine.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn" style={{ fontSize: 13 }} onClick={onCancel}>
+            Choose Different Machine
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ fontSize: 13, background: '#E65100', borderColor: '#E65100' }}
+            onClick={onContinue}
+          >
+            Continue Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Start Process Page
 // ═════════════════════════════════════════════════════════════════════════════
@@ -67,6 +185,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const navigate       = useNavigate();
   const api            = useApi();
   const [searchParams] = useSearchParams();
+
+  // TASK 1: Clipboard context — read-only, never mutates clipboard
+  const { items: clipboardItems } = useClipboard();
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [lots,      setLots]      = useState([]);
@@ -90,6 +211,23 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const [remarks,       setRemarks]       = useState('');
   const [saving,        setSaving]        = useState(false);
 
+  // ── TASK 4: Process Change dialog state ───────────────────────────────────
+  // pendingProcessCode holds the code the user clicked but hasn't confirmed yet.
+  const [pendingProcessCode,    setPendingProcessCode]    = useState(null);
+  const [showProcessChangeDialog, setShowProcessChangeDialog] = useState(false);
+
+  // ── TASK 6: Machine warning dialog state ──────────────────────────────────
+  const [pendingMachineId,   setPendingMachineId]   = useState(null);
+  const [showMachineWarning, setShowMachineWarning] = useState(false);
+
+  // ── TASK 7: Barcode search state (integration point) ─────────────────────
+  // When barcodeQuery is set, the lot browser search is overridden with the
+  // scanned value. The Barcode.jsx component is a CODE128 *renderer*, not a
+  // scanner. A scanner integration can set this value via a keydown listener
+  // attached to the search input, so the infrastructure is ready to connect.
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const activeSearch = barcodeQuery || search;
+
   // ── Derived from selected process rules ───────────────────────────────────
   const selectedProcess = useMemo(
     () => processes.find(p => p.process_code === processType) || null,
@@ -103,7 +241,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   // Boolean visibility flags — default to permissive (true) while loading
   const showInventory = selectedProcess ? !!selectedProcess.requires_inventory      : true;
   const showOperator  = selectedProcess ? !!selectedProcess.requires_operator       : false;
-  
+
   // Phase 35: Enforce GROWTH / LASER overrides
   const showRuntime   = isGrowth || isLaser || (selectedProcess ? !!selectedProcess.requires_runtime : false);
   const reqRuntime    = isGrowth; // Enforced required if GROWTH
@@ -127,17 +265,17 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   // Machines filtered by the eligible machine type.
   const filteredMachines = useMemo(() => {
     if (!eligType) return machines;
-    
+
     const searchStr = eligType.replace(/[_ -]/g, '').toLowerCase();
-    
+
     return machines.filter(m => {
       const typeStr = (m.machine_type || '').replace(/[_ -]/g, '').toLowerCase();
       if (!typeStr) return true; // Fallback: include machines with no assigned type
-      
+
       if (searchStr.includes('cvd') && typeStr.includes('cvd')) return true;
       if (searchStr.includes('laser') && typeStr.includes('laser')) return true;
       if (searchStr.includes('polish') && typeStr.includes('polish')) return true;
-      
+
       return typeStr.includes(searchStr) || searchStr.includes(typeStr);
     });
   }, [machines, eligType]);
@@ -212,8 +350,22 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     return () => { cancelled = true; };
   }, []); // intentional empty deps — one-time load on mount
 
-  // When process type changes, prefill default runtime if available
+  // When process type changes, prefill default runtime if available.
+  // TASK 4: Never silently clear lots — show a dialog when lots are selected.
   const handleProcessChange = useCallback((code) => {
+    if (code === processType) return; // no-op
+
+    if (selectedLots.length > 0) {
+      // Queue the change and ask the operator what to do
+      setPendingProcessCode(code);
+      setShowProcessChangeDialog(true);
+      return;
+    }
+    // No lots selected — apply immediately
+    applyProcessChange(code, false);
+  }, [processType, selectedLots]);
+
+  const applyProcessChange = useCallback((code, keepLots) => {
     setProcessType(code);
     const proc = processes.find(p => p.process_code === code);
     if (proc?.default_runtime_hours) {
@@ -221,12 +373,45 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     } else {
       setTargetRuntime('');
     }
-    // Phase 34: a new process may belong to a different group (GROWTH vs LASER)
-    // with a different eligible inventory category and machine type. Clear the
-    // lot + machine selections so nothing from the previous group carries over.
-    setSelectedLots([]);
+    // Clear machine because a new process group may require a different machine type.
     setMachineId('');
+    // TASK 4: Only clear lots when the operator explicitly chose "Clear Selection"
+    if (!keepLots) {
+      setSelectedLots([]);
+    }
   }, [processes]);
+
+  const handleProcessChangeProceed = useCallback((keepLots) => {
+    setShowProcessChangeDialog(false);
+    if (pendingProcessCode) {
+      applyProcessChange(pendingProcessCode, keepLots);
+      setPendingProcessCode(null);
+    }
+  }, [pendingProcessCode, applyProcessChange]);
+
+  // TASK 6: Machine selection — warn when machine is not idle
+  const handleMachineChange = useCallback((id) => {
+    const m = machines.find(m => String(m.id) === String(id));
+    if (m && m.machine_status && m.machine_status.toLowerCase() !== 'idle') {
+      // Non-idle machine: warn but don't block
+      setPendingMachineId(id);
+      setShowMachineWarning(true);
+      return;
+    }
+    setMachineId(id);
+  }, [machines]);
+
+  const handleMachineWarnContinue = useCallback(() => {
+    setShowMachineWarning(false);
+    setMachineId(pendingMachineId || '');
+    setPendingMachineId(null);
+  }, [pendingMachineId]);
+
+  const handleMachineWarnCancel = useCallback(() => {
+    setShowMachineWarning(false);
+    setPendingMachineId(null);
+    // Leave machineId unchanged (operator picks a different one)
+  }, []);
 
   // Pre-select lot from props or ?lot_id= URL param
   useEffect(() => {
@@ -236,7 +421,59 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     if (found && !selectedLotIds.has(found.id)) {
       setSelectedLots([{ lot: found, issuedQty: '' }]);
     }
-  }, [lots]);
+  }, [lots]); // eslint-disable-line — intentional on lots change only
+
+  // ── TASK 1: Load Clipboard ───────────────────────────────────────────────
+  // Merges clipboard inventory items into the Selected Lots panel.
+  // • Only loads items with entity_type === 'inventory'.
+  // • Skips items already selected (dedup by lot id).
+  // • Skips items not yet loaded in the local lots array (still matches by id
+  //   after lots load via useEffect above, but we also check here for safety).
+  // • Does NOT modify clipboard — clipboard is preserved until the process
+  //   successfully starts (no automatic clear after submit).
+  const handleLoadClipboard = useCallback(() => {
+    const invClipItems = clipboardItems.filter(i => i.entity_type === 'inventory');
+    if (invClipItems.length === 0) {
+      toast('No inventory items in clipboard', { icon: '📋' });
+      return;
+    }
+
+    let added = 0;
+    let skipped = 0;
+    setSelectedLots(prev => {
+      const currentIds = new Set(prev.map(sl => sl.lot.id));
+      const toAdd = [];
+
+      for (const clip of invClipItems) {
+        const lotId = clip.entity_id;
+        if (currentIds.has(lotId)) { skipped++; continue; }
+
+        // Find the lot in our loaded lot list
+        const found = lots.find(l => l.id === lotId || String(l.id) === String(lotId));
+        if (!found) { skipped++; continue; }
+
+        // Respect category filter for current process
+        if (allowedCategories.length > 0 && !allowedCategories.includes(found.category)) {
+          skipped++;
+          continue;
+        }
+
+        if (CANNOT_ISSUE.includes(found.status)) { skipped++; continue; }
+
+        toAdd.push({ lot: found, issuedQty: '' });
+        currentIds.add(lotId);
+        added++;
+      }
+
+      if (added === 0 && skipped > 0) {
+        toast('All clipboard items already selected or not applicable for this process', { icon: '📋' });
+      } else if (added > 0) {
+        toast.success(`${added} lot${added !== 1 ? 's' : ''} loaded from clipboard${skipped > 0 ? ` (${skipped} skipped)` : ''}`);
+      }
+
+      return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+    });
+  }, [clipboardItems, lots, selectedLotIds, allowedCategories]);
 
   // ── Filtered lot browser ──────────────────────────────────────────────────
   const filteredLots = useMemo(() => {
@@ -245,14 +482,14 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     if (allowedCategories.length > 0) {
       base = base.filter(l => allowedCategories.includes(l.category));
     }
-    if (!search) return base;
-    const s = search.toLowerCase();
+    if (!activeSearch) return base;
+    const s = activeSearch.toLowerCase();
     return base.filter(l =>
       l.lot_number?.toLowerCase().includes(s) ||
       l.lot_code?.toLowerCase().includes(s)   ||
       l.item_name?.toLowerCase().includes(s)
     );
-  }, [lots, search, selectedLotIds, allowedCategories.join(',')]);
+  }, [lots, activeSearch, selectedLotIds, allowedCategories.join(',')]); // eslint-disable-line
 
   // ── Lot selection handlers ────────────────────────────────────────────────
   const addLot = useCallback((lot) => {
@@ -309,6 +546,8 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
         `Process ${res.process_number} (${procName}) started on ${res.machine_code}` +
         (res.issue_count > 0 ? ` — ${res.issue_count} lot${res.issue_count !== 1 ? 's' : ''} issued` : '')
       );
+      // TASK 1: Clipboard is NOT cleared here — operator may want to use
+      // clipboard items for a subsequent process on a different machine.
       if (isModal && onComplete) {
         onComplete();
       } else {
@@ -334,13 +573,34 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     ? (CATEGORY_COLORS[selectedProcess.category] || CATEGORY_COLORS.OTHER)
     : null;
 
+  // ── Clipboard count for button label ─────────────────────────────────────
+  const clipboardInvCount = useMemo(
+    () => clipboardItems.filter(i => i.entity_type === 'inventory').length,
+    [clipboardItems]
+  );
+
   // ═════════════════════════════════════════════════════════════════════════
   const { page, setPage, paginatedItems, totalPages, pageSize } = usePagination(filteredLots, []);
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
+      {/* ── TASK 4: Process Change Dialog ── */}
+      {showProcessChangeDialog && (
+        <ProcessChangeDialog
+          onKeep={() => handleProcessChangeProceed(true)}
+          onClear={() => handleProcessChangeProceed(false)}
+        />
+      )}
 
+      {/* ── TASK 6: Machine Warning Dialog ── */}
+      {showMachineWarning && (
+        <MachineWarningDialog
+          machine={machines.find(m => String(m.id) === String(pendingMachineId))}
+          onContinue={handleMachineWarnContinue}
+          onCancel={handleMachineWarnCancel}
+        />
+      )}
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
@@ -353,14 +613,66 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
             <>
               {/* Lot browser toolbar */}
               <div className="grid-toolbar">
+                {/* TASK 7: Barcode scan button (integration point).
+                    When a hardware barcode scanner is connected it fires keydown
+                    events into the search input, which is the standard HID-mode
+                    approach. The ScanLine icon signals to the operator that
+                    scanning is supported. setBarcodeQuery() is the hook point
+                    for software-triggered scans or USB wedge decoders. */}
                 <div className="grid-toolbar-search">
                   <Search size={14} />
                   <input
-                    placeholder="Search lots…"
+                    placeholder="Search lots or scan barcode…"
                     value={search}
-                    onChange={e => setSearch(e.target.value)}
+                    onChange={e => { setSearch(e.target.value); setBarcodeQuery(''); setPage(1); }}
                   />
+                  {(search || barcodeQuery) && (
+                    <button
+                      className="icon-btn"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => { setSearch(''); setBarcodeQuery(''); }}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
                 </div>
+                {/* TASK 7: Barcode integration point button — placeholder for
+                    scanner trigger (e.g. webcam QR, Bluetooth scanner). Currently
+                    shows a toast so operators know scanning is not yet available.
+                    Replace the toast handler with actual scanner invocation. */}
+                <button
+                  className="btn btn-sm"
+                  title="Scan barcode"
+                  style={{ flexShrink: 0 }}
+                  onClick={() => toast('Barcode scanner: connect a USB HID barcode scanner and scan directly into the search box above.', { icon: '📷', duration: 4000 })}
+                >
+                  <ScanLine size={13} />
+                </button>
+
+                {/* TASK 1: Load Clipboard button */}
+                <button
+                  className="btn btn-sm"
+                  title={clipboardInvCount > 0 ? `Load ${clipboardInvCount} clipboard item${clipboardInvCount !== 1 ? 's' : ''}` : 'Clipboard is empty'}
+                  style={{
+                    flexShrink: 0,
+                    background: clipboardInvCount > 0 ? 'var(--brand-50, #F1F8F2)' : undefined,
+                    color: clipboardInvCount > 0 ? 'var(--brand-dark)' : undefined,
+                    border: clipboardInvCount > 0 ? '1px solid var(--brand)' : undefined,
+                  }}
+                  onClick={handleLoadClipboard}
+                  disabled={clipboardInvCount === 0}
+                >
+                  <Clipboard size={13} />
+                  {clipboardInvCount > 0 && (
+                    <span style={{
+                      marginLeft: 4, background: 'var(--brand)', color: '#fff',
+                      borderRadius: 10, fontSize: 9, fontWeight: 700, padding: '0 5px',
+                    }}>
+                      {clipboardInvCount}
+                    </span>
+                  )}
+                </button>
+
                 <span className="grid-count">{filteredLots.length} lots</span>
               </div>
 
@@ -378,7 +690,10 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                         <th style={{ width: 75 }}>Process</th>
                         <th style={{ width: 96 }}>Available</th>
                         <th style={{ width: 50 }}>Unit</th>
-                        <th style={{ width: 80 }}>Rate (₹)</th>
+                        {/* TASK 2: Dimension column replaces Rate (₹).
+                            TASK 3: Rate / cost fields removed — operators should
+                            never see accounting values. */}
+                        <th style={{ width: 120 }}>Dimension (mm)</th>
                         <th style={{ width: 34 }}></th>
                       </tr>
                     </thead>
@@ -397,7 +712,10 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                           </td>
                           <td className="num">{effQty(lot).toFixed(4)}</td>
                           <td>{lot.unit}</td>
-                          <td className="num">₹{Number(lot.rate || 0).toLocaleString('en-IN')}</td>
+                          {/* TASK 2: Display dimensions; '—' when unavailable */}
+                          <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g700)' }}>
+                            {fmtDim(lot)}
+                          </td>
                           <td style={{ textAlign: 'center' }}>
                             <button
                               className="icon-btn"
@@ -416,21 +734,20 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                             textAlign: 'center', color: 'var(--g400)',
                             padding: 40, fontStyle: 'italic', fontSize: 12,
                           }}>
-                            {search ? 'No lots match search' : 'No available lots'}
+                            {activeSearch ? 'No lots match search' : 'No available lots'}
                           </td>
                         </tr>
                       )}
                     </tbody>
-                  <tfoot><tr><td colSpan="100" style={{ padding: 0 }}>
-{filteredLots.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', background: 'var(--g50)', borderTop: '1px solid var(--g200)', fontSize: 11, color: 'var(--g500)' }}>
-                <span>Showing {filteredLots.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredLots.length)} of {filteredLots.length} records</span>
-                <Paginator page={page} totalPages={totalPages} onPage={setPage} />
-              </div>
-            )}
-</td></tr></tfoot>
-</table>
-
+                    <tfoot><tr><td colSpan="100" style={{ padding: 0 }}>
+                      {filteredLots.length > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', background: 'var(--g50)', borderTop: '1px solid var(--g200)', fontSize: 11, color: 'var(--g500)' }}>
+                          <span>Showing {filteredLots.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredLots.length)} of {filteredLots.length} records</span>
+                          <Paginator page={page} totalPages={totalPages} onPage={setPage} />
+                        </div>
+                      )}
+                    </td></tr></tfoot>
+                  </table>
                 )}
               </div>
 
@@ -473,6 +790,8 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                           <th>Lot Code</th>
                           <th>Item</th>
                           <th style={{ width: 110 }}>Available</th>
+                          {/* TASK 2 / TASK 3: Dimension shown instead of Rate/Value */}
+                          <th style={{ width: 110 }}>Dimension</th>
                           <th style={{ width: 130 }}>Issue Qty *</th>
                           <th style={{ width: 28 }}></th>
                         </tr>
@@ -489,6 +808,10 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                               <td style={{ fontSize: 11 }}>{lot.item_name}</td>
                               <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
                                 {avail.toFixed(4)} {lot.unit}
+                              </td>
+                              {/* TASK 2: Dimension in selected panel */}
+                              <td style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g600)' }}>
+                                {fmtDim(lot)}
                               </td>
                               <td>
                                 <input
@@ -517,10 +840,12 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700, fontSize: 11, paddingRight: 8 }}>
+                          <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, fontSize: 11, paddingRight: 8 }}>
                             Total to issue:
                           </td>
-                          <td colSpan={3} style={{
+                          {/* TASK 3: No total value / cost column */}
+                          <td />
+                          <td colSpan={2} style={{
                             fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 12,
                             color: hasQtyError ? '#C62828' : 'var(--brand-dark)',
                           }}>
@@ -598,7 +923,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   <span style={{ color: '#E65100', fontWeight: 400, marginLeft: 6 }}>— no active machines</span>
                 )}
               </label>
-              <SelectDropdown style={inp} value={machineId} onChange={e => setMachineId(e.target.value)}>
+              <SelectDropdown style={inp} value={machineId} onChange={e => handleMachineChange(e.target.value)}>
                 <option value="">— select machine —</option>
                 {filteredMachines.map(m => (
                   <option key={m.id} value={m.id}>

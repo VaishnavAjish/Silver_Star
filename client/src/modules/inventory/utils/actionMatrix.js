@@ -34,6 +34,7 @@ export const CAPABILITY = {
   GROWTH_AGAIN:        'growthAgain',
   GROWTH_OUTPUT:       'growthOutput',
   COMPLETE_GROWTH_RUN: 'completeGrowthRun',
+  RETURN:              'return',  // Navigate directly to LotReturnPage for IN PROCESS lots
 };
 
 /** Inventory categories recognised by the matrix. */
@@ -41,6 +42,8 @@ export const CATEGORY = {
   SEED:       'seed',
   GROWTH_RUN: 'growth_run',
   ROUGH:      'rough',
+  GAS:        'gas',
+  CONSUMABLE: 'consumable',
 };
 
 /** LOW STOCK behaves exactly like IN STOCK (quantity flag, not a workflow state). */
@@ -62,7 +65,9 @@ const C = CAPABILITY;
 const MATRIX = {
   [CATEGORY.SEED]: {
     'IN STOCK':   [C.TRANSFER, C.SPLIT, C.MIX, C.ISSUE_PROCESS],
-    'IN PROCESS': [],
+    // TASK 5 — Return action available directly from Inventory for IN PROCESS lots.
+    // Operator navigates straight to LotReturnPage without searching Process Issues.
+    'IN PROCESS': [C.RETURN],
     'CONSUMED':   [],
     'DAMAGED':    [],
     'QC_HOLD':    [C.TRANSFER],
@@ -70,17 +75,30 @@ const MATRIX = {
   },
   [CATEGORY.ROUGH]: {
     'IN STOCK':   [C.TRANSFER, C.SPLIT, C.ISSUE_PROCESS], // NOTE: rough has no Mix
-    'IN PROCESS': [],
+    'IN PROCESS': [C.RETURN],
     'CONSUMED':   [],
     // DAMAGED / QC_HOLD / REPROCESS intentionally unlisted → read-only floor.
   },
   [CATEGORY.GROWTH_RUN]: {
     'IN STOCK':   [C.TRANSFER, C.GROWTH_AGAIN, C.GROWTH_OUTPUT, C.ISSUE_PROCESS],
+    // Growth Return is captured via Control Tower (ConfirmActionModal with Growth Run Return form).
+    // The RETURN capability here routes non-Growth-run returns; growth_run IN PROCESS
+    // uses COMPLETE_GROWTH_RUN instead.
     'IN PROCESS': [C.COMPLETE_GROWTH_RUN],
     'CONSUMED':   [],
     'DAMAGED':    [],
     'QC_HOLD':    [C.TRANSFER],
     'REPROCESS':  [C.TRANSFER, C.ISSUE_PROCESS],
+  },
+  [CATEGORY.GAS]: {
+    'IN STOCK':   [C.TRANSFER, C.ISSUE_PROCESS],
+    'IN PROCESS': [C.RETURN],
+    'CONSUMED':   [],
+  },
+  [CATEGORY.CONSUMABLE]: {
+    'IN STOCK':   [C.TRANSFER, C.ISSUE_PROCESS],
+    'IN PROCESS': [C.RETURN],
+    'CONSUMED':   [],
   },
 };
 
@@ -100,6 +118,7 @@ export const SELECTION_RULES = {
   canViewLineage:       { min: 1, max: 1 },
   canTransfer:          { min: 1, max: null },
   canIssueProcess:      { min: 1, max: null },
+  canReturn:            { min: 1, max: 1 },    // return is always single-lot
 };
 
 /**
@@ -148,6 +167,7 @@ function toFlags(granted) {
     canGrowthAgain:       set.has(C.GROWTH_AGAIN),
     canGrowthOutput:      set.has(C.GROWTH_OUTPUT),
     canCompleteGrowthRun: set.has(C.COMPLETE_GROWTH_RUN),
+    canReturn:            set.has(C.RETURN),
   };
 }
 
