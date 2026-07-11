@@ -196,7 +196,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const showConsumables = isGrowth || (selectedProcess ? !!selectedProcess.allows_consumables : false);
 
   // Phase 35: Enforce inventory filtering and machine type filtering based on process group
-  let allowedCategories = selectedProcess?.input_item_category ? [selectedProcess.input_item_category.trim().toLowerCase()] : [];
+  let allowedCategories = selectedProcess?.input_item_category ? selectedProcess.input_item_category.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
   let eligType = (selectedProcess?.eligible_machine_type || '').trim().toLowerCase();
 
   if (isGrowth) {
