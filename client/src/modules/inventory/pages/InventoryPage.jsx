@@ -774,6 +774,8 @@ export default function InventoryPage() {
           </span>
         );
       }
+      case 'run_no':
+        return row.run_no ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11.5 }}>R{row.run_no}</span> : '—';
       default:
         return row[col.key] != null ? String(row[col.key]) : '—';
     }
