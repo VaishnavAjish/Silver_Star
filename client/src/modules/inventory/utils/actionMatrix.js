@@ -193,7 +193,13 @@ export function getAllowedActions(lot) {
   if (granted.length === 0 && status === 'IN STOCK') {
     granted = [C.TRANSFER, C.SPLIT, C.ISSUE_PROCESS];
   }
-  return toFlags(granted);
+  const flags = toFlags(granted);
+  
+  if (category === CATEGORY.SEED && status === 'IN STOCK') {
+    flags.canViewHistory = false;
+  }
+  
+  return flags;
 }
 
 /**

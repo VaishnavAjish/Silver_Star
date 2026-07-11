@@ -4,7 +4,7 @@ import { usePagination } from '../../shared/hooks/usePagination';
 import Paginator from '../../shared/components/Paginator';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../shared/hooks/useApi';
-import { Clipboard, SlidersHorizontal, Trash2, FileOutput, List, Upload, Search, Plus, Send, ChevronDown, History, Share2, Package, RotateCcw, GitBranch, GitMerge, CheckCircle, X } from 'lucide-react';
+import { Clipboard, SlidersHorizontal, Trash2, FileOutput, List, Upload, Search, Plus, Send, ChevronDown, History, Share2, Package, RotateCcw, GitBranch, GitMerge, CheckCircle, X, SplitSquareHorizontal, Play } from 'lucide-react';
 import { useClipboard } from '../../core/context/ClipboardContext';
 import toast from 'react-hot-toast';
 import { SYSTEM_TEMPLATES, loadUserTemplates } from '../../shared/utils/templateUtils';
@@ -12,9 +12,10 @@ import { getAllowedActions } from '../../modules/inventory/utils/actionMatrix';
 import SplitLotPage from '../../modules/inventory/pages/SplitLotPage';
 import LotIssuePage from '../../modules/inventory/pages/LotIssuePage';
 import MixLotsPage from '../../modules/inventory/pages/MixLotsPage';
+import LotReturnPage from '../../modules/inventory/pages/LotReturnPage';
 
 export default function ClipboardPage() {
-  const { items, clear, add, openStockTransferModal } = useClipboard();
+  const { items, clear, add, openStockTransferModal, loadClipboard } = useClipboard();
   const navigate = useNavigate();
   const api = useApi();
   const [search, setSearch] = useState('');
@@ -217,11 +218,12 @@ export default function ClipboardPage() {
                       return [
                         perms.canViewHistory && { label: 'View History', icon: <History size={12} />, fn: () => navigate(`/inventory/lots/${lot.id}?tab=history`) },
                         perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={12} />, fn: () => navigate(`/inventory/${lot.id}/lineage`) },
-                        perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={12} />, fn: () => setActiveModal({ type: 'issue', lotId: lot.id }), accent: true },
+                        perms.canIssueProcess && { label: 'Issue to Process', icon: <Play size={12} />, fn: () => setActiveModal({ type: 'issue', lotId: lot.id }), accent: true },
                         perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={12} />, fn: () => navigate('/manufacturing/control-tower'), accent: true },
                         perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={12} />, fn: () => navigate('/manufacturing/growth-output'), accent: true },
                         perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={12} />, fn: () => openStockTransferModal([lot], () => clear()), accent: true },
-                        perms.canSplit && { label: 'Split Lot', icon: <GitBranch size={12} />, fn: () => setActiveModal({ type: 'split', lotId: lot.id }), accent: true },
+                        perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => setActiveModal({ type: 'return', lotId: lot.id }), accent: true },
+                        perms.canSplit && { label: 'Split Lot', icon: <SplitSquareHorizontal size={12} />, fn: () => setActiveModal({ type: 'split', lotId: lot.id }), accent: true },
                         perms.canMix && { label: 'Mix Into…', icon: <GitMerge size={12} />, fn: () => setActiveModal({ type: 'mix', lotIds: lot.id }), accent: true },
                         perms.canCompleteGrowthRun && { label: 'Complete Growth Run', icon: <CheckCircle size={12} />, fn: () => toast('Please open lot workspace to complete Growth Run'), accent: true },
                       ].filter(Boolean);
@@ -333,18 +335,19 @@ export default function ClipboardPage() {
 
       {/* ── Modals ── */}
       {activeModal && (
-        <div className="modal-backdrop" onClick={() => setActiveModal(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="modal-overlay" onClick={() => setActiveModal(null)} style={{ zIndex: 1000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="modal" style={{ background: '#fff', borderRadius: 8, width: '90vw', height: '90vh', maxWidth: 1300, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header" style={{ padding: '12px 16px', borderBottom: '1px solid #ddd', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: 16 }}>
-                {activeModal.type === 'split' ? 'Split Lot' : activeModal.type === 'issue' ? 'Issue to Process' : 'Mix Lots'}
+                {activeModal.type === 'split' ? 'Split Lot' : activeModal.type === 'return' ? 'Return from Process' : activeModal.type === 'issue' ? 'Issue to Process' : 'Mix Lots'}
               </h3>
               <button style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }} onClick={() => setActiveModal(null)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ flex: 1, padding: 0, overflow: 'hidden', position: 'relative' }}>
-              {activeModal.type === 'split' && <SplitLotPage lotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); clear(); }} onCancel={() => setActiveModal(null)} />}
-              {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); clear(); }} onCancel={() => setActiveModal(null)} />}
-              {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); clear(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'split' && <SplitLotPage lotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'return' && <LotReturnPage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
             </div>
           </div>
         </div>

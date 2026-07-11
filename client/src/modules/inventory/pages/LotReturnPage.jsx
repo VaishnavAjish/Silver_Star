@@ -501,18 +501,20 @@ export default function LotReturnPage() {
             </div>
           </div>
 
-          {/* Submit */}
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%', fontSize: 13 }}
-            disabled={!balanced || overFill || saving}
-            onClick={handleSubmit}
-          >
-            {saving
-              ? 'Recording return…'
-              : <><RotateCcw size={14} /> {stillIn > 0.0001 ? 'Record Partial Return' : 'Confirm Final Return'}</>
-            }
-          </button>
+          {/* Date + Notes */}
+          <div style={{ background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
+            padding: '14px 16px', marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div className="fg">
+                <label>Return Date *</label>
+                <DatePicker value={returnDate} onChange={v => setReturnDate(v)} />
+              </div>
+              <div className="fg">
+                <label>Notes</label>
+                <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes…" />
+              </div>
+            </div>
+          </div>
 
           {overFill && (
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#FFEBEE', borderRadius: 6,
@@ -521,6 +523,7 @@ export default function LotReturnPage() {
             </div>
           )}
         </div>
+
 
         {/* ── RIGHT PANEL: Live balance ─────────────────────────────────────── */}
         <div style={{ width: 240, borderLeft: '1px solid var(--g200)',
@@ -642,6 +645,21 @@ export default function LotReturnPage() {
         </div>
 
       </div>{/* end three-panel */}
+
+      {/* Footer Actions */}
+      <div style={{ padding: '16px 20px', borderTop: '1px solid var(--g200)', display: 'flex', justifyContent: 'flex-end', gap: 12, background: 'var(--g50)', flexShrink: 0 }}>
+        <button className="btn" onClick={() => isModal ? onCancel?.() : navigate(-1)} disabled={saving}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!balanced || overFill || saving}
+          onClick={handleSubmit}
+        >
+          {saving ? 'Saving...' : 'Record Return'}
+        </button>
+      </div>
+
     </div>
   );
+
+  return content;
 }

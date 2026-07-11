@@ -37,7 +37,7 @@ const fmtDate = d => d
   : '—';
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
-const TABS = ['Overview', 'Genealogy', 'History', 'Operations', 'Process', 'Attachments'];
+const ALL_TABS = ['Overview', 'Genealogy', 'History', 'Operations', 'Process', 'Attachments'];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 function MetricCard({ label, value, sub, mono, accent }) {
@@ -375,11 +375,10 @@ export default function LotWorkspacePage() {
 
       {/* ── Tab bar ── */}
       <div style={{
-        display: 'flex', gap: 0, flexShrink: 0,
-        borderBottom: '2px solid var(--g200)', background: '#fff',
-        overflowX: 'auto',
+        display: 'flex', borderBottom: '1px solid var(--g200)', background: '#fff',
+        padding: '0 24px', flexShrink: 0, overflowX: 'auto',
       }}>
-        {TABS.map(tab => {
+        {ALL_TABS.filter(t => t !== 'History' || perms.canViewHistory).map(tab => {
           const key = tab.toLowerCase();
           const active = activeTab === key;
           return (

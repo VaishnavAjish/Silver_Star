@@ -78,56 +78,7 @@ function SectionHeader({ children }) {
   );
 }
 
-// ── TASK 4: Process Change Confirmation Dialog ────────────────────────────────
-// Never silently drops the lot selection when the operator changes process type.
-function ProcessChangeDialog({ onKeep, onClear }) {
-  return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 500,
-        background: 'rgba(0,0,0,.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-      onClick={onKeep}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: '#fff', borderRadius: 10, padding: '24px 28px',
-          boxShadow: '0 8px 32px rgba(0,0,0,.18)', maxWidth: 420, width: '90%',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <AlertTriangle size={18} color="#E65100" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#E65100' }}>
-            Process Changed
-          </span>
-        </div>
-        <p style={{ fontSize: 13, color: '#424242', marginBottom: 20, lineHeight: 1.5 }}>
-          Changing the process type may invalidate the current lot selection
-          (category or machine type may differ).
-          Do you want to keep the current selection or clear it?
-        </p>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button
-            className="btn btn-primary"
-            style={{ fontSize: 13 }}
-            onClick={onKeep}
-          >
-            Keep Selection
-          </button>
-          <button
-            className="btn"
-            style={{ fontSize: 13, background: '#FFEBEE', color: '#C62828', border: '1px solid #EF9A9A' }}
-            onClick={onClear}
-          >
-            Clear Selection
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+
 
 // ── TASK 6: Non-Idle Machine Warning Dialog ───────────────────────────────────
 // Warning only — does not block selection.
@@ -211,11 +162,6 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const [expectedRet,   setExpectedRet]   = useState('');
   const [remarks,       setRemarks]       = useState('');
   const [saving,        setSaving]        = useState(false);
-
-  // ── TASK 4: Process Change dialog state ───────────────────────────────────
-  // pendingProcessCode holds the code the user clicked but hasn't confirmed yet.
-  const [pendingProcessCode,    setPendingProcessCode]    = useState(null);
-  const [showProcessChangeDialog, setShowProcessChangeDialog] = useState(false);
 
   // ── TASK 6: Machine warning dialog state ──────────────────────────────────
   const [pendingMachineId,   setPendingMachineId]   = useState(null);
@@ -356,15 +302,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const handleProcessChange = useCallback((code) => {
     if (code === processType) return; // no-op
 
-    if (selectedLots.length > 0) {
-      // Queue the change and ask the operator what to do
-      setPendingProcessCode(code);
-      setShowProcessChangeDialog(true);
-      return;
-    }
-    // No lots selected — apply immediately
-    applyProcessChange(code, false);
-  }, [processType, selectedLots]);
+    // No warning dialog, just keep selection
+    applyProcessChange(code, true);
+  }, [processType, applyProcessChange]);
 
   const applyProcessChange = useCallback((code, keepLots) => {
     setProcessType(code);
@@ -382,13 +322,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     }
   }, [processes]);
 
-  const handleProcessChangeProceed = useCallback((keepLots) => {
-    setShowProcessChangeDialog(false);
-    if (pendingProcessCode) {
-      applyProcessChange(pendingProcessCode, keepLots);
-      setPendingProcessCode(null);
-    }
-  }, [pendingProcessCode, applyProcessChange]);
+
 
   // TASK 6: Machine selection — warn when machine is not idle
   const handleMachineChange = useCallback((id) => {
@@ -587,12 +521,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* ── TASK 4: Process Change Dialog ── */}
-      {showProcessChangeDialog && (
-        <ProcessChangeDialog
-          onKeep={() => handleProcessChangeProceed(true)}
-          onClear={() => handleProcessChangeProceed(false)}
-        />
-      )}
+
 
       {/* ── TASK 6: Machine Warning Dialog ── */}
       {showMachineWarning && (

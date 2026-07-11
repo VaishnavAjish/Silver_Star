@@ -21,6 +21,7 @@ import StockTransferHistoryModal from '../../../shared/components/Modals/StockTr
 import SplitLotPage from './SplitLotPage';
 import LotIssuePage from './LotIssuePage';
 import MixLotsPage from './MixLotsPage';
+import LotReturnPage from './LotReturnPage';
 import { getAllowedActions } from '../utils/actionMatrix';
 
 const ALL_COLS = [
@@ -784,6 +785,7 @@ export default function InventoryPage() {
       perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
+      perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={11} />, fn: () => setActiveModal({ type: 'return', lotId: row.id }), color: 'var(--brand)' },
       perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={11} />, fn: () => navigate('/manufacturing/control-tower'), color: 'var(--brand)' },
       perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={11} />, fn: () => navigate('/manufacturing/growth-output'), color: 'var(--brand)' },
       perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={11} />, fn: () => openStockTransferModal([row], () => { setSelectedTransferRows([]); load(); }), color: 'var(--brand-dark)' },
@@ -799,7 +801,6 @@ export default function InventoryPage() {
   return (
     <div className="grid-page animate-in" style={{ position: 'relative' }}>
 
-      {/* ── Header ── */}
 
       {/* ── Toolbar ── */}
       <div className="filter-bar" style={{ background: '#fff' }}>
@@ -1009,6 +1010,7 @@ export default function InventoryPage() {
                       perms.canViewHistory && { label: 'View History', icon: <History size={12} />, fn: () => navigate(`/inventory/lots/${lot.id}?tab=history`) },
                       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={12} />, fn: () => navigate(`/inventory/${lot.id}/lineage`) },
                       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={12} />, fn: () => setActiveModal({ type: 'issue', lotId: lot.id }), accent: true },
+                      perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => setActiveModal({ type: 'return', lotId: lot.id }), accent: true },
                       perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={12} />, fn: () => navigate('/manufacturing/control-tower'), accent: true },
                       perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={12} />, fn: () => navigate('/manufacturing/growth-output'), accent: true },
                       perms.canSplit && { label: 'Split Lot', icon: <GitBranch size={12} />, fn: () => setActiveModal({ type: 'split', lotId: lot.id }), accent: true },
@@ -1246,13 +1248,15 @@ export default function InventoryPage() {
           <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 1300, padding: 0, display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--brand-dark)' }}>
-                {activeModal.type === 'split' ? 'Split Lot' : 'Issue to Process'}
+                {activeModal.type === 'split' ? 'Split Lot' : 
+                 activeModal.type === 'return' ? 'Return from Process' : 'Issue to Process'}
               </div>
               <button className="icon-btn" onClick={() => setActiveModal(null)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ flex: 1, padding: 0, overflow: 'hidden' }}>
               {activeModal.type === 'split' && <SplitLotPage lotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'return' && <LotReturnPage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
             </div>
           </div>
