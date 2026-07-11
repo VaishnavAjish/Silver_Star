@@ -27,14 +27,14 @@ async function nextGrowthRunNumber(client, machineCode, dateObj = new Date()) {
   const shortYear  = String(dateObj.getFullYear()).slice(-2);
   const ym         = `${shortMonth}${shortYear}`; // e.g., 'MAY26'
 
-  // Upsert the sequence for this machine and month
+  // Upsert the sequence for this month globally across all machines
   const { rows } = await client.query(
     `INSERT INTO growth_monthly_seqs (machine_code, year_month, last_val)
-     VALUES ($1, $2, 1)
+     VALUES ('GLOBAL', $1, 1)
      ON CONFLICT (machine_code, year_month) 
      DO UPDATE SET last_val = growth_monthly_seqs.last_val + 1
      RETURNING last_val`,
-    [cleanMachineCode, ym]
+    [ym]
   );
   
   const seq = String(rows[0].last_val).padStart(3, '0');
