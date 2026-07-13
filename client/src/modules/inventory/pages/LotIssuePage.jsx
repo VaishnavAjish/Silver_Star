@@ -19,7 +19,7 @@ import DatePicker from '../../../shared/components/DatePicker';
 import Barcode from '../../../shared/components/Barcode';
 
 const CANNOT_ISSUE = ['CONSUMED', 'SOLD', 'DISPOSED', 'DAMAGED', 'ARCHIVED'];
-const isLotIssuable = l => !CANNOT_ISSUE.includes(l.status) && (l.status === 'IN STOCK' || (l.status === 'IN PROCESS' && ((l.category || '').toLowerCase() === 'seed' || (l.item_name || '').toLowerCase().includes('seed'))));
+const isLotIssuable = l => !CANNOT_ISSUE.includes(l.status) && (l.status === 'IN STOCK' || l.status === 'IN PROCESS');
 
 // Category color for process type badge in section header
 const CATEGORY_COLORS = {
