@@ -18,6 +18,16 @@ const DS_BADGE = {
 };
 const dsBadge = s => DS_BADGE[s] || { bg: 'var(--g100)', color: 'var(--g600)', border: 'var(--g300)', label: s };
 
+// L × D × H from the Growth Run biscuit; '—' when unmeasured.
+function fmtDim(r) {
+  const l = parseFloat(r.growth_dim_length || 0);
+  const d = parseFloat(r.growth_dim_depth  || 0);
+  const h = parseFloat(r.growth_dim_height || 0);
+  if (!l && !d && !h) return '—';
+  const f = v => v ? v.toFixed(2) : '—';
+  return `${f(l)} × ${f(d)} × ${f(h)}`;
+}
+
 export default function ProcessReturnsListPage() {
   const api      = useApi();
   const navigate = useNavigate();
@@ -204,6 +214,7 @@ export default function ProcessReturnsListPage() {
                     <th style={{ width: 46 }}>Run</th>
                     <th style={{ width: 96 }}>Root Lot</th>
                     <th>Item</th>
+                    <th style={{ width: 110 }}>Dimension</th>
                     <th style={{ width: 88 }}>Process</th>
                     <th style={{ width: 96 }}>Machine</th>
                     <th style={{ width: 70 }} className="num">Issued Qty</th>
@@ -237,7 +248,9 @@ export default function ProcessReturnsListPage() {
                         <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
                           {r.root_lot_code || r.root_lot_number || '—'}
                         </td>
-                        <td style={{ fontSize: 11 }}>{r.item_name}</td>
+                        {/* Phase A: the row is the Growth Assembly, not the seed */}
+                        <td style={{ fontSize: 11 }}>{r.growth_item_name || r.item_name}</td>
+                        <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{fmtDim(r)}</td>
                         <td style={{ fontSize: 11 }}>
                           {r.process_display_name || r.process_type || '—'}
                         </td>

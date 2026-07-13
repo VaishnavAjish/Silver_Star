@@ -179,6 +179,9 @@ router.get('/', authenticate, async (req, res) => {
               -- lot_number IS the Growth Number; run_no increments on Growth Again.
               gr.lot_number AS growth_number,
               gr.run_no,
+              gri.name AS growth_item_name,
+              gr.dim_length AS growth_dim_length, gr.dim_depth AS growth_dim_depth,
+              gr.dim_height AS growth_dim_height, gr.dim_unit AS growth_dim_unit,
               rt.lot_number AS root_lot_number, rt.lot_code AS root_lot_code,
               sl.lot_op_id AS source_lot_op_id,
               -- Operational computed fields
@@ -308,6 +311,14 @@ router.get('/:id', authenticate, async (req, res) => {
               u.full_name AS created_by_name,
               mach.code AS machine_code, mach.name AS machine_name,
               op.full_name AS operator_full_name,
+              -- Phase A workspace context: the Growth Run biscuit linked to this
+              -- process (its lot_number IS the Growth Number) + the root seed lot.
+              gr.lot_number AS growth_number,
+              gr.run_no,
+              gr.dim_length AS growth_dim_length, gr.dim_depth AS growth_dim_depth,
+              gr.dim_height AS growth_dim_height, gr.dim_unit AS growth_dim_unit,
+              gri.name AS growth_item_name,
+              rt.lot_number AS root_lot_number, rt.lot_code AS root_lot_code,
               COALESCE(pm1.allowed_outputs, pm2.allowed_outputs) AS allowed_outputs
        FROM lot_process_issues pi
        JOIN inventory sl      ON sl.id   = pi.source_lot_id
@@ -319,6 +330,10 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN machine_processes mp ON pi.machine_process_id = mp.id
        LEFT JOIN process_master pm1 ON mp.process_type = pm1.process_code
        LEFT JOIN process_master pm2 ON pi.process_type = pm2.process_code
+       LEFT JOIN inventory gr ON gr.machine_process_id = pi.machine_process_id
+                             AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+       LEFT JOIN items gri    ON gri.id = gr.item_id
+       LEFT JOIN inventory rt ON rt.id = sl.root_lot_id
        WHERE pi.id = $1`,
       [req.params.id]
     );
@@ -1030,15 +1045,28 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         byComponent[comp] = (byComponent[comp] || 0) + parseFloat(line.qty);
       }
 
-      // Each component is checked against the input on its own.
-      // Components are NEVER added to one another.
-      for (const [comp, qty] of Object.entries(byComponent)) {
-        if (qty > currentRemaining + 0.0001) {
+      // Phase A: every component group declared in config must FULLY account
+      // for the input on its own — N Partial Growth Runs contain exactly N
+      // seeds AND N diamonds. Components are NEVER added to one another.
+      const requiredComponents = [...new Set(
+        allowedOutputs.filter(o => o.component).map(o => o.component)
+      )];
+      for (const comp of requiredComponents) {
+        const qty = byComponent[comp] || 0;
+        if (Math.abs(qty - currentRemaining) > 0.0001) {
           throw new Error(
-            `${comp} output (${qty}) exceeds the ${currentRemaining} in process. ` +
-            'Components are validated separately and are never summed together.'
+            `${comp} outputs total ${qty.toFixed(4)} but must equal the ` +
+            `${currentRemaining.toFixed(4)} in process. Each component group is ` +
+            'validated on its own and never summed with another.'
           );
         }
+      }
+      // Untagged lines (mixed configs) may still never exceed the input.
+      if (byComponent.primary != null && byComponent.primary > currentRemaining + 0.0001) {
+        throw new Error(
+          `Untagged output (${byComponent.primary.toFixed(4)}) exceeds the ` +
+          `${currentRemaining.toFixed(4)} in process.`
+        );
       }
 
       // Mass balance: outputs may weigh LESS than the input (process loss is normal)

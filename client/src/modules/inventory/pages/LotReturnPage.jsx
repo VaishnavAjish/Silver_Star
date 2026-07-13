@@ -253,6 +253,15 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   }
   const compOver = Object.values(componentTotals).some(q => q > currentRemaining + 0.0001);
 
+  // Phase A: every component group declared in config must EQUAL the input on
+  // its own (N Partial Growth Runs contain exactly N seeds AND N diamonds).
+  const requiredComponents = isComponentMode
+    ? [...new Set(returnTypes.filter(t => t.component).map(t => t.component))]
+    : [];
+  const compEqual = requiredComponents.every(
+    c => Math.abs((componentTotals[c] || 0) - currentRemaining) <= 0.0001
+  );
+
   const inputWeight  = parseFloat(issue?.process_lot_weight || 0);
   const outputWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
   const weightOver   = isComponentMode && inputWeight > 0 && outputWeight > inputWeight + 0.0001;
@@ -261,9 +270,9 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   const difference = currentRemaining - linesTotal;
 
   // Phase 1 Engine: Strict Balance Requirement (QUANTITY mode);
-  // COMPONENT mode: each component within the input, weight conserved.
+  // COMPONENT mode: each group equals the input, weight conserved.
   const balanced   = isComponentMode
-    ? (anyQty && !compOver && !weightOver)
+    ? (anyQty && compEqual && !weightOver)
     : (Math.abs(difference) <= 0.0001 && linesTotal > 0.0001);
   const overFill   = isComponentMode ? compOver : difference < -0.0001;
 
@@ -273,6 +282,17 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   for (const l of lines) totByType[l.type] = (totByType[l.type] || 0) + (parseFloat(l.qty) || 0);
 
   const processLotCode = issue?.process_lot_code || issue?.process_lot_number || '';
+
+  // Dimension string: prefer the Growth Run biscuit's L × D × H, fall back to
+  // the process lot's own dimensions.
+  const fmtDims = (l, d, h, u) => {
+    if (l == null && d == null && h == null) return null;
+    const f = v => v != null ? Number(v).toFixed(2) : '—';
+    return `${f(l)} × ${f(d)} × ${f(h)} ${u || 'mm'}`;
+  };
+  const dimensionStr =
+    fmtDims(issue?.growth_dim_length, issue?.growth_dim_depth, issue?.growth_dim_height, issue?.growth_dim_unit) ||
+    fmtDims(issue?.process_lot_dim_length, issue?.process_lot_dim_depth, issue?.process_lot_dim_height, issue?.process_lot_dim_unit);
 
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -431,8 +451,18 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
           <Section title="Issue" icon={Package}>
             <InfoRow label="Issue #"      value={issue.issue_number} mono />
             <InfoRow label="Issue Date"   value={new Date(issue.issue_date).toLocaleDateString('en-IN')} />
-            <InfoRow label="Item"         value={issue.item_name} />
+            {/* Phase A: the operator returns the Growth Assembly, not the seed */}
+            <InfoRow label="Process Item" value={issue.growth_item_name || issue.item_name} />
+            <InfoRow label="Source Item"  value={issue.item_name} />
             <InfoRow label="Source Lot"   value={issue.source_lot_code || issue.source_lot_number} mono />
+            {(issue.root_lot_code || issue.root_lot_number) && (
+              <InfoRow label="Root Seed Lot" value={issue.root_lot_code || issue.root_lot_number} mono />
+            )}
+            {issue.growth_number && <InfoRow label="Growth Number" value={issue.growth_number} mono />}
+            {issue.growth_number && issue.run_no != null && (
+              <InfoRow label="Run Number" value={`R${issue.run_no}`} mono />
+            )}
+            {dimensionStr && <InfoRow label="Dimension" value={dimensionStr} mono />}
             <InfoRow label="Process Lot"  value={processLotCode} mono />
             <InfoRow label="Process Type" value={issue.process_type} />
           </Section>
@@ -445,15 +475,19 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               /* COMPONENT mode: per-component totals — components are validated
                  separately against the input and are NEVER summed together. */
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
-                {Object.entries(componentTotals).map(([comp, qty]) => (
-                  <BalanceRow
-                    key={comp}
-                    label={comp.charAt(0).toUpperCase() + comp.slice(1)}
-                    value={qty}
-                    color={qty > currentRemaining + 0.0001 ? '#C62828' : undefined}
-                    bold
-                  />
-                ))}
+                {requiredComponents.map(comp => {
+                  const qty = componentTotals[comp] || 0;
+                  const ok  = Math.abs(qty - currentRemaining) <= 0.0001;
+                  return (
+                    <BalanceRow
+                      key={comp}
+                      label={comp.charAt(0).toUpperCase() + comp.slice(1)}
+                      value={`${qty.toFixed(4)} / ${currentRemaining.toFixed(4)}`}
+                      color={ok ? '#2E7D32' : '#C62828'}
+                      bold
+                    />
+                  );
+                })}
                 {inputWeight > 0 && (
                   <BalanceRow
                     label="Weight out / in"
@@ -463,13 +497,13 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     bold
                   />
                 )}
-                <div style={{ fontSize: 10, color: weightOver || compOver ? '#C62828' : 'var(--g500)',
+                <div style={{ fontSize: 10, color: weightOver || !compEqual ? '#C62828' : 'var(--g500)',
                   fontWeight: 600, marginTop: 4 }}>
                   {weightOver
                     ? 'Output weight cannot exceed input weight — a component split cannot create mass.'
-                    : compOver
-                      ? 'A component output exceeds the quantity in process.'
-                      : 'Components are validated separately — never summed. Input is fully consumed.'}
+                    : !compEqual
+                      ? 'Each group must equal the input quantity on its own — groups are never summed.'
+                      : 'Each group fully accounts for the input. Groups are never summed. Input is fully consumed.'}
                 </div>
               </div>
             ) : (
