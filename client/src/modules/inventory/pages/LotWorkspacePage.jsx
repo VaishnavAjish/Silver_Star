@@ -788,6 +788,7 @@ export default function LotWorkspacePage() {
                 {activeModal === 'mix' && <MixLotsPage initialLotIds={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
                 {activeModal === 'issue' && <LotIssuePage initialLotId={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
                 {activeModal === 'return' && <LotReturnPage initialLotId={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
+              </div>
             </div>
           </div>
         )}
