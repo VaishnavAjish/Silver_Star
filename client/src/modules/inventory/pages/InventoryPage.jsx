@@ -51,6 +51,7 @@ const ALL_COLS = [
   { key: 'dim_depth', label: 'Depth', width: 65, num: true },
   { key: 'dim_height', label: 'Height', width: 65, num: true },
   { key: 'dim_preview', label: 'Dimensions', width: 130 },
+  { key: 'return_action', label: 'Return Action', width: 92 },
 ];
 const COL_MAP = Object.fromEntries(ALL_COLS.map(c => [c.key, c]));
 
@@ -778,6 +779,17 @@ export default function InventoryPage() {
       }
       case 'run_no':
         return row.run_no ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11.5 }}>R{row.run_no}</span> : '—';
+      case 'return_action': {
+        const perms = getAllowedActions(row);
+        if (perms.canReturn) {
+          return (
+            <button className="btn btn-sm btn-outline-primary" style={{ padding: '2px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, margin: '0 auto' }} onClick={(e) => { e.stopPropagation(); setActiveModal({ type: 'return', lotId: row.id }); }}>
+              <RotateCcw size={11} /> Return
+            </button>
+          );
+        }
+        return '—';
+      }
       default:
         return row[col.key] != null ? String(row[col.key]) : '—';
     }
