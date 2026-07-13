@@ -229,20 +229,31 @@ function createMasterRouter(tableName, config = {}) {
           rows.push({ rowNum: i + 1, data: row });
         }
       } else if (ext === 'xlsx') {
-        // XLSX — requires 'xlsx' package
+        // XLSX — requires 'exceljs' package
         try {
-          const XLSX = require('xlsx');
-          const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
-          rows = json.map((r, i) => ({
-            rowNum: i + 2,
-            data: Object.fromEntries(
-              Object.entries(r).map(([k, v]) => [k.toLowerCase().trim(), v])
-            ),
-          }));
-        } catch {
-          return res.status(400).json({ error: 'XLSX parsing failed. Is the xlsx package installed?' });
+          const ExcelJS = require('exceljs');
+          const wb = new ExcelJS.Workbook();
+          await wb.xlsx.load(req.file.buffer);
+          const ws = wb.worksheets[0];
+          let headers = [];
+          
+          if (ws) {
+            ws.eachRow((row, rowNumber) => {
+              const rowValues = row.values;
+              if (rowNumber === 1) {
+                headers = rowValues;
+              } else {
+                const rowData = {};
+                headers.forEach((h, i) => {
+                  if (h) rowData[h.toLowerCase().trim()] = rowValues[i] ?? '';
+                });
+                rows.push({ rowNum: rowNumber, data: rowData });
+              }
+            });
+          }
+        } catch (err) {
+          console.error(err);
+          return res.status(400).json({ error: 'XLSX parsing failed. Is the exceljs package installed?' });
         }
       } else {
         return res.status(400).json({ error: 'Only .csv and .xlsx files are supported.' });

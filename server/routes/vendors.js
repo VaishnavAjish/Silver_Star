@@ -12,7 +12,7 @@
 
 const express = require('express');
 const multer  = require('multer');
-const XLSX    = require('xlsx');
+const ExcelJS = require('exceljs');
 const pool    = require('../db/pool');
 const cache   = require('../db/cache');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -32,11 +32,28 @@ function normalizeRow(row) {
   Object.entries(row).forEach(([k, v]) => { out[String(k).trim().toLowerCase()] = String(v ?? '').trim(); });
   return out;
 }
-function parseRows(file) {
-  const wb   = XLSX.read(file.buffer, { type: 'buffer', raw: false });
-  const name = wb.SheetNames[0];
-  if (!name) return [];
-  return XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '', raw: false });
+async function parseRows(file) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(file.buffer);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+  
+  const rows = [];
+  let headers = [];
+
+  ws.eachRow((row, rowNumber) => {
+    const rowValues = row.values;
+    if (rowNumber === 1) {
+      headers = rowValues;
+    } else {
+      const rowData = {};
+      headers.forEach((h, i) => {
+        if (h) rowData[h] = rowValues[i] ?? '';
+      });
+      rows.push(rowData);
+    }
+  });
+  return rows;
 }
 
 // Computes due-date offset in days from payment_term string e.g. '30 Days' → 30
@@ -441,7 +458,8 @@ router.post(
 
     let rows;
     try {
-      rows = parseRows(req.file).map(normalizeRow).filter(row =>
+      const parsed = await parseRows(req.file);
+      rows = parsed.map(normalizeRow).filter(row =>
         Object.values(row).some(v => String(v).trim() !== '')
       );
     } catch (err) {
