@@ -32,16 +32,19 @@
     "otplib": "^13.4.0",
     "pg": "^8.11.3",
     "qrcode": "^1.5.4",
-    "uuid": "^9.0.1",
+    "uuid": "^14.0.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@opentelemetry/api": "^1.7.0",
-    "@opentelemetry/exporter-prometheus": "^0.48.0",
-    "@opentelemetry/instrumentation-express": "^0.35.0",
-    "@opentelemetry/instrumentation-http": "^0.46.0",
-    "@opentelemetry/instrumentation-pg": "^0.37.2",
-    "@opentelemetry/sdk-node": "^0.48.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-prometheus": "^0.220.0",
+    "@opentelemetry/instrumentation-express": "^0.68.0",
+    "@opentelemetry/instrumentation-http": "^0.220.0",
+    "@opentelemetry/instrumentation-pg": "^0.72.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "eslint": "^10.4.0"
+  },
+  "overrides": {
+    "uuid": "$uuid"
   }
 }
