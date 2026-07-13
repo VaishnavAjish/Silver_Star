@@ -55,6 +55,10 @@ router.get('/', authenticate, async (req, res) => {
       machine_id,       // exact match on machine id
       date_from,        // filter by issue_date >= date_from
       date_to,          // filter by issue_date <= date_to
+      process_type,         // exact match on pi.process_type
+      department_id,        // source lot OR machine department
+      expected_return_from, // expected_return >= (returns register due-date range)
+      expected_return_to,   // expected_return <=
       sort_by,          // completion_asc | completion_desc | default (created_at DESC)
       limit  = 50,
       offset = 0,
@@ -110,10 +114,18 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     if (search) {
+      // Covers issue no, item, operator, lot codes, growth number and barcode (lot_op_id)
       params.push(`%${search}%`);
       where += ` AND (pi.issue_number::text ILIKE $${params.length}
                   OR i.name ILIKE $${params.length}
-                  OR op.full_name ILIKE $${params.length})`;
+                  OR op.full_name ILIKE $${params.length}
+                  OR sl.lot_code ILIKE $${params.length}
+                  OR sl.lot_number ILIKE $${params.length}
+                  OR pl.lot_code ILIKE $${params.length}
+                  OR pl.lot_number ILIKE $${params.length}
+                  OR gr.lot_number ILIKE $${params.length}
+                  OR sl.lot_op_id::text ILIKE $${params.length}
+                  OR pl.lot_op_id::text ILIKE $${params.length})`;
     }
 
     if (date_from) {
@@ -124,6 +136,26 @@ router.get('/', authenticate, async (req, res) => {
     if (date_to) {
       params.push(date_to);
       where += ` AND pi.issue_date <= $${params.length}::date`;
+    }
+
+    if (process_type) {
+      params.push(process_type);
+      where += ` AND pi.process_type = $${params.length}`;
+    }
+
+    if (department_id) {
+      params.push(parseInt(department_id));
+      where += ` AND (sl.department_id = $${params.length} OR mach.department_id = $${params.length})`;
+    }
+
+    if (expected_return_from) {
+      params.push(expected_return_from);
+      where += ` AND pi.expected_return >= $${params.length}::date`;
+    }
+
+    if (expected_return_to) {
+      params.push(expected_return_to);
+      where += ` AND pi.expected_return <= $${params.length}::date`;
     }
 
     // Dynamic ORDER BY
@@ -143,6 +175,12 @@ router.get('/', authenticate, async (req, res) => {
               mach.code AS machine_code, mach.name AS machine_name,
               op.full_name AS operator_full_name,
               pm.process_name AS process_display_name,
+              -- Growth Run linkage (biscuit created at process start): the biscuit's
+              -- lot_number IS the Growth Number; run_no increments on Growth Again.
+              gr.lot_number AS growth_number,
+              gr.run_no,
+              rt.lot_number AS root_lot_number, rt.lot_code AS root_lot_code,
+              sl.lot_op_id AS source_lot_op_id,
               -- Operational computed fields
               ROUND(pi.issued_qty - COALESCE(pi.remaining_in_process, pi.issued_qty), 4) AS returned_qty,
               COALESCE(pi.remaining_in_process, pi.issued_qty)                            AS remaining_qty,
@@ -172,18 +210,26 @@ router.get('/', authenticate, async (req, res) => {
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op      ON op.id   = pi.operator_id
        LEFT JOIN process_master pm ON pm.process_code = pi.process_type
+       LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
+                              AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+       LEFT JOIN inventory rt  ON rt.id = sl.root_lot_id
        ${where}
        ORDER BY ${orderBy}
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
 
-    // Count query (same JOINs needed for machine_search filter)
+    // Count query — must carry every JOIN the where clause can reference
+    // (machine_search, search across op/pl/gr, department filter)
     const { rows: [cnt] } = await pool.query(
       `SELECT COUNT(*) FROM lot_process_issues pi
        JOIN inventory sl       ON sl.id   = pi.source_lot_id
        JOIN items i            ON i.id    = sl.item_id
+       LEFT JOIN inventory pl  ON pl.id   = pi.process_lot_id
+       LEFT JOIN users op      ON op.id   = pi.operator_id
        LEFT JOIN machines mach ON mach.id = pi.machine_id
+       LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
+                              AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
        ${where}`,
       baseParams
     );

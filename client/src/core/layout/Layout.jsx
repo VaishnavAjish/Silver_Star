@@ -29,6 +29,7 @@ export const NAV = [
       { label: 'Lot Movements', path: '/lot-movements', submodule: 'lot_movements' },
       { label: 'Process Issues', path: '/inventory/process-issues', submodule: 'process_issues' },
       { label: 'Start Process', path: '/inventory/process-issues/new', editorOnly: true },
+      { label: 'Process Return', path: '/inventory/process-returns', submodule: 'process_issues' },
     ]
   },
   {

@@ -17,7 +17,7 @@ async function run() {
     console.log('Connecting to the database at', process.env.DB_HOST, '...');
     await client.connect();
     
-    const sqlPath = path.join(__dirname, 'migrations', 'phase53-backfill-growth-dimensions.sql');
+    const sqlPath = path.join(__dirname, 'migrations', 'phase57-seed-remove-components.sql');
     console.log('Reading migration file:', sqlPath);
     const sql = fs.readFileSync(sqlPath, 'utf8');
     

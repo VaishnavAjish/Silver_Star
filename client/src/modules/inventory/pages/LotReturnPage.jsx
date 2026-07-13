@@ -92,12 +92,20 @@ function BalanceRow({ label, value, unit, color, bold }) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export default function LotReturnPage() {
+// Two entry modes share this single page:
+//   route mode — /inventory/process-issues/:id/return (issue id from the URL)
+//   modal mode — <LotReturnPage initialLotId isModal onComplete onCancel />
+//                the issue is resolved from the lot's OPEN process issues by
+//                stable id (raw status=OPEN so PARTIAL returns stay eligible)
+export default function LotReturnPage({ initialLotId, isModal = false, onComplete, onCancel }) {
   const navigate    = useNavigate();
   const api         = useApi();
-  const { id }      = useParams();
+  const { id: routeId } = useParams();
   const lineIdRef   = useRef(2);
 
+  const [issueId,    setIssueId]    = useState(routeId || null);
+  const [resolveMsg, setResolveMsg] = useState(null); // diagnostic when no issue can be resolved
+  const [candidates, setCandidates] = useState([]);   // >1 OPEN issues on the lot → picker
   const [issue,      setIssue]      = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [lines,      setLines]      = useState([]);
@@ -131,10 +139,44 @@ export default function LotReturnPage() {
     }
   }, [returnTypes, lines]);
 
+  // Resolve the issue id in modal mode: the lot's OPEN process issues, by stable id.
   useEffect(() => {
+    if (routeId) return;                    // route mode — id already known
+    if (!initialLotId) {
+      setResolveMsg('No lot or issue specified.');
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
+    // Raw status=OPEN (not display_status) so PARTIAL returns stay eligible.
+    api.get(`/api/lot-process-issues?lot_id=${initialLotId}&status=OPEN`)
+      .then(res => {
+        if (cancelled) return;
+        const rows = Array.isArray(res) ? res : (res.data || []);
+        if (rows.length === 0) {
+          setResolveMsg('No active process issue for this lot.');
+          setLoading(false);
+        } else if (rows.length === 1) {
+          setIssueId(rows[0].id);
+        } else {
+          setCandidates(rows);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setResolveMsg(err.message || 'Failed to look up process issues for this lot.');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [routeId, initialLotId]);
+
+  useEffect(() => {
+    if (!issueId) return;
+    let cancelled = false;
+    setLoading(true);
     Promise.all([
-      api.get(`/api/lot-process-issues/${id}`),
+      api.get(`/api/lot-process-issues/${issueId}`),
       api.get('/api/items')
     ])
       .then(([data, itemsData]) => {
@@ -158,7 +200,11 @@ export default function LotReturnPage() {
       .catch(() => { if (!cancelled) setIssue(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [id]);
+  }, [issueId]);
+
+  // ── Exit helpers — modal mode must never navigate the underlying page ───────
+  const exitBack   = () => { if (isModal) { onCancel?.(); } else { navigate(-1); } };
+  const exitToList = () => { if (isModal) { onCancel?.(); } else { navigate('/inventory/process-issues'); } };
 
   // ── Line management ─────────────────────────────────────────────────────────
   const addLine = () => {
@@ -188,13 +234,38 @@ export default function LotReturnPage() {
   const currentRemaining = issue && issue.remaining_in_process != null
     ? parseFloat(issue.remaining_in_process) : issuedQty;
 
+  // COMPONENT mode mirrors the backend gate (lotProcessIssues POST /:id/return):
+  // outputs are DIFFERENT components in DIFFERENT units (e.g. Growth Diamond CT +
+  // Recovered Seed PCS), so per-component totals are validated separately and are
+  // NEVER summed together. The input is fully consumed; weight is the only
+  // conserved quantity (outputs may weigh less = process loss, never more).
+  const isComponentMode = returnTypes.some(t => t.component);
+
   const linesTotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-  const stillIn    = Math.max(0, currentRemaining - linesTotal);
+  const anyQty     = lines.some(l => (parseFloat(l.qty) || 0) > 0.0001);
+
+  const componentTotals = {};
+  if (isComponentMode) {
+    for (const l of lines) {
+      const comp = typeMap[l.type]?.component || 'primary';
+      componentTotals[comp] = (componentTotals[comp] || 0) + (parseFloat(l.qty) || 0);
+    }
+  }
+  const compOver = Object.values(componentTotals).some(q => q > currentRemaining + 0.0001);
+
+  const inputWeight  = parseFloat(issue?.process_lot_weight || 0);
+  const outputWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+  const weightOver   = isComponentMode && inputWeight > 0 && outputWeight > inputWeight + 0.0001;
+
+  const stillIn    = isComponentMode ? 0 : Math.max(0, currentRemaining - linesTotal);
   const difference = currentRemaining - linesTotal;
-  
-  // Phase 1 Engine: Strict Balance Requirement
-  const balanced   = Math.abs(difference) <= 0.0001 && linesTotal > 0.0001;
-  const overFill   = difference < -0.0001;
+
+  // Phase 1 Engine: Strict Balance Requirement (QUANTITY mode);
+  // COMPONENT mode: each component within the input, weight conserved.
+  const balanced   = isComponentMode
+    ? (anyQty && !compOver && !weightOver)
+    : (Math.abs(difference) <= 0.0001 && linesTotal > 0.0001);
+  const overFill   = isComponentMode ? compOver : difference < -0.0001;
 
   // Totals per type for balance panel
   const totByType = {};
@@ -224,23 +295,26 @@ export default function LotReturnPage() {
         notes:       notes || undefined,
         lines: lines
           .filter(l => parseFloat(l.qty) > 0)
-          .map(l => ({ 
-            type: l.type, 
-            qty: parseFloat(l.qty), 
+          .map(l => ({
+            type: l.type,
+            qty: parseFloat(l.qty),
+            // Per-line weight feeds the COMPONENT-mode mass-balance gate;
+            // QUANTITY mode ignores it server-side.
+            weight: l.weight !== '' && l.weight != null ? parseFloat(l.weight) : undefined,
             remarks: l.remarks || undefined,
             item_id: l.item_id ? parseInt(l.item_id) : undefined
           })),
-        remaining_in_process: parseFloat(stillIn.toFixed(4)),
+        remaining_in_process: isComponentMode ? 0 : parseFloat(stillIn.toFixed(4)),
         ...(hasMeas ? { measurements: measObj } : {}),
       };
-      const res = await api.post(`/api/lot-process-issues/${id}/return`, payload);
+      const res = await api.post(`/api/lot-process-issues/${issueId}/return`, payload);
       const isFinal = res.is_final;
       toast.success(
         isFinal
           ? `Return ${res.return_number} recorded — issue closed`
           : `Partial return ${res.return_number} recorded — ${res.remaining_after.toFixed(4)} still in process`
       );
-      navigate('/inventory/process-issues');
+      if (isModal) { onComplete?.(); } else { navigate('/inventory/process-issues'); }
     } catch (err) {
       toast.error(err.message || 'Failed to record return');
     } finally { setSaving(false); }
@@ -255,12 +329,58 @@ export default function LotReturnPage() {
       </div>
     );
   }
+  if (resolveMsg) {
+    return (
+      <div className="animate-in empty-state" style={{ height: '100%' }}>
+        <AlertCircle size={32} />
+        <p>{resolveMsg}</p>
+        <button className="btn btn-sm" onClick={exitToList}>← Back</button>
+      </div>
+    );
+  }
+  // Multiple OPEN issues on this lot — never auto-pick; the operator chooses.
+  if (!issueId && candidates.length > 1) {
+    return (
+      <div className="animate-in" style={{ padding: 24, height: '100%', overflow: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <RotateCcw size={16} style={{ color: 'var(--brand)' }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--g900)' }}>
+            Select Process Issue
+          </span>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--g500)', marginBottom: 14 }}>
+          This lot has {candidates.length} open process issues. Choose the one to return against.
+        </p>
+        {candidates.map(c => (
+          <button
+            key={c.id}
+            onClick={() => setIssueId(c.id)}
+            style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+              textAlign: 'left', padding: '10px 14px', marginBottom: 8, cursor: 'pointer',
+              background: '#fff', border: '1px solid var(--g200)', borderRadius: 8 }}
+          >
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--g900)' }}>
+              {c.issue_number}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--g600)', flex: 1 }}>
+              {c.item_name} · {c.process_display_name || c.process_type || '—'}
+              {c.machine_name ? ` · ${c.machine_name}` : ''}
+            </span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--g500)' }}>
+              {Number(c.remaining_qty ?? c.issued_qty).toFixed(4)} remaining
+            </span>
+          </button>
+        ))}
+        <button className="btn btn-sm" style={{ marginTop: 6 }} onClick={exitBack}>Cancel</button>
+      </div>
+    );
+  }
   if (!issue) {
     return (
       <div className="animate-in empty-state" style={{ height: '100%' }}>
         <AlertCircle size={32} />
         <p>Issue not found.</p>
-        <button className="btn btn-sm" onClick={() => navigate('/inventory/process-issues')}>← Back</button>
+        <button className="btn btn-sm" onClick={exitToList}>← Back</button>
       </div>
     );
   }
@@ -269,7 +389,7 @@ export default function LotReturnPage() {
       <div className="animate-in empty-state" style={{ height: '100%' }}>
         <AlertCircle size={32} />
         <p>Issue {issue.issue_number} is {issue.status.toLowerCase()} — no further returns allowed.</p>
-        <button className="btn btn-sm" onClick={() => navigate('/inventory/process-issues')}>← Back</button>
+        <button className="btn btn-sm" onClick={exitToList}>← Back</button>
       </div>
     );
   }
@@ -285,7 +405,7 @@ export default function LotReturnPage() {
       <div style={{ padding: '10px 16px', background: 'var(--g50)',
         borderBottom: '1px solid var(--g200)', display: 'flex', alignItems: 'center',
         gap: 10, flexShrink: 0 }}>
-        <button className="icon-btn" onClick={() => navigate(-1)}><ArrowLeft size={15} /></button>
+        <button className="icon-btn" onClick={exitBack}><ArrowLeft size={15} /></button>
         <RotateCcw size={16} style={{ color: 'var(--brand)' }} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--g900)' }}>Return from Process</div>
@@ -320,24 +440,60 @@ export default function LotReturnPage() {
           <Section title="Balance Validation" icon={Info}>
             <InfoRow label="Issued Qty"
               value={`${currentRemaining.toFixed(4)} ${unit}`} mono />
-            <InfoRow label="Returned Qty"
-              value={`${linesTotal.toFixed(4)} ${unit}`} mono />
-            
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: balanced ? '#2E7D32' : '#C62828' }}>
-                  Difference
-                </span>
-                <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 800, color: balanced ? '#2E7D32' : '#C62828' }}>
-                  {difference.toFixed(4)} {unit}
-                </span>
-              </div>
-              {!balanced && linesTotal > 0 && (
-                <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
-                  Return quantities must exactly equal the Issued Quantity.
+
+            {isComponentMode ? (
+              /* COMPONENT mode: per-component totals — components are validated
+                 separately against the input and are NEVER summed together. */
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
+                {Object.entries(componentTotals).map(([comp, qty]) => (
+                  <BalanceRow
+                    key={comp}
+                    label={comp.charAt(0).toUpperCase() + comp.slice(1)}
+                    value={qty}
+                    color={qty > currentRemaining + 0.0001 ? '#C62828' : undefined}
+                    bold
+                  />
+                ))}
+                {inputWeight > 0 && (
+                  <BalanceRow
+                    label="Weight out / in"
+                    value={`${outputWeight.toFixed(4)} / ${inputWeight.toFixed(4)}`}
+                    unit="ct"
+                    color={weightOver ? '#C62828' : '#2E7D32'}
+                    bold
+                  />
+                )}
+                <div style={{ fontSize: 10, color: weightOver || compOver ? '#C62828' : 'var(--g500)',
+                  fontWeight: 600, marginTop: 4 }}>
+                  {weightOver
+                    ? 'Output weight cannot exceed input weight — a component split cannot create mass.'
+                    : compOver
+                      ? 'A component output exceeds the quantity in process.'
+                      : 'Components are validated separately — never summed. Input is fully consumed.'}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <>
+                <InfoRow label="Returned Qty"
+                  value={`${linesTotal.toFixed(4)} ${unit}`} mono />
+
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: balanced ? '#2E7D32' : '#C62828' }}>
+                      Difference
+                    </span>
+                    <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 800, color: balanced ? '#2E7D32' : '#C62828' }}>
+                      {difference.toFixed(4)} {unit}
+                    </span>
+                  </div>
+                  {!balanced && linesTotal > 0 && (
+                    <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
+                      Return quantities must exactly equal the Issued Quantity.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </Section>
 
           {(issue.machine_name || issue.operator_full_name) && (
@@ -413,9 +569,11 @@ export default function LotReturnPage() {
                 Return Lines
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-sm" onClick={fillBalance} title="Add a line to balance remaining as Consumed">
-                  Auto-fill balance
-                </button>
+                {!isComponentMode && (
+                  <button className="btn btn-sm" onClick={fillBalance} title="Add a line to balance remaining as Consumed">
+                    Auto-fill balance
+                  </button>
+                )}
                 <button className="btn btn-sm btn-primary" onClick={addLine}>
                   <Plus size={12} /> Add Row
                 </button>
@@ -569,21 +727,6 @@ export default function LotReturnPage() {
             </div>
           </div>
 
-          {/* Date + Notes */}
-          <div style={{ background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
-            padding: '14px 16px', marginBottom: 14 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <div className="fg">
-                <label>Return Date *</label>
-                <DatePicker value={returnDate} onChange={v => setReturnDate(v)} />
-              </div>
-              <div className="fg">
-                <label>Notes</label>
-                <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes…" />
-              </div>
-            </div>
-          </div>
-
           {overFill && (
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#FFEBEE', borderRadius: 6,
               color: '#C62828', fontSize: 12, fontWeight: 600 }}>
@@ -615,14 +758,24 @@ export default function LotReturnPage() {
             padding: '12px 16px', borderTop: '1px solid var(--g200)',
             background: '#fff', flexShrink: 0,
           }}>
-            {!balanced && linesTotal > 0 && (
+            {!isComponentMode && !balanced && linesTotal > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
                 <AlertCircle size={12} /> The Return Difference must be 0 to save.
               </div>
             )}
-            {overFill && (
+            {!isComponentMode && overFill && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
                 <AlertCircle size={12} /> You cannot return more than what was issued.
+              </div>
+            )}
+            {isComponentMode && compOver && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
+                <AlertCircle size={12} /> A component output exceeds the quantity in process — components are never summed.
+              </div>
+            )}
+            {isComponentMode && weightOver && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
+                <AlertCircle size={12} /> Output weight exceeds input weight — a split cannot create mass.
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -678,13 +831,17 @@ export default function LotReturnPage() {
             background: overFill ? '#FFEBEE' : balanced ? '#E8F5E9' : '#FFF8E1',
             border: `1px solid ${overFill ? '#EF9A9A' : balanced ? '#A5D6A7' : '#FFE082'}`,
           }}>
-            {overFill ? (
+            {overFill || weightOver ? (
               <>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#C62828', marginBottom: 4 }}>
-                  Over-filled
+                  {isComponentMode ? (weightOver ? 'Mass created' : 'Component over-filled') : 'Over-filled'}
                 </div>
                 <div style={{ fontSize: 11, color: '#C62828' }}>
-                  Reduce by {(linesTotal - currentRemaining).toFixed(4)} {unit}
+                  {isComponentMode
+                    ? (weightOver
+                        ? `Output weight ${outputWeight.toFixed(4)} > input ${inputWeight.toFixed(4)} ct`
+                        : `Each component must stay within ${currentRemaining.toFixed(4)} ${unit}`)
+                    : `Reduce by ${(linesTotal - currentRemaining).toFixed(4)} ${unit}`}
                 </div>
               </>
             ) : balanced ? (
@@ -692,12 +849,14 @@ export default function LotReturnPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6,
                   fontSize: 12, fontWeight: 700, color: '#2E7D32', marginBottom: 4 }}>
                   <CheckCircle2 size={14} />
-                  {stillIn > 0.0001 ? 'Partial — balanced' : 'Final — balanced'}
+                  {isComponentMode ? 'Component split — valid' : stillIn > 0.0001 ? 'Partial — balanced' : 'Final — balanced'}
                 </div>
                 <div style={{ fontSize: 11, color: '#388E3C' }}>
-                  {stillIn > 0.0001
-                    ? `${stillIn.toFixed(4)} ${unit} stays in machine`
-                    : 'Issue will be closed on submit'}
+                  {isComponentMode
+                    ? 'Input fully consumed — issue closes on submit'
+                    : stillIn > 0.0001
+                      ? `${stillIn.toFixed(4)} ${unit} stays in machine`
+                      : 'Issue will be closed on submit'}
                 </div>
               </>
             ) : (
@@ -738,7 +897,7 @@ export default function LotReturnPage() {
 
       {/* Footer Actions */}
       <div style={{ padding: '16px 20px', borderTop: '1px solid var(--g200)', display: 'flex', justifyContent: 'flex-end', gap: 12, background: 'var(--g50)', flexShrink: 0 }}>
-        <button className="btn" onClick={() => isModal ? onCancel?.() : navigate(-1)} disabled={saving}>Cancel</button>
+        <button className="btn" onClick={exitBack} disabled={saving}>Cancel</button>
         <button
           className="btn btn-primary"
           disabled={!balanced || overFill || saving}
@@ -750,6 +909,4 @@ export default function LotReturnPage() {
 
     </div>
   );
-
-  return content;
 }
