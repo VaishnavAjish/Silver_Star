@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { isSeedItem, nextMixLotCode, childSplitCode, nextSiblingCode, nextLotOpId } = require('../services/seedLotCodeService');
+const { resolveMixDimensions, mixDimensionError } = require('../services/lotDimensions');
 const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
@@ -396,6 +397,19 @@ router.post('/mix/preview', authenticate, async (req, res) => {
         error: `Lots already consumed: ${consumed.map(r => r.lot_number).join(', ')}`,
       });
 
+    // Dimensions are per-piece, not additive: a mixed lot may only carry a
+    // dimension every measured parent agrees on. Preview must reject exactly what
+    // execute rejects, or the operator discovers the block only after confirming.
+    const isSeed = isSeedItem(rows[0]);
+    const mixDims = resolveMixDimensions(rows);
+    if (isSeed && mixDims.conflict) {
+      return res.status(409).json({
+        error: mixDimensionError(mixDims),
+        dimensions_conflict: true,
+        conflicting_lots: mixDims.conflictingLots,
+      });
+    }
+
     const totalEffQty = rows.reduce((s, r) => s + effQty(r), 0);
     const totalVal    = rows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0);
     const wAvgRate    = totalEffQty > 0
@@ -406,6 +420,8 @@ router.post('/mix/preview', authenticate, async (req, res) => {
     const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
 
     res.json({
+      child_dimensions: isSeed ? mixDims.dims : null,
+      dimensions_conflict: false,
       parents: rows.map(r => ({
         id: r.id,
         lot_number: r.lot_number,
@@ -479,6 +495,21 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
     const childTotalValue = Math.round(totalVal * 100) / 100;
 
     const firstParent = rows[0];
+    const isSeed      = isSeedItem(firstParent);
+
+    // Dimensions are per-piece attributes, never additive. The child may only
+    // inherit a dimension that every measured parent agrees on — otherwise the
+    // mixed lot would claim a size that isn't true of its contents. Reject here,
+    // before the first write, so the transaction rolls back clean.
+    const mixDims = resolveMixDimensions(rows);
+    if (isSeed && mixDims.conflict) throw new Error(mixDimensionError(mixDims));
+    const childDims = isSeed
+      ? mixDims.dims
+      : { dim_length: null, dim_depth: null, dim_height: null, dim_unit: null };
+
+    // batch_no is likewise not mergeable: keep it only when the parents agree.
+    const batchNos     = [...new Set(rows.map(r => r.batch_no || null))];
+    const childBatchNo = batchNos.length === 1 ? batchNos[0] : null;
 
     const movNum = await genMovNum(client);
     const { rows: [mv] } = await client.query(
@@ -498,7 +529,6 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
     }
 
     // Create the single child lot
-    const isSeed = isSeedItem(firstParent);
     let childCode, mixLotCode;
     if (isSeed) {
       mixLotCode = await nextMixLotCode(client);
@@ -515,17 +545,19 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
 
     const { rows: [childInv] } = await client.query(
       `INSERT INTO inventory
-         (item_id, lot_number, lot_name, qty, unit, weight, rate, total_value,
+         (item_id, lot_number, lot_name, batch_no, qty, unit, weight, rate, total_value,
           location_id, department_id, vendor_id, purchase_date,
           status, remarks, source_movement_id, source_type,
-          lot_code, operation_type, split_level, lot_op_id, source_module)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CURRENT_DATE,'IN STOCK',$12,$13,'mix',
-               $14,'mix',0,$15,'Mix Lots')
+          lot_code, operation_type, split_level, lot_op_id, source_module,
+          dim_length, dim_depth, dim_height, dim_unit)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CURRENT_DATE,'IN STOCK',$13,$14,'mix',
+               $15,'mix',0,$16,'Mix Lots',$17,$18,$19,$20)
        RETURNING *`,
       [
         firstParent.item_id,
         childCode,
         `Mixed lot ${movNum}`,
+        childBatchNo,
         invQty,
         firstParent.unit,
         invWeight,
@@ -538,6 +570,10 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
         mv.id,
         mixLotCode,
         mixLotOpId,
+        childDims.dim_length,
+        childDims.dim_depth,
+        childDims.dim_height,
+        childDims.dim_unit,
       ]
     );
 
@@ -584,6 +620,7 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
         effective_qty: totalEffQty,
         rate: wAvgRate,
         total_value: Math.round(totalVal * 100) / 100,
+        dimensions: isSeed ? childDims : null,
       },
     });
     dispatchEvent('lot.merged', { movement_id: mv.id, movement_number: movNum, parent_lot_ids, child_lot_id: childInv.id, child_lot_number: childCode }).catch(() => {});

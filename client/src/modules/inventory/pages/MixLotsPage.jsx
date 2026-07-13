@@ -123,6 +123,14 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
   const unit = selectedLots[0]?.unit || '';
   const qtyLabel = unit === 'CT' ? 'Weight (ct)' : `Qty (${unit || 'pcs'})`;
 
+  /** Dimensions are per-piece: inherited only when every parent agrees, never summed. */
+  const formatDims = (d) => {
+    if (!d) return null;
+    const axes = [d.dim_length, d.dim_depth, d.dim_height];
+    if (axes.every(v => v === null || v === undefined)) return null;
+    return `${axes.map(v => (v === null || v === undefined ? '—' : v)).join(' × ')} ${d.dim_unit || 'mm'}`;
+  };
+
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
@@ -380,11 +388,14 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
               <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 6 }}>
                 ↓ Resulting lot ({preview.child_lot_code_preview})
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
                 {[
                   { l: qtyLabel, v: `${preview.child_effective_qty.toFixed(4)} ${preview.unit}` },
                   { l: 'Rate (weighted avg)', v: `₹${Number(preview.child_cost_per_unit).toLocaleString('en-IN', { maximumFractionDigits: 4 })}` },
                   { l: 'Total Value', v: `₹${Number(preview.child_total_value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` },
+                  ...(formatDims(preview.child_dimensions)
+                    ? [{ l: 'Dimensions', v: formatDims(preview.child_dimensions) }]
+                    : []),
                 ].map(({ l, v }) => (
                   <div key={l} style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 9, color: '#2E7D32', textTransform: 'uppercase', letterSpacing: '.5px' }}>{l}</div>
