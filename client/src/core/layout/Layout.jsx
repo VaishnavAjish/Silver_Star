@@ -233,7 +233,7 @@ function LayoutInner() {
     '/bills': 'Vendor Bills', '/bills/new': 'New Vendor Bill',
     '/purchase-notes': 'Purchase Notes', '/purchase-notes/new': 'New Purchase Note',
     '/expenses': 'Expenses', '/expenses/new': 'New Expense', '/rough-growth': 'Rough Growth',
-    '/growth-runs': 'Growth Runs', '/inventory/process-issues': 'Process Issues',
+    '/growth-runs': 'Growth Runs',
     '/invoices': 'Rough Invoices', '/invoices/new': 'New Invoice', '/customers': 'Customers',
     '/payments': 'Payments', '/payments/new': 'New Payment', '/receipts': 'Receipts', '/receipts/new': 'New Receipt', '/ledger': 'Account Ledger', '/trial-balance': 'Trial Balance',
     '/pnl': 'Profit & Loss', '/costing': 'Costing Report', '/balance-sheet': 'Balance Sheet',
