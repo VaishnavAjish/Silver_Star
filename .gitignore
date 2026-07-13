@@ -44,3 +44,7 @@ test_insert.js
 test_sql_*.js
 drop_broken_fks.js
 mig_output.json
+
+server/public/assets/
+server/public/*.png
+server/public/*.svg
