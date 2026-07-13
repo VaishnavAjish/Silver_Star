@@ -11,11 +11,15 @@ import {
   Play, Search, Plus, X, Package, AlertCircle, Info, Clipboard,
   ScanLine,   // TASK 7: barcode scan trigger
   AlertTriangle,
+  CheckSquare,
+  Square,
+  RotateCcw
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 import Barcode from '../../../shared/components/Barcode';
 
-const CANNOT_ISSUE = ['CONSUMED', 'SOLD', 'DISPOSED', 'DAMAGED', 'ARCHIVED', 'IN PROCESS'];
+const CANNOT_ISSUE = ['CONSUMED', 'SOLD', 'DISPOSED', 'DAMAGED', 'ARCHIVED'];
+const isLotIssuable = l => !CANNOT_ISSUE.includes(l.status) && (l.status === 'IN STOCK' || (l.status === 'IN PROCESS' && ((l.category || '').toLowerCase() === 'seed' || (l.item_name || '').toLowerCase().includes('seed'))));
 
 // Category color for process type badge in section header
 const CATEGORY_COLORS = {
@@ -151,6 +155,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   // ── Lot selection ─────────────────────────────────────────────────────────
   const [search,       setSearch]      = useState('');
   const [selectedLots, setSelectedLots] = useState([]);  // [{lot, issuedQty}]
+  const [checkedLotIds, setCheckedLotIds] = useState(new Set());
 
   // ── Process config ────────────────────────────────────────────────────────
   const [machineId,     setMachineId]     = useState('');
@@ -277,7 +282,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
 
       // ── Inventory lots (conditional — failure shown if it rejects) ───────
       if (invRes.status === 'fulfilled') {
-        setLots((invRes.value?.data || []).filter(l => !CANNOT_ISSUE.includes(l.status)));
+        setLots((invRes.value?.data || []).filter(isLotIssuable));
       }
 
       // One combined toast for any critical failures — operators omitted
@@ -393,7 +398,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
         //   continue;
         // }
 
-        if (CANNOT_ISSUE.includes(found.status)) { skipped++; continue; }
+        if (!isLotIssuable(found)) { skipped++; continue; }
 
         toAdd.push({ lot: found, issuedQty: '' });
         currentIds.add(lotId);
@@ -621,6 +626,40 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   )}
                 </button>
 
+                {/* Return Process button */}
+                <button
+                  className="btn btn-sm"
+                  title="Return Process"
+                  style={{ flexShrink: 0 }}
+                  onClick={async () => {
+                    const checkedIds = Array.from(checkedLotIds);
+                    if (checkedIds.length === 0) {
+                      toast.error('Please select a lot first');
+                      return;
+                    }
+                    if (checkedIds.length > 1) {
+                      toast.error('Please select only ONE lot to return');
+                      return;
+                    }
+                    const lotId = checkedIds[0];
+                    try {
+                      const res = await api.get(`/api/lot-process-issues?lot_id=${lotId}`);
+                      const openIssue = (res.data || []).find(i => i.status === 'OPEN');
+                      if (openIssue) {
+                        navigate(`/inventory/process-issues/${openIssue.id}/return`);
+                      } else {
+                        toast.error('No open process issue found for this lot');
+                      }
+                    } catch (err) {
+                      toast.error('Failed to find process issue');
+                    }
+                  }}
+                  disabled={checkedLotIds.size === 0}
+                >
+                  <RotateCcw size={13} />
+                  <span style={{ marginLeft: 4 }}>Return Process</span>
+                </button>
+
                 <span className="grid-count">{filteredLots.length} lots</span>
               </div>
 
@@ -632,6 +671,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                   <table className="dgrid">
                       <thead style={{ position: 'sticky', top: 0, zIndex: 20 }}>
                         <tr>
+                          <th style={{ width: 34, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}></th>
                           <th style={{ width: 110, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Lot Code</th>
                           <th style={{ width: 130, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Item</th>
                           <th style={{ width: 100, position: 'sticky', top: 0, background: 'var(--table-header, #f4f6f8)', zIndex: 21 }}>Barcode</th>
@@ -646,6 +686,20 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                     <tbody>
                       {paginatedItems.map(lot => (
                         <tr key={lot.id} style={{ cursor: 'pointer' }} onClick={() => addLot(lot)}>
+                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            <span style={{ cursor: 'pointer' }} onClick={(e) => {
+                              e.stopPropagation();
+                              setCheckedLotIds(prev => {
+                                const next = new Set(prev);
+                                next.has(lot.id) ? next.delete(lot.id) : next.add(lot.id);
+                                return next;
+                              });
+                            }}>
+                              {checkedLotIds.has(lot.id)
+                                ? <CheckSquare size={13} style={{ color: 'var(--brand)' }} />
+                                : <Square size={13} style={{ color: 'var(--g400)' }} />}
+                            </span>
+                          </td>
                           <td>
                             <span className="cell-link">{lot.lot_code || lot.lot_number}</span>
                           </td>
@@ -679,7 +733,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                       ))}
                       {filteredLots.length === 0 && !loading && (
                         <tr>
-                          <td colSpan={9} style={{
+                          <td colSpan={10} style={{
                             textAlign: 'center', color: 'var(--g400)',
                             padding: 40, fontStyle: 'italic', fontSize: 12,
                           }}>
