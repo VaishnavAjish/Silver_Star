@@ -154,6 +154,11 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         if (cancelled) return;
         const rows = Array.isArray(res) ? res : (res.data || []);
         if (rows.length === 0) {
+          if (isModal && onCancel) {
+            toast.error('No active process issue for this lot.');
+            onCancel();
+            return;
+          }
           setResolveMsg('No active process issue for this lot.');
           setLoading(false);
         } else if (rows.length === 1) {
