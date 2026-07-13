@@ -261,7 +261,8 @@ router.get('/:id', authenticate, async (req, res) => {
               i.name AS item_name, i.category,
               u.full_name AS created_by_name,
               mach.code AS machine_code, mach.name AS machine_name,
-              op.full_name AS operator_full_name
+              op.full_name AS operator_full_name,
+              COALESCE(pm1.allowed_outputs, pm2.allowed_outputs) AS allowed_outputs
        FROM lot_process_issues pi
        JOIN inventory sl      ON sl.id   = pi.source_lot_id
        JOIN items i           ON i.id    = sl.item_id
@@ -269,6 +270,9 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN users u      ON u.id    = pi.created_by
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op     ON op.id   = pi.operator_id
+       LEFT JOIN machine_processes mp ON pi.machine_process_id = mp.id
+       LEFT JOIN process_master pm1 ON mp.process_master_id = pm1.id
+       LEFT JOIN process_master pm2 ON pi.process_type = pm2.process_code
        WHERE pi.id = $1`,
       [req.params.id]
     );
@@ -842,13 +846,6 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 });
 
 // ── RETURN LOT CODE HELPERS ───────────────────────────────────────────────────
-// Suffix map: return_type → lot code character
-const TYPE_SUFFIX = { usable: 'R', damaged: 'D', consumed: 'C', reprocess: 'P', qc_hold: 'Q' };
-// Inventory status created for each return type
-const TYPE_STATUS = {
-  usable: 'IN STOCK', damaged: 'DAMAGED', consumed: 'CONSUMED',
-  reprocess: 'REPROCESS', qc_hold: 'QC_HOLD',
-};
 
 /**
  * Generate next sequential return lot code for a given suffix char.
@@ -886,26 +883,40 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
   if (!Array.isArray(lines) || lines.length === 0)
     return res.status(400).json({ error: 'At least one return line is required' });
 
-  const validTypes = Object.keys(TYPE_SUFFIX);
-  for (const line of lines) {
-    if (!validTypes.includes(line.type))
-      return res.status(400).json({ error: `Invalid return type: '${line.type}'. Allowed: ${validTypes.join(', ')}` });
-    if (!(parseFloat(line.qty) > 0))
-      return res.status(400).json({ error: `qty must be positive for type '${line.type}'` });
-  }
-
   const client = await pool.primaryPool.connect();
   try {
     await client.query('BEGIN');
 
     // 1. Lock the issue
     const { rows: issueRows } = await client.query(
-      'SELECT * FROM lot_process_issues WHERE id = $1 FOR UPDATE',
+      `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs
+       FROM lot_process_issues i
+       LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
+       LEFT JOIN process_master p1 ON mp.process_master_id = p1.id
+       LEFT JOIN process_master p2 ON i.process_type = p2.process_code
+       WHERE i.id = $1 FOR UPDATE OF i`,
       [issueId]
     );
     if (!issueRows.length) throw new Error('Issue not found');
     const issue = issueRows[0];
     if (issue.status !== 'OPEN') throw new Error(`Issue ${issue.issue_number} is already ${issue.status}`);
+
+    const fallbackOutputs = [
+      { type: 'usable',    label: 'Usable',   suffix: 'R', status: 'IN STOCK' },
+      { type: 'damaged',   label: 'Damaged',  suffix: 'D', status: 'DAMAGED' },
+      { type: 'consumed',  label: 'Consumed', suffix: 'C', status: 'CONSUMED' }
+    ];
+    const allowedOutputs = issue.allowed_outputs && issue.allowed_outputs.length > 0 
+      ? issue.allowed_outputs 
+      : fallbackOutputs;
+
+    const validTypes = allowedOutputs.map(o => o.type);
+    for (const line of lines) {
+      if (!validTypes.includes(line.type))
+        throw new Error(`Invalid return type: '${line.type}'. Allowed: ${validTypes.join(', ')}`);
+      if (!(parseFloat(line.qty) > 0))
+        throw new Error(`qty must be positive for type '${line.type}'`);
+    }
 
     const issuedQty = parseFloat(issue.issued_qty);
     const currentRemaining = issue.remaining_in_process !== null
@@ -979,8 +990,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const outcomes = [];
     for (const line of lines) {
       const qty        = parseFloat(line.qty);
-      const suffix     = TYPE_SUFFIX[line.type];
-      const lotStatus  = TYPE_STATUS[line.type];
+      const outputRule = allowedOutputs.find(o => o.type === line.type);
+      const suffix     = outputRule.suffix;
+      const lotStatus  = outputRule.status;
 
       // Growth Run: no clone, no child lot. Record the return against the biscuit
       // itself so history/genealogy stay intact on the single record, then move on.
@@ -1002,6 +1014,17 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       let outItemId = processLot.item_id;
       let outUnit = processLot.unit;
       let outRough = rough;
+      
+      // Override from Output Rule config (e.g. 'growth_diamond')
+      if (outputRule.item_category_override) {
+        const { rows: ruleItemRows } = await client.query('SELECT * FROM items WHERE category = $1 ORDER BY id LIMIT 1', [outputRule.item_category_override]);
+        if (ruleItemRows.length) {
+          outItemId = ruleItemRows[0].id;
+          outUnit = ruleItemRows[0].unit;
+          outRough = ['CTS', 'g', 'mg'].includes(outUnit) || (ruleItemRows[0].category === 'rough_diamond' || ruleItemRows[0].category === 'growth_diamond');
+        }
+      }
+
       if (line.item_id) {
         const { rows: iRows } = await client.query('SELECT * FROM items WHERE id = $1', [line.item_id]);
         if (iRows.length) {
@@ -1131,7 +1154,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
           -currentRemaining, 'CONSUMED', `Process return final (${returnNum})`, req.user.id);
       } else {
-        const finalStatus = TYPE_STATUS[lines[0].type] || 'IN STOCK';
+        const finalStatusRule = allowedOutputs.find(o => o.type === lines[0].type);
+        const finalStatus = finalStatusRule ? finalStatusRule.status : 'IN STOCK';
 
         await client.query(
           `UPDATE inventory SET status=$1, updated_at=NOW() WHERE id=$2`,

@@ -35,7 +35,7 @@ export const NAV = [
     label: 'Rough Diamonds', icon: Gem, module: 'rough', children: [
       { label: 'Rough Growth', path: '/rough-growth', submodule: 'rough_growth' },
       { label: 'Growth Runs', path: '/growth-runs', submodule: 'rough_growth' },
-      { label: 'Growth Output', path: '/manufacturing/growth-output', editorOnly: true },
+      { label: 'Process Issues', path: '/inventory/process-issues', editorOnly: true },
     ]
   },
   {
@@ -233,7 +233,7 @@ function LayoutInner() {
     '/bills': 'Vendor Bills', '/bills/new': 'New Vendor Bill',
     '/purchase-notes': 'Purchase Notes', '/purchase-notes/new': 'New Purchase Note',
     '/expenses': 'Expenses', '/expenses/new': 'New Expense', '/rough-growth': 'Rough Growth',
-    '/growth-runs': 'Growth Runs', '/manufacturing/growth-output': 'Growth Output',
+    '/growth-runs': 'Growth Runs', '/inventory/process-issues': 'Process Issues',
     '/invoices': 'Rough Invoices', '/invoices/new': 'New Invoice', '/customers': 'Customers',
     '/payments': 'Payments', '/payments/new': 'New Payment', '/receipts': 'Receipts', '/receipts/new': 'New Receipt', '/ledger': 'Account Ledger', '/trial-balance': 'Trial Balance',
     '/pnl': 'Profit & Loss', '/costing': 'Costing Report', '/balance-sheet': 'Balance Sheet',
@@ -278,8 +278,8 @@ function LayoutInner() {
     // imperatively BEFORE any tab is opened (a mounted <Navigate> would loop in
     // the keep-alive tab system). Short-circuits before the open-tab logic below.
     if (location.pathname === '/rough-growth/new') {
-      lastLocationRef.current = '/manufacturing/growth-output';
-      navigate('/manufacturing/growth-output', { replace: true });
+      lastLocationRef.current = '/inventory/process-issues';
+      navigate('/inventory/process-issues', { replace: true });
       return;
     }
 

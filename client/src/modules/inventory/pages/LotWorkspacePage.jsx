@@ -264,14 +264,14 @@ export default function LotWorkspacePage() {
     perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={12} />, fn: () => navigate(`/inventory/${id}/lineage`) },
     perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={12} />, fn: () => setActiveModal('issue'), accent: true },
     perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={12} />, fn: () => navigate('/manufacturing/control-tower'), accent: true },
-    perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={12} />, fn: () => navigate('/manufacturing/growth-output'), accent: true },
+    perms.canGrowthOutput && { label: 'Process Issues', icon: <Package size={12} />, fn: () => navigate('/inventory/process-issues'), accent: true },
     perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={12} />, fn: () => openStockTransferModal([{ ...lot, id: lot.lot_id || lot.id, lot_code: displayCode }], () => loadCore()), accent: true },
     perms.canSplit && { label: 'Split Lot', icon: <GitBranch size={12} />, fn: () => setActiveModal('split'), accent: true },
     perms.canMix && { label: 'Mix Into…', icon: <GitMerge size={12} />, fn: () => setActiveModal('mix'), accent: true },
     // Complete Growth Run is only valid for a biscuit inside a CVD *growth* process.
     // The Action Matrix grants it for any growth_run IN PROCESS (it cannot see the
     // runtime process_type), so we AND it with the already-computed CVD-growth guard
-    // here. A biscuit in a laser/cut process must complete via Growth Output, not this
+    // here. A biscuit in a laser/cut process must complete via Process Issues, not this
     // dimension-measurement dialog.
     perms.canCompleteGrowthRun && isCurrentlyInCvdGrowth && { label: 'Complete Growth Run', icon: <CheckCircle size={12} />, fn: () => setShowGrowthReturn(true), accent: true },
     // TASK 5: Return from Process — navigates directly to LotReturnPage using the

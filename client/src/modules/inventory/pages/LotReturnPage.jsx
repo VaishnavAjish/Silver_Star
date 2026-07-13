@@ -11,29 +11,34 @@ import {
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 
-// ── Return type catalogue ─────────────────────────────────────────────────────
-const RETURN_TYPES = [
-  { value: 'usable',   label: 'Usable',    suffix: 'R', status: 'IN STOCK',  color: '#2E7D32', bg: '#E8F5E9', border: '#A5D6A7' },
-  { value: 'damaged',  label: 'Damaged',   suffix: 'D', status: 'DAMAGED',   color: '#C62828', bg: '#FFEBEE', border: '#EF9A9A' },
-  { value: 'consumed', label: 'Consumed',  suffix: 'C', status: 'CONSUMED',  color: '#757575', bg: '#F5F5F5', border: '#E0E0E0' },
-  { value: 'reprocess',label: 'Reprocess', suffix: 'P', status: 'REPROCESS', color: '#1565C0', bg: '#E3F2FD', border: '#90CAF9' },
-  { value: 'qc_hold',  label: 'QC Hold',   suffix: 'Q', status: 'QC_HOLD',   color: '#E65100', bg: '#FFF3E0', border: '#FFCC80' },
+// ── Return type catalogue (Fallback) ──────────────────────────────────────────
+const FALLBACK_TYPES = [
+  { type: 'usable',   label: 'Usable',    suffix: 'R', status: 'IN STOCK' },
+  { type: 'damaged',  label: 'Damaged',   suffix: 'D', status: 'DAMAGED' },
+  { type: 'consumed', label: 'Consumed',  suffix: 'C', status: 'CONSUMED' },
 ];
 
-const TYPE_MAP = Object.fromEntries(RETURN_TYPES.map(t => [t.value, t]));
+const STYLE_PALETTES = [
+  { color: '#2E7D32', bg: '#E8F5E9', border: '#A5D6A7' },
+  { color: '#C62828', bg: '#FFEBEE', border: '#EF9A9A' },
+  { color: '#757575', bg: '#F5F5F5', border: '#E0E0E0' },
+  { color: '#1565C0', bg: '#E3F2FD', border: '#90CAF9' },
+  { color: '#E65100', bg: '#FFF3E0', border: '#FFCC80' },
+  { color: '#6A1B9A', bg: '#F3E5F5', border: '#CE93D8' },
+];
 
-function newLine(n) {
-  return { _id: n, type: 'usable', qty: '', weight: '', length: '', width: '', height: '', remarks: '', item_id: '' };
+function newLine(n, defaultType) {
+  return { _id: n, type: defaultType, qty: '', weight: '', length: '', width: '', height: '', remarks: '', item_id: '' };
 }
 
 // Compute the preview lot code for a line within the current form session.
 // existingCounts: { R: 2, D: 0, ... } from prior returns already in DB.
 // priorSameType: count of lines with same type that appear before this one in form.
 // isGrowthRun: backend returns in-place — no child lot created, show code unchanged.
-function previewCode(processLotCode, type, priorSameType, existingCounts, isGrowthRun) {
+function previewCode(processLotCode, type, priorSameType, existingCounts, isGrowthRun, typeMap) {
   if (!processLotCode || !type) return '—';
   if (isGrowthRun) return processLotCode;
-  const cfg = TYPE_MAP[type];
+  const cfg = typeMap[type];
   if (!cfg) return '—';
   const base = existingCounts[cfg.suffix] || 0;
   return `${processLotCode}-${cfg.suffix}${base + priorSameType + 1}`;
@@ -95,7 +100,7 @@ export default function LotReturnPage() {
 
   const [issue,      setIssue]      = useState(null);
   const [loading,    setLoading]    = useState(true);
-  const [lines,      setLines]      = useState([newLine(1)]);
+  const [lines,      setLines]      = useState([]);
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes,      setNotes]      = useState('');
   const [saving,     setSaving]     = useState(false);
@@ -104,6 +109,27 @@ export default function LotReturnPage() {
 
   // Count of each suffix char already in DB (from prior partial returns on this issue)
   const [existingCounts, setExistingCounts] = useState({});
+
+  // Dynamic config
+  const returnTypes = React.useMemo(() => {
+    const arr = (issue?.allowed_outputs?.length ? issue.allowed_outputs : FALLBACK_TYPES);
+    return arr.map((t, i) => ({
+      ...t,
+      value: t.type, // UI expects `value`
+      ...STYLE_PALETTES[i % STYLE_PALETTES.length]
+    }));
+  }, [issue]);
+
+  const typeMap = React.useMemo(() => {
+    return Object.fromEntries(returnTypes.map(t => [t.value, t]));
+  }, [returnTypes]);
+
+  // Set initial line when returnTypes becomes available
+  useEffect(() => {
+    if (returnTypes.length > 0 && lines.length === 0) {
+      setLines([newLine(1, returnTypes[0].value)]);
+    }
+  }, [returnTypes, lines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,10 +143,12 @@ export default function LotReturnPage() {
         setItems(itemsData.data || itemsData || []);
         // Tally existing return lines by suffix char
         const counts = {};
+        const arr = (data?.allowed_outputs?.length ? data.allowed_outputs : FALLBACK_TYPES);
+        const tMap = Object.fromEntries(arr.map(t => [t.type, t]));
         if (Array.isArray(data.returns)) {
           data.returns.forEach(ret => {
             (ret.lines || []).forEach(l => {
-              const cfg = TYPE_MAP[l.return_type];
+              const cfg = tMap[l.return_type];
               if (cfg) counts[cfg.suffix] = (counts[cfg.suffix] || 0) + 1;
             });
           });
@@ -135,7 +163,7 @@ export default function LotReturnPage() {
   // ── Line management ─────────────────────────────────────────────────────────
   const addLine = () => {
     const _id = lineIdRef.current++;
-    setLines(ls => [...ls, newLine(_id)]);
+    setLines(ls => [...ls, newLine(_id, returnTypes[0]?.value || 'usable')]);
   };
 
   const removeLine = _id => setLines(ls => ls.filter(l => l._id !== _id));
@@ -151,7 +179,8 @@ export default function LotReturnPage() {
     const gap   = Math.max(0, currentRemaining - soFar);
     if (gap < 0.0001) return;
     const _id = lineIdRef.current++;
-    setLines(ls => [...ls, { _id, type: 'consumed', qty: gap.toFixed(4), weight: '', length: '', width: '', height: '', remarks: '' }]);
+    const defType = returnTypes.find(t => t.type === 'consumed')?.value || returnTypes[returnTypes.length - 1]?.value || 'usable';
+    setLines(ls => [...ls, { _id, type: defType, qty: gap.toFixed(4), weight: '', length: '', width: '', height: '', remarks: '', item_id: '' }]);
   };
 
   // ── Derived balance ─────────────────────────────────────────────────────────
@@ -169,7 +198,7 @@ export default function LotReturnPage() {
 
   // Totals per type for balance panel
   const totByType = {};
-  for (const t of RETURN_TYPES) totByType[t.value] = 0;
+  for (const t of returnTypes) totByType[t.value] = 0;
   for (const l of lines) totByType[l.type] = (totByType[l.type] || 0) + (parseFloat(l.qty) || 0);
 
   const processLotCode = issue?.process_lot_code || issue?.process_lot_number || '';
@@ -428,9 +457,9 @@ export default function LotReturnPage() {
               </thead>
               <tbody>
                 {lines.map((line, idx) => {
-                  const cfg = TYPE_MAP[line.type] || RETURN_TYPES[0];
+                  const cfg = typeMap[line.type] || returnTypes[0];
                   const priorSame = lines.slice(0, idx).filter(l => l.type === line.type).length;
-                  const code = previewCode(processLotCode, line.type, priorSame, existingCounts, issue?.category === 'growth_run');
+                  const code = previewCode(processLotCode, line.type, priorSame, existingCounts, issue?.category === 'growth_run', typeMap);
                   const qtyVal = parseFloat(line.qty) || 0;
                   const qtyErr = qtyVal > currentRemaining + 0.0001;
 
@@ -440,9 +469,8 @@ export default function LotReturnPage() {
                         <SelectDropdown
                           value={line.type}
                           onChange={e => updateLine(line._id, 'type', e.target.value)}
-                          style={{ width: '100%' }}
                         >
-                          {RETURN_TYPES.map(t => (
+                          {returnTypes.map(t => (
                             <option key={t.value} value={t.value}>{t.label} → {t.status}</option>
                           ))}
                         </SelectDropdown>

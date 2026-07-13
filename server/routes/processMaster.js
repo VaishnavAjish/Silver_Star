@@ -87,6 +87,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
     process_group         = 'OTHER',
     input_item_category,
     eligible_machine_type,
+    allowed_outputs = [],
   } = req.body;
 
   if (!process_code?.trim() || !process_name?.trim())
@@ -105,8 +106,9 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
           requires_inventory, requires_machine, requires_operator,
           requires_runtime, requires_expected_yield, allows_consumables,
           output_type, default_runtime_hours, sort_order,
-          process_group, input_item_category, eligible_machine_type)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          process_group, input_item_category, eligible_machine_type,
+          allowed_outputs)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         process_code.toLowerCase().trim(), process_name.trim(), category,
@@ -117,6 +119,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
         process_group,
         input_item_category ? String(input_item_category).trim() : null,
         eligible_machine_type ? String(eligible_machine_type).trim() : null,
+        JSON.stringify(allowed_outputs),
       ]
     );
     dispatchEvent('process_master.created', { id: rows[0].id, process_code: rows[0].process_code, process_name: rows[0].process_name, module: 'manufacturing' });
@@ -154,6 +157,7 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
       process_group,
       input_item_category,
       eligible_machine_type,
+      allowed_outputs,
     } = req.body;
 
     if (category    !== undefined && !VALID_CATEGORIES.includes(category))
@@ -180,8 +184,9 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
          process_group           = $13,
          input_item_category     = $14,
          eligible_machine_type   = $15,
+         allowed_outputs         = COALESCE($16, allowed_outputs),
          updated_at              = NOW()
-       WHERE id = $16
+       WHERE id = $17
        RETURNING *`,
       [
         process_name    !== undefined ? process_name.trim() : p.process_name,
@@ -205,6 +210,7 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
         eligible_machine_type !== undefined
           ? (eligible_machine_type ? String(eligible_machine_type).trim() : null)
           : p.eligible_machine_type,
+        allowed_outputs !== undefined ? JSON.stringify(allowed_outputs) : null,
         parseInt(req.params.id),
       ]
     );

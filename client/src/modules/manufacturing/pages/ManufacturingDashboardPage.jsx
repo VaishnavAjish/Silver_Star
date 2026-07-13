@@ -242,8 +242,8 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
           <ActionBtn icon={Play} label="Start" color="#2E7D32" onClick={() => onAction('start', machine)} />
         )}
         {machine.machine_status === 'awaiting_output' && machine.process_id && (
-          <ActionBtn icon={Package} label="Enter Output" color="#7B1FA2"
-            onClick={() => onNavigate(`/manufacturing/growth-output?machine_process_id=${machine.process_id}`)} />
+          <ActionBtn icon={Package} label="Returns" color="#7B1FA2"
+            onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`)} />
         )}
         {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
           <>
@@ -517,8 +517,8 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
             <GActionBtn icon={Play} label="Start" color="#2E7D32" onClick={() => onAction('start', m)} />
           )}
           {m.machine_status === 'awaiting_output' && m.process_id && (
-            <GActionBtn icon={Package} label="Enter Output" color="#7B1FA2"
-              onClick={() => onNavigate(`/manufacturing/growth-output?machine_process_id=${m.process_id}`)} />
+            <GActionBtn icon={Package} label="Returns" color="#7B1FA2"
+              onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${m.process_id}`)} />
           )}
           {m.process_status === 'running' && m.machine_status !== 'awaiting_output' && (
             <>
@@ -1456,7 +1456,7 @@ export default function ManufacturingDashboard() {
                   </button>
                 )}
                 {selectedAlert.section.key === 'awaiting_output' && (
-                  <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleNavigate(`/manufacturing/growth-output?machine_process_id=${selectedAlert.item.process_id}`); setSelectedAlert(null); }}>
+                  <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleNavigate(`/inventory/process-issues?machine_process_id=${selectedAlert.item.process_id}`); setSelectedAlert(null); }}>
                     Enter Output
                   </button>
                 )}

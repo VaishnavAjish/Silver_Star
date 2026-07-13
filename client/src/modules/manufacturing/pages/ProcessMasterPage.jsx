@@ -69,7 +69,8 @@ const BLANK = {
   requires_operator: false, requires_runtime: false,
   requires_expected_yield: false, allows_consumables: false,
   output_type: 'NONE', default_runtime_hours: '', sort_order: '0',
-  active: true, process_group: 'LASER', eligible_machine_type: 'LASER'
+  active: true, process_group: 'LASER', eligible_machine_type: 'LASER',
+  allowed_outputs: []
 };
 
 // ── Edit/Create Modal ─────────────────────────────────────────────────────────
@@ -110,6 +111,15 @@ function ProcessModal({ initial, isNew, onSave, onClose }) {
     if (!form.process_code.trim() || !form.process_name.trim()) {
       toast.error('Code and Name are required'); return;
     }
+    let parsedOutputs = form.allowed_outputs;
+    if (typeof parsedOutputs === 'string') {
+      try {
+        parsedOutputs = JSON.parse(parsedOutputs || '[]');
+        if (!Array.isArray(parsedOutputs)) throw new Error('Must be an array');
+      } catch(e) {
+        toast.error('Invalid JSON in Allowed Outputs'); return;
+      }
+    }
     if (form.process_group === 'GROWTH' && form.eligible_machine_type !== 'CVD_REACTOR') {
       toast.error('GROWTH processes must use CVD_REACTOR machines'); return;
     }
@@ -119,6 +129,7 @@ function ProcessModal({ initial, isNew, onSave, onClose }) {
     setSaving(true);
     await onSave({
       ...form,
+      allowed_outputs: parsedOutputs,
       default_runtime_hours: form.default_runtime_hours ? parseFloat(form.default_runtime_hours) : null,
       sort_order: parseInt(form.sort_order) || 0,
     });
@@ -225,11 +236,30 @@ function ProcessModal({ initial, isNew, onSave, onClose }) {
             fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
             letterSpacing: '.6px', color: 'var(--brand-dark)',
             borderBottom: '1px solid var(--g200)', paddingBottom: 5, marginBottom: 10,
+            marginTop: 20
           }}>
             Behavior Flags
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
             {BOOL_FLAGS.map(f => chkRow(f.key, f.label))}
+          </div>
+
+          {/* Allowed Outputs JSON */}
+          <div style={{
+            fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
+            letterSpacing: '.6px', color: 'var(--brand-dark)',
+            borderBottom: '1px solid var(--g200)', paddingBottom: 5, marginBottom: 10,
+            marginTop: 20
+          }}>
+            Allowed Outputs (JSON)
+          </div>
+          <div>
+            <textarea
+              style={{ ...inp, height: 160, fontFamily: 'var(--mono)', resize: 'vertical' }}
+              value={typeof form.allowed_outputs === 'string' ? form.allowed_outputs : JSON.stringify(form.allowed_outputs, null, 2)}
+              onChange={e => setForm(f => ({ ...f, allowed_outputs: e.target.value }))}
+              placeholder={'[\n  { "type": "usable", "label": "Growth Diamond", "suffix": "R", "status": "IN STOCK" }\n]'}
+            />
           </div>
 
         </div>

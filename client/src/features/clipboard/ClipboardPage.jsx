@@ -220,7 +220,7 @@ export default function ClipboardPage() {
                         perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={12} />, fn: () => navigate(`/inventory/${lot.id}/lineage`) },
                         perms.canIssueProcess && { label: 'Issue to Process', icon: <Play size={12} />, fn: () => setActiveModal({ type: 'issue', lotId: lot.id }), accent: true },
                         perms.canGrowthAgain && { label: 'Growth Again', icon: <RotateCcw size={12} />, fn: () => navigate('/manufacturing/control-tower'), accent: true },
-                        perms.canGrowthOutput && { label: 'Growth Output', icon: <Package size={12} />, fn: () => navigate('/manufacturing/growth-output'), accent: true },
+                        perms.canGrowthOutput && { label: 'Process Issues', icon: <Package size={12} />, fn: () => navigate('/inventory/process-issues'), accent: true },
                         perms.canTransfer && { label: 'Stock Transfer', icon: <Send size={12} />, fn: () => openStockTransferModal([lot], () => clear()), accent: true },
                         perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => setActiveModal({ type: 'return', lotId: lot.id }), accent: true },
                         perms.canSplit && { label: 'Split Lot', icon: <SplitSquareHorizontal size={12} />, fn: () => setActiveModal({ type: 'split', lotId: lot.id }), accent: true },

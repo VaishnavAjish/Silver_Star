@@ -42,7 +42,7 @@ export const ROUTES = {
   // Growth / Rough
   ROUGH_GROWTH:         '/rough-growth',
   ROUGH_GROWTH_NEW:     '/rough-growth/new',
-  GROWTH_OUTPUT:        '/growth-output',
+  GROWTH_OUTPUT:        '/inventory/process-issues',
   LOT_ISSUE:            '/lot-issue',
 
   // Accounting
