@@ -215,6 +215,7 @@ router.get('/', authenticate, async (req, res) => {
        LEFT JOIN process_master pm ON pm.process_code = pi.process_type
        LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
                               AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+       LEFT JOIN items gri     ON gri.id = gr.item_id
        LEFT JOIN inventory rt  ON rt.id = sl.root_lot_id
        ${where}
        ORDER BY ${orderBy}
