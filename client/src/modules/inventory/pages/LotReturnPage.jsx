@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import { useNavigate, useParams } from 'react-router-dom';
