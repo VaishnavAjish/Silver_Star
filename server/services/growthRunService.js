@@ -74,6 +74,9 @@ async function loadProcessSeedContext(client, machineProcessId) {
             sl.lot_number    AS source_lot_number,
             sl.lot_code      AS source_lot_code,
             sl.dim_height    AS source_dim_height,
+            sl.dim_length    AS source_dim_length,
+            sl.dim_depth     AS source_dim_depth,
+            sl.dim_unit      AS source_dim_unit,
             sl.weight        AS source_weight,
             sl.root_lot_id   AS source_root_lot_id,
             sl.genealogy_path AS source_genealogy_path
@@ -153,9 +156,15 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   const lotOpId         = await nextLotOpId(client);
   const biscuitItemId   = await getBiscuitItemId(client);
 
-  // 4. Snapshot seed measurements from the PRIMARY seed at moment of biscuit creation
+  // 4. Snapshot seed measurements from the PRIMARY seed at moment of biscuit creation.
+  //    The biscuit starts life as the seed physically is, so it inherits the seed's
+  //    full geometry — not just its height. Length/depth stay fixed as the crystal
+  //    grows upward; only height and weight change, via applyMeasurements().
   const seedHeightAtIn = seedCtx.primarySeed.source_dim_height ?? null;
   const weightAtIn     = seedCtx.primarySeed.source_weight ?? null;
+  const seedDimLength  = seedCtx.primarySeed.source_dim_length ?? null;
+  const seedDimDepth   = seedCtx.primarySeed.source_dim_depth ?? null;
+  const seedDimUnit    = seedCtx.primarySeed.source_dim_unit ?? 'mm';
 
   // Phase 34 (FIX 3): the Growth Run carries the SEED QUANTITY, not a hardcoded 1.
   // Sum the issued seed qty across every seed issue for this process (mix-aware),
@@ -176,8 +185,12 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
   //      status     = 'IN PROCESS'  (actively growing in the machine)
   //      dim_height = seed_height_at_in  → actual_growth_mm = 0 (generated)
   //      weight     = weight_at_in       → weight_gain      = 0 (generated)
+  //      dim_length / dim_depth / dim_unit = the seed's footprint, carried over
+  //        as-is: CVD grows the crystal upward, so the base geometry is the seed's.
   //    Growth Output later overwrites weight/dim_height with the final
-  //    measurements and consumes the biscuit.
+  //    measurements and consumes the biscuit. This INSERT runs at most once per
+  //    process (guarded by the idempotency check at the top of createGrowthRun),
+  //    so re-issue and Growth Again can never overwrite these inherited values.
   const insertRes = await client.query(
     `INSERT INTO inventory (
         item_id, lot_number, lot_name, lot_code,
@@ -187,7 +200,7 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
         parent_lot_id, root_lot_id, genealogy_path,
         source_type, operation_type, source_module, split_level,
         machine_process_id, seed_height_at_in, weight_at_in,
-        dim_height, dim_unit
+        dim_length, dim_depth, dim_height, dim_unit
      ) VALUES (
         $1, $2, $3, $4,
         $15, 'PCS', $14, 0, 0,
@@ -196,7 +209,7 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
         $9, $10, $11,
         'growth', 'growth_output', 'Growth Run', COALESCE((SELECT split_level FROM inventory WHERE id = $9) + 1, 1),
         $12, $13, $14,
-        $13, 'mm'
+        $16, $17, $13, $18
      ) RETURNING *`,
     [
       biscuitItemId,
@@ -214,6 +227,9 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
       seedHeightAtIn,
       weightAtIn,
       seedQty,
+      seedDimLength,
+      seedDimDepth,
+      seedDimUnit,
     ]
   );
   const biscuit = insertRes.rows[0];
