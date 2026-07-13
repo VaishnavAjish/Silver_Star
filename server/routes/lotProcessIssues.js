@@ -271,7 +271,7 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op     ON op.id   = pi.operator_id
        LEFT JOIN machine_processes mp ON pi.machine_process_id = mp.id
-       LEFT JOIN process_master pm1 ON mp.process_master_id = pm1.id
+       LEFT JOIN process_master pm1 ON mp.process_type = pm1.process_code
        LEFT JOIN process_master pm2 ON pi.process_type = pm2.process_code
        WHERE pi.id = $1`,
       [req.params.id]
@@ -892,7 +892,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs
        FROM lot_process_issues i
        LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
-       LEFT JOIN process_master p1 ON mp.process_master_id = p1.id
+       LEFT JOIN process_master p1 ON mp.process_type = p1.process_code
        LEFT JOIN process_master p2 ON i.process_type = p2.process_code
        WHERE i.id = $1 FOR UPDATE OF i`,
       [issueId]
