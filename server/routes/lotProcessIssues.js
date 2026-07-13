@@ -922,18 +922,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const currentRemaining = issue.remaining_in_process !== null
       ? parseFloat(issue.remaining_in_process)
       : issuedQty;
-
-    const returnTotal = lines.reduce((s, l) => s + parseFloat(l.qty), 0);
-    const remainingAfter = remainingAfterInput !== undefined
-      ? parseFloat(remainingAfterInput)
-      : Math.max(0, currentRemaining - returnTotal);
-
-    // Balance gate
-    if (Math.abs(returnTotal + remainingAfter - currentRemaining) > 0.0001)
-      throw new Error(
-        `Balance mismatch: ${returnTotal.toFixed(4)} returning + ${remainingAfter.toFixed(4)} remaining ` +
-        `= ${(returnTotal + remainingAfter).toFixed(4)}, but ${currentRemaining.toFixed(4)} is available`
-      );
+    // The balance gate lives further down, after the process lot is loaded — the
+    // component-conservation rule needs the input lot's weight.
 
     // 2. Lock and load the process lot (fallback to source lot if process lot missing)
     const targetLotId = issue.process_lot_id || issue.source_lot_id;
@@ -963,6 +953,73 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const parentLevel = isSeed ? (parseInt(processLot.split_level) || 0) : 0;
     const parentPath  = isSeed ? (processLot.genealogy_path || parentCode) : null;
     const seedLevel   = isSeed ? parentLevel + 1 : null;
+
+    // ── Conservation model ────────────────────────────────────────────────────
+    // QUANTITY mode (growth, laser, cuts — the default): every output is the same
+    // physical thing as the input, so quantities sum:
+    //     issued = usable + damaged + consumed + qc_hold + reprocess
+    //
+    // COMPONENT mode (seed_remove): the input splits into DIFFERENT components in
+    // DIFFERENT units — Growth Diamond (CT) and Recovered Seed (PCS). Adding those
+    // together is physically meaningless, so each component is validated on its own
+    // and the input lot is wholly consumed. Weight is the only quantity genuinely
+    // conserved across a component split.
+    //
+    // The mode is derived from the process's allowed_outputs config: any output rule
+    // carrying a "component" tag opts that process into COMPONENT mode. Processes
+    // without the tag keep exactly the quantity behaviour they have today.
+    const isComponentMode = allowedOutputs.some(o => o.component);
+
+    let returnTotal, remainingAfter;
+
+    if (isComponentMode) {
+      // The input is wholly transformed — nothing stays in process.
+      remainingAfter = 0;
+      returnTotal    = currentRemaining;
+
+      const byComponent = {};
+      for (const line of lines) {
+        const rule = allowedOutputs.find(o => o.type === line.type);
+        const comp = rule.component || 'primary';
+        byComponent[comp] = (byComponent[comp] || 0) + parseFloat(line.qty);
+      }
+
+      // Each component is checked against the input on its own.
+      // Components are NEVER added to one another.
+      for (const [comp, qty] of Object.entries(byComponent)) {
+        if (qty > currentRemaining + 0.0001) {
+          throw new Error(
+            `${comp} output (${qty}) exceeds the ${currentRemaining} in process. ` +
+            'Components are validated separately and are never summed together.'
+          );
+        }
+      }
+
+      // Mass balance: outputs may weigh LESS than the input (process loss is normal)
+      // but never more. Lines with no weight entered are skipped, not assumed zero.
+      const inputWeight  = parseFloat(processLot.weight || 0);
+      const outputWeight = lines.reduce((s, l) => (
+        s + (l.weight !== undefined && l.weight !== null && l.weight !== '' ? parseFloat(l.weight) : 0)
+      ), 0);
+      if (inputWeight > 0 && outputWeight > inputWeight + 0.0001) {
+        throw new Error(
+          `Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — ` +
+          'a component split cannot create mass.'
+        );
+      }
+    } else {
+      returnTotal    = lines.reduce((s, l) => s + parseFloat(l.qty), 0);
+      remainingAfter = remainingAfterInput !== undefined
+        ? parseFloat(remainingAfterInput)
+        : Math.max(0, currentRemaining - returnTotal);
+
+      // Balance gate
+      if (Math.abs(returnTotal + remainingAfter - currentRemaining) > 0.0001)
+        throw new Error(
+          `Balance mismatch: ${returnTotal.toFixed(4)} returning + ${remainingAfter.toFixed(4)} remaining ` +
+          `= ${(returnTotal + remainingAfter).toFixed(4)}, but ${currentRemaining.toFixed(4)} is available`
+        );
+    }
 
     // 3. Create lot_process_returns header (backward compat summary)
     const returnNum   = await genReturnNum(client);
