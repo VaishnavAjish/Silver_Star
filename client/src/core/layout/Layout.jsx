@@ -429,7 +429,7 @@ function LayoutInner() {
             </div>
           </div>
         </div>
-        <div style={{ padding: '12px 16px', fontSize: 10, color: 'var(--g600)', textAlign: 'center', borderTop: '1px solid var(--sidebar-border)', fontFamily: 'var(--mono)', fontWeight: 500 }}>
+        <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--brand)', textAlign: 'center', borderTop: '1px solid var(--sidebar-border)', fontFamily: 'var(--mono)', fontWeight: 800 }}>
           v{packageJson.version}
         </div>
       </nav>

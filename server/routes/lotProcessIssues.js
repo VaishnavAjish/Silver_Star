@@ -998,13 +998,26 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         continue;
       }
 
+      // Phase 1 Engine: Support Item Category transformations
+      let outItemId = processLot.item_id;
+      let outUnit = processLot.unit;
+      let outRough = rough;
+      if (line.item_id) {
+        const { rows: iRows } = await client.query('SELECT * FROM items WHERE id = $1', [line.item_id]);
+        if (iRows.length) {
+          outItemId = iRows[0].id;
+          outUnit = iRows[0].unit;
+          outRough = ['CTS', 'g', 'mg'].includes(outUnit) || (iRows[0].category === 'rough_diamond' || iRows[0].category === 'growth_diamond');
+        }
+      }
+
       const childCode = await nextReturnLotCode(client, processLot.id, parentCode, suffix);
       const { rows: dup } = await client.query(
         'SELECT 1 FROM inventory WHERE lot_code=$1 OR lot_number=$1', [childCode]
       );
       if (dup.length) throw new Error(`Lot code ${childCode} already exists — retry`);
 
-      const childWeight = rough
+      const childWeight = outRough
         ? qty
         : (parseFloat(processLot.weight || 0) > 0
           ? Math.round((qty / issuedQty) * parseFloat(processLot.weight) * 10000) / 10000
@@ -1024,10 +1037,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
                  $16,$17,$18,'return',$19,$20,$21,$22,$23,$24,$25,'Return from Process')
          RETURNING id, lot_number, lot_code, qty, weight`,
         [
-          processLot.item_id, childCode,
+          outItemId, childCode,
           `${processLot.lot_name || parentCode} (${line.type.replace('_', ' ')})`,
-          processLot.batch_no, rough ? 1 : qty, processLot.unit,
-          rough ? qty : childWeight,
+          processLot.batch_no, outRough ? 1 : qty, outUnit,
+          outRough ? qty : childWeight,
           rate, childValue,
           processLot.location_id, processLot.department_id, processLot.vendor_id, processLot.purchase_date,
           lotStatus, line.remarks || null,

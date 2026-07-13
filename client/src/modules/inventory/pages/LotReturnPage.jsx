@@ -23,7 +23,7 @@ const RETURN_TYPES = [
 const TYPE_MAP = Object.fromEntries(RETURN_TYPES.map(t => [t.value, t]));
 
 function newLine(n) {
-  return { _id: n, type: 'usable', qty: '', weight: '', length: '', width: '', height: '', remarks: '' };
+  return { _id: n, type: 'usable', qty: '', weight: '', length: '', width: '', height: '', remarks: '', item_id: '' };
 }
 
 // Compute the preview lot code for a line within the current form session.
@@ -100,15 +100,21 @@ export default function LotReturnPage() {
   const [notes,      setNotes]      = useState('');
   const [saving,     setSaving]     = useState(false);
 
+  const [items,      setItems]      = useState([]);
+
   // Count of each suffix char already in DB (from prior partial returns on this issue)
   const [existingCounts, setExistingCounts] = useState({});
 
   useEffect(() => {
     let cancelled = false;
-    api.get(`/api/lot-process-issues/${id}`)
-      .then(data => {
+    Promise.all([
+      api.get(`/api/lot-process-issues/${id}`),
+      api.get('/api/items')
+    ])
+      .then(([data, itemsData]) => {
         if (cancelled) return;
         setIssue(data);
+        setItems(itemsData);
         // Tally existing return lines by suffix char
         const counts = {};
         if (Array.isArray(data.returns)) {
@@ -155,8 +161,11 @@ export default function LotReturnPage() {
 
   const linesTotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
   const stillIn    = Math.max(0, currentRemaining - linesTotal);
-  const balanced   = Math.abs(linesTotal + stillIn - currentRemaining) <= 0.0001 && linesTotal > 0.0001;
-  const overFill   = linesTotal > currentRemaining + 0.0001;
+  const difference = currentRemaining - linesTotal;
+  
+  // Phase 1 Engine: Strict Balance Requirement
+  const balanced   = Math.abs(difference) <= 0.0001 && linesTotal > 0.0001;
+  const overFill   = difference < -0.0001;
 
   // Totals per type for balance panel
   const totByType = {};
@@ -186,7 +195,12 @@ export default function LotReturnPage() {
         notes:       notes || undefined,
         lines: lines
           .filter(l => parseFloat(l.qty) > 0)
-          .map(l => ({ type: l.type, qty: parseFloat(l.qty), remarks: l.remarks || undefined })),
+          .map(l => ({ 
+            type: l.type, 
+            qty: parseFloat(l.qty), 
+            remarks: l.remarks || undefined,
+            item_id: l.item_id ? parseInt(l.item_id) : undefined
+          })),
         remaining_in_process: parseFloat(stillIn.toFixed(4)),
         ...(hasMeas ? { measurements: measObj } : {}),
       };
@@ -274,16 +288,27 @@ export default function LotReturnPage() {
             <InfoRow label="Process Type" value={issue.process_type} />
           </Section>
 
-          <Section title="Quantities" icon={Info}>
+          <Section title="Balance Validation" icon={Info}>
             <InfoRow label="Issued Qty"
-              value={`${Number(issue.issued_qty).toFixed(4)} ${unit}`} mono />
-            <InfoRow label="Remaining"
               value={`${currentRemaining.toFixed(4)} ${unit}`} mono />
-            {currentRemaining < issuedQty && (
-              <div style={{ fontSize: 10, color: '#E65100', fontWeight: 600, marginTop: 4 }}>
-                Partial returns already recorded
+            <InfoRow label="Returned Qty"
+              value={`${linesTotal.toFixed(4)} ${unit}`} mono />
+            
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: balanced ? '#2E7D32' : '#C62828' }}>
+                  Difference
+                </span>
+                <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 800, color: balanced ? '#2E7D32' : '#C62828' }}>
+                  {difference.toFixed(4)} {unit}
+                </span>
               </div>
-            )}
+              {!balanced && linesTotal > 0 && (
+                <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
+                  Return quantities must exactly equal the Issued Quantity.
+                </div>
+              )}
+            </div>
           </Section>
 
           {(issue.machine_name || issue.operator_full_name) && (
@@ -376,6 +401,9 @@ export default function LotReturnPage() {
                     letterSpacing: '.4px', width: 130 }}>Type</th>
                   <th style={{ padding: '7px 8px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, textTransform: 'uppercase', color: 'var(--g500)',
+                    letterSpacing: '.4px', width: 150 }}>Item Category</th>
+                  <th style={{ padding: '7px 8px', textAlign: 'left', fontSize: 10,
+                    fontWeight: 700, textTransform: 'uppercase', color: 'var(--g500)',
                     letterSpacing: '.4px', width: 100 }}>Qty ({unit})</th>
                   <th style={{ padding: '7px 8px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, textTransform: 'uppercase', color: 'var(--g500)',
@@ -416,6 +444,18 @@ export default function LotReturnPage() {
                         >
                           {RETURN_TYPES.map(t => (
                             <option key={t.value} value={t.value}>{t.label} → {t.status}</option>
+                          ))}
+                        </SelectDropdown>
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <SelectDropdown
+                          value={line.item_id || ''}
+                          onChange={e => updateLine(line._id, 'item_id', e.target.value)}
+                          style={{ width: '100%' }}
+                        >
+                          <option value="">— Inherit Parent —</option>
+                          {items.map(i => (
+                            <option key={i.id} value={i.id}>{i.name}</option>
                           ))}
                         </SelectDropdown>
                       </td>
@@ -543,6 +583,28 @@ export default function LotReturnPage() {
             )}
           </div>
 
+          <div style={{
+            padding: '12px 16px', borderTop: '1px solid var(--g200)',
+            background: '#fff', flexShrink: 0,
+          }}>
+            {!balanced && linesTotal > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
+                <AlertCircle size={12} /> The Return Difference must be 0 to save.
+              </div>
+            )}
+            {overFill && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
+                <AlertCircle size={12} /> You cannot return more than what was issued.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" style={{ flex: 1, padding: '10px 16px', fontWeight: 700 }}
+                disabled={!balanced || saving} onClick={handleSubmit}>
+                {saving ? 'Saving…' : <><CheckCircle2 size={16} /> Complete Return</>}
+              </button>
+            </div>
+          </div>
+          
           <div style={{ padding: '10px 12px', background: '#fff', border: '1px solid var(--g200)',
             borderRadius: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 9.5, color: 'var(--g500)', fontWeight: 700,
