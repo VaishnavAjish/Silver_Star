@@ -195,6 +195,13 @@ export function getAllowedActions(lot) {
   if (granted.length === 0 && status === 'IN STOCK') {
     granted = [C.TRANSFER, C.SPLIT, C.ISSUE_PROCESS];
   }
+  
+  if (category === CATEGORY.GROWTH_RUN && status === 'IN PROCESS') {
+    if (lot.current_process_name && String(lot.current_process_name).toUpperCase() === 'GROWTH RUN') {
+      granted = granted.filter(a => a !== C.RETURN);
+    }
+  }
+
   const flags = toFlags(granted);
   return flags;
 }
