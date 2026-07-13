@@ -114,7 +114,7 @@ export default function LotReturnPage() {
       .then(([data, itemsData]) => {
         if (cancelled) return;
         setIssue(data);
-        setItems(itemsData);
+        setItems(itemsData.data || itemsData || []);
         // Tally existing return lines by suffix char
         const counts = {};
         if (Array.isArray(data.returns)) {
