@@ -81,10 +81,12 @@ const MATRIX = {
   },
   [CATEGORY.GROWTH_RUN]: {
     'IN STOCK':   [C.TRANSFER, C.GROWTH_AGAIN, C.GROWTH_OUTPUT, C.ISSUE_PROCESS],
-    // Growth Return is captured via Control Tower (ConfirmActionModal with Growth Run Return form).
-    // The RETURN capability here routes non-Growth-run returns; growth_run IN PROCESS
-    // uses COMPLETE_GROWTH_RUN instead.
-    'IN PROCESS': [C.COMPLETE_GROWTH_RUN],
+    // Two distinct operations coexist for an IN PROCESS Growth Run:
+    //   COMPLETE_GROWTH_RUN — finish the GROWTH process itself (Control Tower flow).
+    //   RETURN — return the Growth Assembly from a DOWNSTREAM process
+    //            (seed_remove / laser ops) via the unified Return workspace,
+    //            which resolves the lot's OPEN issue by stable id.
+    'IN PROCESS': [C.COMPLETE_GROWTH_RUN, C.RETURN],
     'CONSUMED':   [],
     'DAMAGED':    [],
     'QC_HOLD':    [C.TRANSFER],
