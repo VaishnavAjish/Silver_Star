@@ -14,9 +14,9 @@ INSERT INTO process_master
    output_type, default_runtime_hours, sort_order, completion_mode)
 VALUES
   -- Growth Run process (from phase 29)
-  ('growth',      'Growth',      'PRIMARY', true,  true,  true,  true,  true,  false, 'ROUGH',    168.0,  10, 'TIME_BASED'),
+  ('growth',      'Growth',      'PRIMARY', true,  true,  true,  true,  true,  false, 'ROUGH',    168.0,  10, 'RETURN_BASED'),
   ('seeding',     'Seeding',     'PRIMARY', true,  true,  true,  false, false, false, 'NONE',     null,   20, 'OUTPUT_BASED'),
-  ('cleaning',    'Cleaning',    'SUPPORT', false, true,  true,  true,  false, false, 'NONE',     2.0,    30, 'TIME_BASED'),
+  ('cleaning',    'Cleaning',    'SUPPORT', false, true,  true,  true,  false, false, 'NONE',     2.0,    30, 'RETURN_BASED'),
   ('polishing',   'Polishing',   'PRIMARY', true,  true,  true,  true,  true,  false, 'POLISHED', null,   40, 'OUTPUT_BASED'),
   ('cutting',     'Cutting',     'PRIMARY', true,  true,  true,  true,  true,  false, 'CUSTOM',   null,   50, 'OUTPUT_BASED'),
   ('testing',     'Testing',     'QC',      true,  true,  false, false, false, false, 'NONE',     null,   60, 'OUTPUT_BASED'),
