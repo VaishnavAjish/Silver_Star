@@ -100,7 +100,7 @@ router.get('/', authenticate, async (req, res) => {
 
     if (lot_id) {
       params.push(parseInt(lot_id));
-      where += ` AND (pi.source_lot_id = $${params.length} OR pi.process_lot_id = $${params.length})`;
+      where += ` AND (pi.source_lot_id = $${params.length} OR pi.process_lot_id = $${params.length} OR gr.id = $${params.length})`;
     }
 
     if (machine_id) {
