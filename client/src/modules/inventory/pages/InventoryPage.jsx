@@ -579,10 +579,12 @@ export default function InventoryPage() {
     localStorage.setItem('inv_default_template', id);
   };
 
+  const canSelectRow = r => r && (r.status === 'IN STOCK' || (r.status === 'IN PROCESS' && (r.category || '').toLowerCase() === 'seed'));
+
   const toggleMix = (id, e) => {
     e?.stopPropagation();
     const row = data.find(r => r.id === id);
-    if (row && row.status !== 'IN STOCK') return;
+    if (!canSelectRow(row)) return;
     setMixSelected(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -608,7 +610,7 @@ export default function InventoryPage() {
     } else {
       setMixSelected(prev => {
         const next = new Set(prev);
-        data.filter(r => r.status === 'IN STOCK').forEach(r => next.add(r.id));
+        data.filter(canSelectRow).forEach(r => next.add(r.id));
         return next;
       });
     }
@@ -1152,13 +1154,13 @@ export default function InventoryPage() {
                         <tr key={row.id}
                           onDoubleClick={() => navigate(`/inventory/lots/${row.id}`)}
                           onClick={() => toggleMix(row.id)}
-                          style={{ background: mixCked ? '#F3E5F5' : hasPending ? '#FFFBEB' : undefined, cursor: row.status === 'IN STOCK' ? 'pointer' : 'default' }}>
+                          style={{ background: mixCked ? '#F3E5F5' : hasPending ? '#FFFBEB' : undefined, cursor: canSelectRow(row) ? 'pointer' : 'default' }}>
 
                           <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                            <span onClick={e => toggleMix(row.id, e)} style={{ cursor: row.status === 'IN STOCK' ? 'pointer' : 'not-allowed' }}>
+                            <span onClick={e => toggleMix(row.id, e)} style={{ cursor: canSelectRow(row) ? 'pointer' : 'not-allowed' }}>
                               {mixCked
                                 ? <CheckSquare size={13} style={{ color: 'var(--brand)' }} />
-                                : <Square size={13} style={{ color: row.status === 'IN STOCK' ? 'var(--g300)' : 'var(--g400)' }} />}
+                                : <Square size={13} style={{ color: canSelectRow(row) ? 'var(--g300)' : 'var(--g400)' }} />}
                             </span>
                           </td>
 
