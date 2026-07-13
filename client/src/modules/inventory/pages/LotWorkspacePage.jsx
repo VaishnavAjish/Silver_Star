@@ -15,6 +15,7 @@ import toast from 'react-hot-toast';
 import SplitLotPage from './SplitLotPage';
 import MixLotsPage from './MixLotsPage';
 import LotIssuePage from './LotIssuePage';
+import LotReturnPage from './LotReturnPage';
 import { getAllowedActions } from '../utils/actionMatrix';
 import { useClipboard } from '../../../core/context/ClipboardContext';
 
@@ -278,17 +279,7 @@ export default function LotWorkspacePage() {
     // open process issue id. Operator does not need to search Process Issues manually.
     // Only available for IN PROCESS lots via actionMatrix (seed / rough / gas / consumable).
     // growth_run IN PROCESS uses canCompleteGrowthRun (above) instead.
-    perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => {
-      const openIssue = processData?.issues?.find(i => i.status === 'OPEN');
-      if (openIssue) {
-        navigate(`/inventory/process-issues/${openIssue.id}/return`);
-      } else if (processLoaded) {
-        toast.error('No open process issue found for this lot');
-      } else {
-        // Process data not yet loaded — navigate to process issues filtered by lot
-        navigate(`/inventory/process-issues?search=${encodeURIComponent(displayCode)}`);
-      }
-    }, accent: true },
+    perms.canReturn && { label: 'Return from Process', icon: <RotateCcw size={12} />, fn: () => setActiveModal('return'), accent: true },
   ].filter(Boolean);
 
 
@@ -788,7 +779,7 @@ export default function LotWorkspacePage() {
             <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 1300, padding: 0, display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
               <div className="modal-header">
                 <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--brand-dark)' }}>
-                  {activeModal === 'split' ? 'Split Lot' : activeModal === 'mix' ? 'Mix Lots' : 'Issue to Process'}
+                  {activeModal === 'split' ? 'Split Lot' : activeModal === 'mix' ? 'Mix Lots' : activeModal === 'return' ? 'Return from Process' : 'Issue to Process'}
                 </div>
                 <button className="icon-btn" onClick={() => setActiveModal(null)}><X size={14} /></button>
               </div>
@@ -796,7 +787,7 @@ export default function LotWorkspacePage() {
                 {activeModal === 'split' && <SplitLotPage lotId={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
                 {activeModal === 'mix' && <MixLotsPage initialLotIds={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
                 {activeModal === 'issue' && <LotIssuePage initialLotId={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
-              </div>
+                {activeModal === 'return' && <LotReturnPage initialLotId={id} isModal onComplete={() => { setActiveModal(null); loadCore(); }} onCancel={() => setActiveModal(null)} />}
             </div>
           </div>
         )}
