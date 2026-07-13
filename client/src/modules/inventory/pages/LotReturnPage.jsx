@@ -639,7 +639,7 @@ export default function LotReturnPage() {
               textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
               This Return
             </div>
-            {RETURN_TYPES.map(t => totByType[t.value] > 0 && (
+            {returnTypes.map(t => totByType[t.value] > 0 && (
               <BalanceRow
                 key={t.value}
                 label={t.label}
@@ -648,7 +648,7 @@ export default function LotReturnPage() {
                 color={t.color}
               />
             ))}
-            {RETURN_TYPES.every(t => totByType[t.value] <= 0) && (
+            {returnTypes.every(t => totByType[t.value] <= 0) && (
               <div style={{ fontSize: 11, color: 'var(--g400)', fontStyle: 'italic' }}>
                 No lines yet
               </div>
@@ -720,7 +720,7 @@ export default function LotReturnPage() {
               textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
               Lot Code Legend
             </div>
-            {RETURN_TYPES.map(t => (
+            {returnTypes.map(t => (
               <div key={t.value} style={{ display: 'flex', alignItems: 'center', gap: 6,
                 marginBottom: 4 }}>
                 <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10,
