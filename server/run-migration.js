@@ -1,7 +1,7 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { Client } = require('pg');
 const fs = require('fs');
-const path = require('path');
 
 async function run() {
   const client = new Client({
@@ -14,7 +14,7 @@ async function run() {
   });
 
   try {
-    console.log('Connecting to the database...');
+    console.log('Connecting to the database at', process.env.DB_HOST, '...');
     await client.connect();
     
     const sqlPath = path.join(__dirname, 'migrations', 'phase52-backfill-mix-dimensions.sql');
