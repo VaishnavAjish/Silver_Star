@@ -645,7 +645,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     letterSpacing: '.4px', width: 88 }}>Height (mm)</th>
                   <th style={{ padding: '7px 8px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, textTransform: 'uppercase', color: 'var(--g500)',
-                    letterSpacing: '.4px', width: 140 }}>Generated Code</th>
+                    letterSpacing: '.4px', width: 140 }}>Return Identity</th>
                   <th style={{ padding: '7px 8px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, textTransform: 'uppercase', color: 'var(--g500)',
                     letterSpacing: '.4px' }}>Remarks</th>
@@ -656,7 +656,14 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                 {lines.map((line, idx) => {
                   const cfg = typeMap[line.type] || returnTypes[0];
                   const priorSame = lines.slice(0, idx).filter(l => l.type === line.type).length;
-                  const code = previewCode(processLotCode, line.type, priorSame, existingCounts, issue?.category === 'growth_run', typeMap);
+                  // The usable Growth output references the EXISTING biscuit —
+                  // show its permanent Growth Number, not a generated child code.
+                  // (Backend enforces this; the preview mirrors it.)
+                  const isBiscuitLine = !!(issue?.growth_number &&
+                    cfg?.type === 'usable' && cfg?.item_category_override === 'growth_run');
+                  const code = isBiscuitLine
+                    ? issue.growth_number
+                    : previewCode(processLotCode, line.type, priorSame, existingCounts, issue?.category === 'growth_run', typeMap);
                   const qtyVal = parseFloat(line.qty) || 0;
                   const qtyErr = qtyVal > currentRemaining + 0.0001;
 

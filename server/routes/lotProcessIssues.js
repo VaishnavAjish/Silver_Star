@@ -930,6 +930,10 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
   return `${parentCode}-${suffixChar}${maxN + 1}`;
 }
 
+// Growth-identity routing decision — pure helper, unit-tested in
+// tests/growthReturnRouting.test.js (see services/returnRouting.js).
+const { resolveGrowthReturnRoute } = require('../services/returnRouting');
+
 // ── CREATE RETURN ──────────────────────────────────────────────────────────────
 // Accepts multi-line returns, partial returns, and five return types.
 // Body: { return_date, notes, lines: [{type, qty, remarks}], remaining_in_process? }
@@ -951,7 +955,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
 
     // 1. Lock the issue
     const { rows: issueRows } = await client.query(
-      `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs
+      `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs,
+              COALESCE(p1.process_group, p2.process_group) AS process_group
        FROM lot_process_issues i
        LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
        LEFT JOIN process_master p1 ON mp.process_type = p1.process_code
@@ -1009,6 +1014,27 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     if (isGrowthRun && lines.length > 1) {
       throw new Error('Growth Run returns must use a single disposition.');
     }
+
+    // ── Growth biscuit resolution ─────────────────────────────────────────────
+    // For a GROWTH-group issue the biscuit created at Start Process IS the
+    // authoritative growth identity (permanent Growth Number + run_no). Lock it
+    // so the usable output can reference it instead of minting a child lot.
+    // Skipped when the process lot itself is the biscuit (laser ops in-place
+    // path above) and for non-growth processes (incl. seed_remove/COMPONENT).
+    const isGrowthGroupIssue =
+      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+    let biscuit = null;
+    if (isGrowthGroupIssue && !isGrowthRun && issue.machine_process_id) {
+      const { rows: bRows } = await client.query(
+        `SELECT inv.* FROM inventory inv
+         WHERE inv.machine_process_id = $1
+           AND inv.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+         FOR UPDATE OF inv`,
+        [issue.machine_process_id]
+      );
+      biscuit = bRows[0] || null;
+    }
+
     const rough      = usesWeight(processLot);
     const rate       = parseFloat(processLot.rate);
     const parentCode = (isSeed && processLot.lot_code) ? processLot.lot_code : processLot.lot_number;
@@ -1096,6 +1122,22 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         );
     }
 
+    // Phase 1 growth-identity routing — decided ONCE from backend-calculated
+    // quantities. BISCUIT = full ALL-USABLE single-line return references the
+    // existing biscuit; REJECT = any partial or mixed return containing a
+    // usable growth output; CHILD = untouched legacy behaviour (damaged-only,
+    // non-growth, seed_remove/COMPONENT mode, or no biscuit).
+    // Biscuit-input returns (the process lot IS the biscuit — growth again /
+    // laser ops) are handled by the dedicated in-place branch in the line
+    // loop; the growth-identity route must not re-evaluate (or reject) them.
+    const growthRoute = isGrowthRun
+      ? { route: 'CHILD' }
+      : resolveGrowthReturnRoute({
+          isGrowthGroupIssue, isComponentMode, biscuit,
+          lines, allowedOutputs, currentRemaining, remainingAfter,
+        });
+    if (growthRoute.route === 'REJECT') throw new Error(growthRoute.reason);
+
     // 3. Create lot_process_returns header (backward compat summary)
     const returnNum   = await genReturnNum(client);
     const isFinal     = remainingAfter <= 0.0001;
@@ -1139,6 +1181,31 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           `${line.type} return of Growth Run ${processLot.lot_number} (in place — no clone, ${returnNum})`,
           req.user.id);
         outcomes.push({ type: line.type, lot_id: processLot.id, lot_code: processLot.lot_code || processLot.lot_number, qty, status: processLot.status, in_place: true });
+        continue;
+      }
+
+      // Growth identity rule: the usable output of a full all-usable GROWTH
+      // return references the EXISTING biscuit (permanent Growth Number,
+      // run_no untouched). No nextReturnLotCode, no inventory INSERT — the
+      // biscuit's status advances via the existing completion flow
+      // (OUTPUT_BASED → advanceGrowthRunToStock).
+      if (growthRoute.route === 'BISCUIT') {
+        await client.query(
+          `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [ret.id, line.type, qty, biscuit.id, biscuit.lot_code || biscuit.lot_number, line.remarks || null]
+        );
+        await logOp(client, biscuit.id, `return_${line.type}`, 'lot_process_return', ret.id,
+          0, biscuit.status,
+          `Usable growth return recorded against Growth Run ${biscuit.lot_number} (existing identity — no child lot, ${returnNum})`,
+          req.user.id);
+        outcomes.push({
+          type: line.type, lot_id: biscuit.id,
+          lot_code: biscuit.lot_code || biscuit.lot_number, qty,
+          weight: biscuit.weight != null ? parseFloat(biscuit.weight) : null,
+          status: biscuit.status, in_place: true,
+          growth_number: biscuit.lot_number, run_no: biscuit.run_no,
+        });
         continue;
       }
 
@@ -1227,24 +1294,27 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // post-cut measurements. Apply them to the SAME Growth Run row (in place — no
     // clone, no new genealogy node) and append a cycle-history entry so the
     // before/after dimensions are preserved.
-    if (isGrowthRun && measurements && (
+    const measureTarget = isGrowthRun
+      ? processLot
+      : (growthRoute.route === 'BISCUIT' ? biscuit : null);
+    if (measureTarget && measurements && (
       (measurements.weight != null && measurements.weight !== '') ||
       (measurements.height != null && measurements.height !== '') ||
       (measurements.length != null && measurements.length !== '') ||
       (measurements.width  != null && measurements.width  !== '')
     )) {
-      const prevHeight = processLot.dim_height;
-      const prevWeight = processLot.weight;
-      const updated = await applyMeasurements(client, processLot.id, {
+      const prevHeight = measureTarget.dim_height;
+      const prevWeight = measureTarget.weight;
+      const updated = await applyMeasurements(client, measureTarget.id, {
         weight:     measurements.weight  != null && measurements.weight  !== '' ? parseFloat(measurements.weight)  : undefined,
         dim_height: measurements.height  != null && measurements.height  !== '' ? parseFloat(measurements.height)  : undefined,
         dim_length: measurements.length  != null && measurements.length  !== '' ? parseFloat(measurements.length)  : undefined,
         dim_depth:  measurements.width   != null && measurements.width    !== '' ? parseFloat(measurements.width)   : undefined,
-        dim_unit:   measurements.dim_unit || processLot.dim_unit || 'mm',
+        dim_unit:   measurements.dim_unit || measureTarget.dim_unit || 'mm',
         remarks:    measurements.remarks || undefined,
       });
       await recordGrowthCycle(client, {
-        growthRunId:      processLot.id,
+        growthRunId:      measureTarget.id,
         machineProcessId: issue.machine_process_id || null,
         processType:      issue.process_type || null,
         prevHeight,
@@ -1257,9 +1327,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         remarks:          measurements.remarks || null,
         performedBy:      req.user.id,
       });
-      await logOp(client, processLot.id, 'growth_run_measured', 'lot_process_return', ret.id,
-        0, processLot.status,
-        `Growth Run ${processLot.lot_number} measured after ${issue.process_type || 'laser'}: ` +
+      await logOp(client, measureTarget.id, 'growth_run_measured', 'lot_process_return', ret.id,
+        0, measureTarget.status,
+        `Growth Run ${measureTarget.lot_number} measured after ${issue.process_type || 'laser'}: ` +
           `Weight ${prevWeight ?? '—'} → ${updated.weight}; Height ${prevHeight ?? '—'} → ${updated.dim_height}${updated.dim_unit || 'mm'}`,
         req.user.id);
     }
