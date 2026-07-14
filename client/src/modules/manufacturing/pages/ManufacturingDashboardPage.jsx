@@ -1337,67 +1337,67 @@ export default function ManufacturingDashboard() {
           </div>
         </div>
 
-        <div className="fg">
-          <label>Department</label>
-          <SelectDropdown style={{ width: '100%' }} value={filters.dept} onChange={e => setFilter('dept')(e.target.value)}>
-            <option value="">All Depts</option>
-            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </SelectDropdown>
-        </div>
-
-        <div className="fg">
-          <label>Status</label>
-          <SelectDropdown style={{ width: '100%' }} value={filters.status} onChange={e => setFilter('status')(e.target.value)}>
-            <option value="">All Status</option>
-            {Object.entries(MACHINE_STATUS_CFG).map(([s, cfg]) => (
-              <option key={s} value={s}>{cfg.label}</option>
-            ))}
-          </SelectDropdown>
-        </div>
-
-        <div className="fg">
-          <label>Operator</label>
-          <SelectDropdown style={{ width: '100%' }} value={filters.operator} onChange={e => setFilter('operator')(e.target.value)}>
-            <option value="">All Operators</option>
-            {operators.map(o => <option key={o.id} value={o.id}>{o.full_name}</option>)}
-          </SelectDropdown>
-        </div>
-
-        <div className="fg">
-          <label>Process Type</label>
-          <SelectDropdown style={{ width: '100%' }} value={filters.process_type} onChange={e => setFilter('process_type')(e.target.value)}>
-            <option value="">All Types</option>
-            {processes.map(p => (
-              <option key={p.process_code} value={p.process_code}>{p.process_name}</option>
-            ))}
-          </SelectDropdown>
-        </div>
-
-        <div className="fg">
-          <label>Length (mm)</label>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <input type="number" placeholder="Min" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_min} onChange={e => setFilter('length_min')(e.target.value)} />
-            <span style={{ color: '#9E9E9E' }}>-</span>
-            <input type="number" placeholder="Max" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_max} onChange={e => setFilter('length_max')(e.target.value)} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Department</label>
+            <SelectDropdown style={{ width: 140, height: 32 }} value={filters.dept} onChange={e => setFilter('dept')(e.target.value)}>
+              <option value="">All Departments</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </SelectDropdown>
           </div>
-        </div>
 
-        <div className="fg">
-          <label>Height (mm)</label>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <input type="number" placeholder="Min" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_min} onChange={e => setFilter('height_min')(e.target.value)} />
-            <span style={{ color: '#9E9E9E' }}>-</span>
-            <input type="number" placeholder="Max" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_max} onChange={e => setFilter('height_max')(e.target.value)} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Status</label>
+            <SelectDropdown style={{ width: 140, height: 32 }} value={filters.status} onChange={e => setFilter('status')(e.target.value)}>
+              <option value="">All Statuses</option>
+              {Object.entries(MACHINE_STATUS_CFG).map(([s, cfg]) => (
+                <option key={s} value={s}>{cfg.label}</option>
+              ))}
+            </SelectDropdown>
           </div>
-        </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', paddingBottom: 2, whiteSpace: 'nowrap' }}>
-          <input type="checkbox"
-            checked={filters.overdue === 'true'}
-            onChange={e => setFilter('overdue')(e.target.checked ? 'true' : '')}
-          />
-          Overdue Only
-        </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Operator / Location</label>
+            <SelectDropdown style={{ width: 160, height: 32 }} value={filters.operator} onChange={e => setFilter('operator')(e.target.value)}>
+              <option value="">All Operators / Locations</option>
+              {operators.map(o => <option key={o.id} value={o.id}>{o.full_name}</option>)}
+            </SelectDropdown>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Process Type</label>
+            <SelectDropdown style={{ width: 140, height: 32 }} value={filters.process_type} onChange={e => setFilter('process_type')(e.target.value)}>
+              <option value="">All Processes</option>
+              {processes.map(p => (
+                <option key={p.process_code} value={p.process_code}>{p.process_name}</option>
+              ))}
+            </SelectDropdown>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Length (mm)</label>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="number" placeholder="Min" style={{ width: 60, height: 32, padding: '4px 8px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_min} onChange={e => setFilter('length_min')(e.target.value)} />
+              <span style={{ color: '#9E9E9E' }}>-</span>
+              <input type="number" placeholder="Max" style={{ width: 60, height: 32, padding: '4px 8px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_max} onChange={e => setFilter('length_max')(e.target.value)} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Height (mm)</label>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="number" placeholder="Min" style={{ width: 60, height: 32, padding: '4px 8px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_min} onChange={e => setFilter('height_min')(e.target.value)} />
+              <span style={{ color: '#9E9E9E' }}>-</span>
+              <input type="number" placeholder="Max" style={{ width: 60, height: 32, padding: '4px 8px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_max} onChange={e => setFilter('height_max')(e.target.value)} />
+            </div>
+          </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', paddingBottom: 8, whiteSpace: 'nowrap' }}>
+            <input type="checkbox"
+              checked={filters.overdue === 'true'}
+              onChange={e => setFilter('overdue')(e.target.checked ? 'true' : '')}
+            />
+            Overdue Only
+          </label>
 
         {activeFilters && (
           <button className="btn" style={{ background: 'var(--g100)', color: 'var(--g700)' }} onClick={clearFilters}>
