@@ -15,7 +15,7 @@ import MixLotsPage from '../../modules/inventory/pages/MixLotsPage';
 import LotReturnPage from '../../modules/inventory/pages/LotReturnPage';
 
 export default function ClipboardPage() {
-  const { items, clear, add, openStockTransferModal, loadClipboard } = useClipboard();
+  const { items, clear, remove, add, openStockTransferModal, loadClipboard } = useClipboard();
   const navigate = useNavigate();
   const api = useApi();
   const [search, setSearch] = useState('');
@@ -30,6 +30,7 @@ export default function ClipboardPage() {
 
   const [activeModal, setActiveModal] = useState(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   import('react').then(({ useEffect }) => {
     if (!actionsOpen) return;
@@ -98,7 +99,23 @@ export default function ClipboardPage() {
   const removeAllRows = async () => {
     if (window.confirm('Clear the entire clipboard?')) {
       await clear();
+      setSelectedIds(new Set());
       toast('Clipboard cleared');
+    }
+  };
+
+  /* ── Remove Selected ── */
+  const removeSelectedRows = async () => {
+    if (selectedIds.size === 0) {
+      toast('Please select items to remove');
+      return;
+    }
+    if (window.confirm(`Remove ${selectedIds.size} item(s) from clipboard?`)) {
+      for (const id of selectedIds) {
+        await remove(id);
+      }
+      setSelectedIds(new Set());
+      toast('Selected items removed');
     }
   };
 
@@ -266,6 +283,7 @@ export default function ClipboardPage() {
       <div style={{ flex: 1, overflow: 'auto', borderBottom: '1px solid #ddd', minHeight: 0 }}>
         <table style={{ borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
           <colgroup>
+            <col style={{ width: 40 }} />
             <col style={{ width: 80 }} />
             <col style={{ width: 160 }} />
             <col style={{ width: 100 }} />
@@ -278,6 +296,24 @@ export default function ClipboardPage() {
           </colgroup>
           <thead>
             <tr>
+              <th style={{
+                  border: '1px solid #e0e0e0', padding: '8px 10px',
+                  background: '#f3f3f3', fontWeight: 700, textAlign: 'center',
+                  position: 'sticky', top: 0, zIndex: 2, userSelect: 'none',
+                }}>
+                <input
+                  type="checkbox"
+                  checked={paginatedItems.length > 0 && selectedIds.size === paginatedItems.length}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setSelectedIds(new Set(paginatedItems.map(r => r.id)));
+                    } else {
+                      setSelectedIds(new Set());
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                />
+              </th>
               {['Lot ID', 'Lot Name', 'Category', 'Status', 'Qty', 'Weight', 'Length', 'Depth', 'Height'].map(h => (
                 <th key={h} style={{
                   border: '1px solid #e0e0e0', padding: '8px 10px',
@@ -290,6 +326,19 @@ export default function ClipboardPage() {
           <tbody>
             {paginatedItems.map((row, ri) => (
               <tr key={`${row.id}-${row.entity_id || ''}-${ri}`} style={{ background: '#fff', height: 28 }}>
+                <td style={{ ...cellSt, textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(row.id)}
+                    onChange={e => {
+                      const s = new Set(selectedIds);
+                      if (e.target.checked) s.add(row.id);
+                      else s.delete(row.id);
+                      setSelectedIds(s);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </td>
                 <td style={{ ...cellSt, fontWeight: 600, color: '#095C47' }}>{row.lot_op_id || '—'}</td>
                 <td style={cellSt}>{row.lot_code || '—'}</td>
                 <td style={cellSt}>{row.category || '—'}</td>
@@ -303,7 +352,7 @@ export default function ClipboardPage() {
             ))}
             {paginatedItems.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+                <td colSpan={10} style={{ textAlign: 'center', padding: 40, color: '#999' }}>
                   Clipboard is empty
                 </td>
               </tr>
@@ -327,6 +376,7 @@ export default function ClipboardPage() {
       }}>
         <button onClick={showSeedIds} style={btnPrimary}><List size={14} /> Show IDs</button>
         <button onClick={removeAllRows} style={btnPrimary}><Trash2 size={14} /> Remove All</button>
+        <button onClick={removeSelectedRows} style={btnPrimary}><X size={14} /> Remove</button>
 
         <button onClick={loadAndClose} style={{ ...btnPrimary, marginLeft: 'auto' }}>
           <Upload size={14} /> Load &amp; Close
