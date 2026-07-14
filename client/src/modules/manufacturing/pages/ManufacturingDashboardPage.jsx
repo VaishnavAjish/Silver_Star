@@ -188,18 +188,20 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
       {/* Body */}
       <div style={{ padding: '8px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: machine.growth_run_number ? '#1565C0' : '#424242', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span>{machine.growth_run_number || 'No active process'}</span>
+          <div style={{ fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ color: machine.growth_run_number ? '#1565C0' : '#424242' }}>
+              {machine.growth_run_number || 'No active process'}
+            </span>
             {machine.process_type && (
               <>
                 <span style={{ color: '#BDBDBD' }}>•</span>
-                <span>{processMap?.get(machine.process_type)?.process_name || machine.process_type}</span>
+                <span style={{ color: '#424242' }}>{processMap?.get(machine.process_type)?.process_name || machine.process_type}</span>
               </>
             )}
             {machine.run_no && (
               <>
                 <span style={{ color: '#BDBDBD' }}>•</span>
-                <span>R{machine.run_no}</span>
+                <span style={{ color: '#424242' }}>R{machine.run_no}</span>
               </>
             )}
           </div>
