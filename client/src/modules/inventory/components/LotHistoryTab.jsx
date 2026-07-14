@@ -191,8 +191,11 @@ export default function LotHistoryTab({ lotId }) {
           {hasFilters ? 'No transactions match the current filters.' : 'No history recorded for this lot.'}
         </div>
       ) : (
-        <div style={{ overflowX: 'auto', border: '1px solid var(--g200)', borderRadius: 8 }}>
-          <table className="dgrid" style={{ width: '100%' }}>
+        // Full-width register: tableLayout fixed lets the unspecified Details
+        // column absorb ALL remaining width; minWidth keeps columns readable —
+        // horizontal scroll appears ONLY below ~1100px viewports, never at 1920.
+        <div style={{ overflowX: 'auto', border: '1px solid var(--g200)', borderRadius: 8, width: '100%' }}>
+          <table className="dgrid" style={{ width: '100%', minWidth: 1100, tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th style={{ width: 128 }}>Date</th>
@@ -202,7 +205,7 @@ export default function LotHistoryTab({ lotId }) {
                 <th style={{ width: 88 }}>Status →</th>
                 <th style={{ width: 78 }} className="num">Qty Δ</th>
                 <th style={{ width: 90 }} className="num">Balance After</th>
-                <th style={{ width: 72 }}>Txn</th>
+                <th style={{ width: 96 }}>Txn</th>
                 <th>Details / Remarks</th>
                 <th style={{ width: 110 }}>Operator</th>
               </tr>
@@ -239,7 +242,11 @@ export default function LotHistoryTab({ lotId }) {
                         background: r.txn_status === 'REVERSED' ? '#FFEBEE' : '#E8F5E9' }}>
                         {r.txn_status || 'ACTIVE'}
                       </span>
-                      {r.source === 'op_log' && r.return_id && r.event_type === 'return_usable' &&
+                      {/* r.reversible is server-derived (pre_state IS NOT NULL):
+                          exactly ONE row per full usable Growth Return carries
+                          it — legacy usable child-lot returns never show it. */}
+                      {r.source === 'op_log' && r.return_id && r.reversible &&
+                        r.event_type === 'return_usable' &&
                         (r.txn_status || 'ACTIVE') === 'ACTIVE' && (
                         <button className="icon-btn" title="Reverse this Growth Return (admin)"
                           onClick={() => handleReverse(r)}
@@ -248,7 +255,10 @@ export default function LotHistoryTab({ lotId }) {
                         </button>
                       )}
                     </td>
-                    <td style={{ fontSize: 11, color: 'var(--g600)' }}>{details || '—'}</td>
+                    <td style={{ fontSize: 11, color: 'var(--g600)', overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={details || undefined}>
+                      {details || '—'}
+                    </td>
                     <td style={{ fontSize: 11 }}>
                       {r.user
                         ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>

@@ -31,18 +31,10 @@ function newLine(n, defaultType) {
   return { _id: n, type: defaultType, qty: '', weight: '', length: '', width: '', height: '', remarks: '', item_id: '' };
 }
 
-// Compute the preview lot code for a line within the current form session.
-// existingCounts: { R: 2, D: 0, ... } from prior returns already in DB.
-// priorSameType: count of lines with same type that appear before this one in form.
-// isGrowthRun: backend returns in-place — no child lot created, show code unchanged.
-function previewCode(processLotCode, type, priorSameType, existingCounts, isGrowthRun, typeMap) {
-  if (!processLotCode || !type) return '—';
-  if (isGrowthRun) return processLotCode;
-  const cfg = typeMap[type];
-  if (!cfg) return '—';
-  const base = existingCounts[cfg.suffix] || 0;
-  return `${processLotCode}-${cfg.suffix}${base + priorSameType + 1}`;
-}
+// Return identities are NEVER predicted client-side. The backend preflight
+// (POST /api/lot-process-issues/:id/return/validate — the same buildReturnPlan
+// the posting transaction recomputes under lock) is the only identity source.
+const PREFLIGHT_DEBOUNCE_MS = 400;
 
 // ── Panel: left info card ─────────────────────────────────────────────────────
 function InfoRow({ label, value, mono }) {
@@ -115,8 +107,12 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
 
   const [items,      setItems]      = useState([]);
 
-  // Count of each suffix char already in DB (from prior partial returns on this issue)
-  const [existingCounts, setExistingCounts] = useState({});
+  // Authoritative backend Return Plan (preflight). planSeqRef guards against
+  // stale out-of-order responses; the plan is invalidated synchronously on
+  // every line change so an outdated identity can never enable submission.
+  const [plan,        setPlan]        = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const planSeqRef = useRef(0);
 
   // Dynamic config
   const returnTypes = React.useMemo(() => {
@@ -188,19 +184,6 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         if (cancelled) return;
         setIssue(data);
         setItems(itemsData.data || itemsData || []);
-        // Tally existing return lines by suffix char
-        const counts = {};
-        const arr = (data?.allowed_outputs?.length ? data.allowed_outputs : FALLBACK_TYPES);
-        const tMap = Object.fromEntries(arr.map(t => [t.type, t]));
-        if (Array.isArray(data.returns)) {
-          data.returns.forEach(ret => {
-            (ret.lines || []).forEach(l => {
-              const cfg = tMap[l.return_type];
-              if (cfg) counts[cfg.suffix] = (counts[cfg.suffix] || 0) + 1;
-            });
-          });
-        }
-        setExistingCounts(counts);
       })
       .catch(() => { if (!cancelled) setIssue(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -299,40 +282,75 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     fmtDims(issue?.growth_dim_length, issue?.growth_dim_depth, issue?.growth_dim_height, issue?.growth_dim_unit) ||
     fmtDims(issue?.process_lot_dim_length, issue?.process_lot_dim_depth, issue?.process_lot_dim_height, issue?.process_lot_dim_unit);
 
+  // ── Shared payload — preflight and submit post the SAME body ────────────────
+  const buildReturnPayload = () => {
+    // Consolidate measurements from lines — first non-empty value per field wins.
+    // Blank fields are omitted so the backend never overwrites existing values with null.
+    const mFields = ['weight', 'length', 'width', 'height'];
+    const measObj = {};
+    for (const l of lines.filter(ln => parseFloat(ln.qty) > 0)) {
+      for (const k of mFields) {
+        if (!measObj[k] && l[k] !== '' && l[k] != null) measObj[k] = l[k];
+      }
+    }
+    const hasMeas = mFields.some(k => measObj[k]);
+
+    return {
+      return_date: returnDate,
+      notes:       notes || undefined,
+      lines: lines
+        .filter(l => parseFloat(l.qty) > 0)
+        .map(l => ({
+          type: l.type,
+          qty: parseFloat(l.qty),
+          // Per-line weight feeds the COMPONENT-mode mass-balance gate;
+          // QUANTITY mode ignores it server-side.
+          weight: l.weight !== '' && l.weight != null ? parseFloat(l.weight) : undefined,
+          remarks: l.remarks || undefined,
+          item_id: l.item_id ? parseInt(l.item_id) : undefined
+        })),
+      remaining_in_process: isComponentMode ? 0 : parseFloat(stillIn.toFixed(4)),
+      ...(hasMeas ? { measurements: measObj } : {}),
+    };
+  };
+
+  // ── Authoritative preflight ─────────────────────────────────────────────────
+  // Debounced on every line change (type, qty, weight, rows). The sequence
+  // counter drops stale/out-of-order responses; the plan is cleared
+  // IMMEDIATELY so an outdated identity is never displayed and Record Return
+  // stays disabled until the backend approves the current lines.
+  useEffect(() => {
+    if (!issueId || !issue) return;
+    const seq = ++planSeqRef.current;
+    setPlan(null);
+    const hasActiveLine = lines.some(l => parseFloat(l.qty) > 0);
+    if (!hasActiveLine) { setPlanLoading(false); return; }
+    setPlanLoading(true);
+    const t = setTimeout(() => {
+      api.post(`/api/lot-process-issues/${issueId}/return/validate`, buildReturnPayload())
+        .then(res => {
+          if (seq !== planSeqRef.current) return; // stale response — discard
+          setPlan(res);
+          setPlanLoading(false);
+        })
+        .catch(err => {
+          if (seq !== planSeqRef.current) return;
+          setPlan({ valid: false, route: 'REJECT', error: err.message || 'Validation failed' });
+          setPlanLoading(false);
+        });
+    }, PREFLIGHT_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [issueId, issue, lines]);
+
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!balanced || overFill || saving) return;
+    // The backend plan must approve the CURRENT lines; the posting endpoint
+    // re-validates everything under lock regardless of this client gate.
+    if (planLoading || !plan || !plan.valid) return;
     setSaving(true);
     try {
-      // Consolidate measurements from lines — first non-empty value per field wins.
-      // Blank fields are omitted so the backend never overwrites existing values with null.
-      const mFields = ['weight', 'length', 'width', 'height'];
-      const measObj = {};
-      for (const l of lines.filter(ln => parseFloat(ln.qty) > 0)) {
-        for (const k of mFields) {
-          if (!measObj[k] && l[k] !== '' && l[k] != null) measObj[k] = l[k];
-        }
-      }
-      const hasMeas = mFields.some(k => measObj[k]);
-
-      const payload = {
-        return_date: returnDate,
-        notes:       notes || undefined,
-        lines: lines
-          .filter(l => parseFloat(l.qty) > 0)
-          .map(l => ({
-            type: l.type,
-            qty: parseFloat(l.qty),
-            // Per-line weight feeds the COMPONENT-mode mass-balance gate;
-            // QUANTITY mode ignores it server-side.
-            weight: l.weight !== '' && l.weight != null ? parseFloat(l.weight) : undefined,
-            remarks: l.remarks || undefined,
-            item_id: l.item_id ? parseInt(l.item_id) : undefined
-          })),
-        remaining_in_process: isComponentMode ? 0 : parseFloat(stillIn.toFixed(4)),
-        ...(hasMeas ? { measurements: measObj } : {}),
-      };
-      const res = await api.post(`/api/lot-process-issues/${issueId}/return`, payload);
+      const res = await api.post(`/api/lot-process-issues/${issueId}/return`, buildReturnPayload());
       const isFinal = res.is_final;
       toast.success(
         isFinal
@@ -655,15 +673,15 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               <tbody>
                 {lines.map((line, idx) => {
                   const cfg = typeMap[line.type] || returnTypes[0];
-                  const priorSame = lines.slice(0, idx).filter(l => l.type === line.type).length;
-                  // The usable Growth output references the EXISTING biscuit —
-                  // show its permanent Growth Number, not a generated child code.
-                  // (Backend enforces this; the preview mirrors it.)
-                  const isBiscuitLine = !!(issue?.growth_number &&
-                    cfg?.type === 'usable' && cfg?.item_category_override === 'growth_run');
-                  const code = isBiscuitLine
-                    ? issue.growth_number
-                    : previewCode(processLotCode, line.type, priorSame, existingCounts, issue?.category === 'growth_run', typeMap);
+                  // The backend Return Plan is the ONLY identity source. Rows
+                  // without a qty are not part of the preflight payload, so
+                  // they map to no plan line yet.
+                  const hasQty  = parseFloat(line.qty) > 0;
+                  const planIdx = lines.slice(0, idx).filter(l => parseFloat(l.qty) > 0).length;
+                  const identity = hasQty && plan?.valid ? plan?.line_identities?.[planIdx] : null;
+                  const code = !hasQty ? '—'
+                    : planLoading ? '…'
+                    : (identity ? (identity.lot_code || '—') : '—');
                   const qtyVal = parseFloat(line.qty) || 0;
                   const qtyErr = qtyVal > currentRemaining + 0.0001;
 
@@ -800,6 +818,42 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             )}
           </div>
 
+          {/* ── Backend Return Plan — the authoritative posting decision ── */}
+          <div style={{ padding: '10px 12px', background: '#fff',
+            border: `1px solid ${plan && !plan.valid ? '#EF9A9A' : 'var(--g200)'}`,
+            borderRadius: 8, marginBottom: 12 }}>
+            <div style={{ fontSize: 9.5, color: 'var(--g500)', fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
+              Return Plan (server)
+            </div>
+            {planLoading ? (
+              <div style={{ fontSize: 11, color: 'var(--g400)', fontStyle: 'italic' }}>Validating…</div>
+            ) : !plan ? (
+              <div style={{ fontSize: 11, color: 'var(--g400)', fontStyle: 'italic' }}>
+                Enter return lines to validate
+              </div>
+            ) : !plan.valid ? (
+              <div style={{ fontSize: 11, color: '#C62828', fontWeight: 600 }}>{plan.error}</div>
+            ) : (
+              <>
+                <BalanceRow label="Route" value={plan.route} bold />
+                {plan.target_lot_code && <BalanceRow label="Target Lot" value={plan.target_lot_code} bold />}
+                {plan.growth_number && <BalanceRow label="Growth Number" value={plan.growth_number} />}
+                {plan.run_no != null && <BalanceRow label="Run" value={`R${plan.run_no}`} />}
+                <BalanceRow label="New lot created" value={plan.will_create_new_lot ? 'YES' : 'NO'} />
+                {plan.will_create_new_lot && plan.generated_child_code && (
+                  <BalanceRow label="Child Code" value={plan.generated_child_code} />
+                )}
+                <BalanceRow label="Final" value={plan.is_final ? 'YES' : 'NO'} />
+                <BalanceRow label="Issue →" value={plan.projected_issue_status} />
+                {plan.projected_inventory_status && (
+                  <BalanceRow label="Lot →" value={plan.projected_inventory_status} />
+                )}
+                <BalanceRow label="Reversible" value={plan.reversal_supported ? 'YES' : 'NO'} />
+              </>
+            )}
+          </div>
+
           <div style={{
             padding: '12px 16px', borderTop: '1px solid var(--g200)',
             background: '#fff', flexShrink: 0,
@@ -826,8 +880,8 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" style={{ flex: 1, padding: '10px 16px', fontWeight: 700 }}
-                disabled={!balanced || saving} onClick={handleSubmit}>
-                {saving ? 'Saving…' : <><CheckCircle2 size={16} /> Complete Return</>}
+                disabled={!balanced || saving || planLoading || !plan?.valid} onClick={handleSubmit}>
+                {saving ? 'Saving…' : planLoading ? 'Validating…' : <><CheckCircle2 size={16} /> Complete Return</>}
               </button>
             </div>
           </div>
@@ -946,10 +1000,10 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         <button className="btn" onClick={exitBack} disabled={saving}>Cancel</button>
         <button
           className="btn btn-primary"
-          disabled={!balanced || overFill || saving}
+          disabled={!balanced || overFill || saving || planLoading || !plan?.valid}
           onClick={handleSubmit}
         >
-          {saving ? 'Saving...' : 'Record Return'}
+          {saving ? 'Saving...' : planLoading ? 'Validating…' : 'Record Return'}
         </button>
       </div>
 

@@ -521,7 +521,8 @@ router.get('/:id/history', authenticate, async (req, res) => {
                inv.qty::numeric AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
-               'ACTIVE'::text AS txn_status
+               'ACTIVE'::text AS txn_status,
+               FALSE AS reversible
         FROM inventory inv
         WHERE inv.id = $1
 
@@ -540,7 +541,14 @@ router.get('/:id/history', authenticate, async (req, res) => {
                ol.qty_delta::numeric AS qty_delta,
                COALESCE(pi.issue_number, pr.return_number)::text AS doc_no,
                pr.id::int AS return_id,
-               CASE WHEN pr.status = 'REVERSED' THEN 'REVERSED' ELSE 'ACTIVE' END AS txn_status
+               CASE WHEN pr.status = 'REVERSED' THEN 'REVERSED' ELSE 'ACTIVE' END AS txn_status,
+               -- Deterministic reversal eligibility: ONLY the canonical
+               -- return_usable event of an ACTIVE return carrying a pre_state
+               -- snapshot (full usable Growth Return, phase60) is reversible.
+               -- PK join (pr.id = ol.reference_id) — no fan-out.
+               (pr.pre_state IS NOT NULL
+                AND COALESCE(pr.status, 'ACTIVE') <> 'REVERSED'
+                AND ol.operation = 'return_usable') AS reversible
         FROM lot_op_log ol
         LEFT JOIN users u ON u.id = ol.performed_by
         LEFT JOIN lot_process_issues pi
@@ -564,7 +572,8 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::numeric AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
-               'ACTIVE'::text AS txn_status
+               'ACTIVE'::text AS txn_status,
+               FALSE AS reversible
         FROM lot_movement_parents lmp
         JOIN lot_movements lm ON lm.id = lmp.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -585,7 +594,8 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::numeric AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
-               'ACTIVE'::text AS txn_status
+               'ACTIVE'::text AS txn_status,
+               FALSE AS reversible
         FROM lot_movement_children lmc
         JOIN lot_movements lm ON lm.id = lmc.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -606,7 +616,8 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::numeric AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
-               'ACTIVE'::text AS txn_status
+               'ACTIVE'::text AS txn_status,
+               FALSE AS reversible
         FROM growth_run_cycles grc
         LEFT JOIN machine_processes mp ON mp.id = grc.machine_process_id
         LEFT JOIN process_master pm ON pm.process_code = mp.process_type

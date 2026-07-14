@@ -398,7 +398,10 @@ export default function LotWorkspacePage() {
 
       {/* ── Scrollable Tab Content ── */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <div style={{ padding: '20px 24px', maxWidth: 960, margin: '0 auto' }}>
+        {/* The History register uses the FULL workspace width; every other
+            tab keeps the original centered 960px reading layout. */}
+        <div style={{ padding: '20px 24px',
+          maxWidth: activeTab === 'history' ? 'none' : 960, margin: '0 auto' }}>
 
           {/* ════ OVERVIEW TAB ════ */}
           {activeTab === 'overview' && (

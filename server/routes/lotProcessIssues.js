@@ -930,9 +930,121 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
   return `${parentCode}-${suffixChar}${maxN + 1}`;
 }
 
-// Growth-identity routing + reversal eligibility — pure helpers, unit-tested
-// in tests/growthReturnRouting.test.js (see services/returnRouting.js).
-const { resolveGrowthReturnRoute, reversalBlockReason } = require('../services/returnRouting');
+// Growth-identity routing, shared return plan + reversal eligibility — pure
+// helpers, unit-tested in tests/growthReturnRouting.test.js.
+// buildReturnPlan is used by BOTH the read-only preflight below and the
+// locked posting transaction (recomputed there — preflight is never trusted).
+const {
+  resolveAllowedOutputs, buildReturnPlan, reversalBlockReason,
+} = require('../services/returnRouting');
+
+// ── RETURN PREFLIGHT (read-only) ──────────────────────────────────────────────
+// POST /:id/return/validate — authoritative Return Plan with ZERO database
+// writes (SELECTs only, no locks, no transaction). Same auth as the actual
+// return. Resolves the biscuit itself — it does not depend on the detail
+// API's growth_number field. The posting endpoint re-resolves everything
+// under FOR UPDATE; this response is display-only.
+router.post('/:id/return/validate', authenticate, authorize('admin', 'operator'), async (req, res) => {
+  const issueId = parseInt(req.params.id);
+  // remaining_in_process from the client is intentionally IGNORED — the
+  // projected remaining is always server-calculated inside buildReturnPlan.
+  const { lines, measurements } = req.body || {};
+  try {
+    const { rows: issueRows } = await pool.query(
+      `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs,
+              COALESCE(p1.process_group, p2.process_group) AS process_group
+       FROM lot_process_issues i
+       LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
+       LEFT JOIN process_master p1 ON mp.process_type = p1.process_code
+       LEFT JOIN process_master p2 ON i.process_type = p2.process_code
+       WHERE i.id = $1`,
+      [issueId]
+    );
+    if (!issueRows.length)
+      return res.json({ valid: false, route: 'REJECT', error: 'Issue not found' });
+    const issue = issueRows[0];
+    const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
+
+    const targetLotId = issue.process_lot_id || issue.source_lot_id;
+    const { rows: lotRows } = await pool.query(
+      `SELECT inv.*, i.category, i.name AS item_name
+       FROM inventory inv JOIN items i ON inv.item_id = i.id
+       WHERE inv.id = $1`,
+      [targetLotId]
+    );
+    const processLot = lotRows[0] || null;
+
+    const isGrowthGroupIssue =
+      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+    const isGrowthRunInput = !!processLot && processLot.category === 'growth_run';
+    let biscuit = null;
+    let biscuitCandidateCount = 0;
+    if (isGrowthGroupIssue && !isGrowthRunInput && issue.machine_process_id) {
+      // ALL candidates — never silently pick one row. 0 → missing-biscuit
+      // REJECT; >1 → identity-conflict REJECT (both inside buildReturnPlan).
+      const { rows: bRows } = await pool.query(
+        `SELECT inv.* FROM inventory inv
+         WHERE inv.machine_process_id = $1
+           AND inv.item_id IN (SELECT id FROM items WHERE category = 'growth_run')`,
+        [issue.machine_process_id]
+      );
+      biscuitCandidateCount = bRows.length;
+      biscuit = bRows.length === 1 ? bRows[0] : null;
+    }
+
+    let openSiblingCount = 0;
+    if (issue.machine_process_id) {
+      const { rows: [s] } = await pool.query(
+        `SELECT COUNT(*)::int AS open_siblings FROM lot_process_issues
+         WHERE machine_process_id = $1 AND status = 'OPEN' AND id <> $2`,
+        [issue.machine_process_id, issueId]
+      );
+      openSiblingCount = s.open_siblings;
+    }
+
+    const plan = buildReturnPlan({
+      issue, processLot, biscuit, allowedOutputs, lines,
+      measurements, openSiblingCount, biscuitCandidateCount,
+    });
+    if (!plan.valid) return res.json(plan);
+
+    // Per-line projected identities. CHILD codes are best-effort previews of
+    // nextReturnLotCode — the posting transaction regenerates them under lock.
+    const parentCode = (processLot.category === 'seed' && processLot.lot_code)
+      ? processLot.lot_code : processLot.lot_number;
+    const lineIdentities = [];
+    const counters = {}; // suffix → last projected sequence number
+    for (const line of lines) {
+      if (plan.route === 'BISCUIT') {
+        lineIdentities.push({ type: line.type, lot_code: plan.target_lot_code, will_create_new_lot: false });
+        continue;
+      }
+      const rule = allowedOutputs.find(o => o.type === line.type);
+      const suffix = rule && rule.suffix;
+      if (!suffix) {
+        lineIdentities.push({ type: line.type, lot_code: null, will_create_new_lot: true });
+        continue;
+      }
+      if (counters[suffix] == null) {
+        const first = await nextReturnLotCode(pool, processLot.id, parentCode, suffix);
+        counters[suffix] = parseInt(first.slice(`${parentCode}-${suffix}`.length), 10);
+        lineIdentities.push({ type: line.type, lot_code: first, will_create_new_lot: true });
+      } else {
+        counters[suffix] += 1;
+        lineIdentities.push({ type: line.type, lot_code: `${parentCode}-${suffix}${counters[suffix]}`, will_create_new_lot: true });
+      }
+    }
+    const generatedChild = lineIdentities.find(li => li.will_create_new_lot && li.lot_code);
+
+    return res.json({
+      ...plan,
+      line_identities: lineIdentities,
+      generated_child_code: generatedChild ? generatedChild.lot_code : null,
+    });
+  } catch (err) {
+    return res.status(400).json({ valid: false, route: 'REJECT', error: err.message });
+  }
+});
 
 // ── CREATE RETURN ──────────────────────────────────────────────────────────────
 // Accepts multi-line returns, partial returns, and five return types.
@@ -943,8 +1055,10 @@ const { resolveGrowthReturnRoute, reversalBlockReason } = require('../services/r
 //   if all sibling issues are also RETURNED.
 router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (req, res) => {
   const issueId = parseInt(req.params.id);
-  const { return_date, notes, lines, remaining_in_process: remainingAfterInput,
-          measurements } = req.body;
+  // remaining_in_process from the client is intentionally IGNORED — the
+  // projected remaining is always recomputed from the LOCKED issue row
+  // inside buildReturnPlan (server-calculated, decimal-safe).
+  const { return_date, notes, lines, measurements } = req.body;
 
   if (!Array.isArray(lines) || lines.length === 0)
     return res.status(400).json({ error: 'At least one return line is required' });
@@ -968,14 +1082,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const issue = issueRows[0];
     if (issue.status !== 'OPEN') throw new Error(`Issue ${issue.issue_number} is already ${issue.status}`);
 
-    const fallbackOutputs = [
-      { type: 'usable',    label: 'Usable',   suffix: 'R', status: 'IN STOCK' },
-      { type: 'damaged',   label: 'Damaged',  suffix: 'D', status: 'DAMAGED' },
-      { type: 'consumed',  label: 'Consumed', suffix: 'C', status: 'CONSUMED' }
-    ];
-    const allowedOutputs = issue.allowed_outputs && issue.allowed_outputs.length > 0 
-      ? issue.allowed_outputs 
-      : fallbackOutputs;
+    const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
     const validTypes = allowedOutputs.map(o => o.type);
     for (const line of lines) {
@@ -1024,15 +1131,20 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const isGrowthGroupIssue =
       String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
     let biscuit = null;
+    let biscuitCandidateCount = 0;
     if (isGrowthGroupIssue && !isGrowthRun && issue.machine_process_id) {
+      // Lock ALL candidate biscuit rows FIRST, then count — never silently
+      // pick one row when multiple Growth biscuits exist (identity conflict
+      // → buildReturnPlan REJECTs; 0 candidates → missing-biscuit REJECT).
       const { rows: bRows } = await client.query(
         `SELECT inv.* FROM inventory inv
          WHERE inv.machine_process_id = $1
-           AND inv.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+           AND inv.item_id IN (SELECT id FROM items WHERE category = 'growth_run')
          FOR UPDATE OF inv`,
         [issue.machine_process_id]
       );
-      biscuit = bRows[0] || null;
+      biscuitCandidateCount = bRows.length;
+      biscuit = bRows.length === 1 ? bRows[0] : null;
     }
 
     const rough      = usesWeight(processLot);
@@ -1042,101 +1154,32 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const parentPath  = isSeed ? (processLot.genealogy_path || parentCode) : null;
     const seedLevel   = isSeed ? parentLevel + 1 : null;
 
-    // ── Conservation model ────────────────────────────────────────────────────
-    // QUANTITY mode (growth, laser, cuts — the default): every output is the same
-    // physical thing as the input, so quantities sum:
-    //     issued = usable + damaged + consumed + qc_hold + reprocess
-    //
-    // COMPONENT mode (seed_remove): the input splits into DIFFERENT components in
-    // DIFFERENT units — Growth Diamond (CT) and Recovered Seed (PCS). Adding those
-    // together is physically meaningless, so each component is validated on its own
-    // and the input lot is wholly consumed. Weight is the only quantity genuinely
-    // conserved across a component split.
-    //
-    // The mode is derived from the process's allowed_outputs config: any output rule
-    // carrying a "component" tag opts that process into COMPONENT mode. Processes
-    // without the tag keep exactly the quantity behaviour they have today.
-    const isComponentMode = allowedOutputs.some(o => o.component);
-
-    let returnTotal, remainingAfter;
-
-    if (isComponentMode) {
-      // The input is wholly transformed — nothing stays in process.
-      remainingAfter = 0;
-      returnTotal    = currentRemaining;
-
-      const byComponent = {};
-      for (const line of lines) {
-        const rule = allowedOutputs.find(o => o.type === line.type);
-        const comp = rule.component || 'primary';
-        byComponent[comp] = (byComponent[comp] || 0) + parseFloat(line.qty);
-      }
-
-      // Phase A: every component group declared in config must FULLY account
-      // for the input on its own — N Partial Growth Runs contain exactly N
-      // seeds AND N diamonds. Components are NEVER added to one another.
-      const requiredComponents = [...new Set(
-        allowedOutputs.filter(o => o.component).map(o => o.component)
-      )];
-      for (const comp of requiredComponents) {
-        const qty = byComponent[comp] || 0;
-        if (Math.abs(qty - currentRemaining) > 0.0001) {
-          throw new Error(
-            `${comp} outputs total ${qty.toFixed(4)} but must equal the ` +
-            `${currentRemaining.toFixed(4)} in process. Each component group is ` +
-            'validated on its own and never summed with another.'
-          );
-        }
-      }
-      // Untagged lines (mixed configs) may still never exceed the input.
-      if (byComponent.primary != null && byComponent.primary > currentRemaining + 0.0001) {
-        throw new Error(
-          `Untagged output (${byComponent.primary.toFixed(4)}) exceeds the ` +
-          `${currentRemaining.toFixed(4)} in process.`
-        );
-      }
-
-      // Mass balance: outputs may weigh LESS than the input (process loss is normal)
-      // but never more. Lines with no weight entered are skipped, not assumed zero.
-      const inputWeight  = parseFloat(processLot.weight || 0);
-      const outputWeight = lines.reduce((s, l) => (
-        s + (l.weight !== undefined && l.weight !== null && l.weight !== '' ? parseFloat(l.weight) : 0)
-      ), 0);
-      if (inputWeight > 0 && outputWeight > inputWeight + 0.0001) {
-        throw new Error(
-          `Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — ` +
-          'a component split cannot create mass.'
-        );
-      }
-    } else {
-      returnTotal    = lines.reduce((s, l) => s + parseFloat(l.qty), 0);
-      remainingAfter = remainingAfterInput !== undefined
-        ? parseFloat(remainingAfterInput)
-        : Math.max(0, currentRemaining - returnTotal);
-
-      // Balance gate
-      if (Math.abs(returnTotal + remainingAfter - currentRemaining) > 0.0001)
-        throw new Error(
-          `Balance mismatch: ${returnTotal.toFixed(4)} returning + ${remainingAfter.toFixed(4)} remaining ` +
-          `= ${(returnTotal + remainingAfter).toFixed(4)}, but ${currentRemaining.toFixed(4)} is available`
-        );
+    // ── Authoritative return plan ─────────────────────────────────────────────
+    // buildReturnPlan is the SAME pure resolver the read-only preflight
+    // (POST /:id/return/validate) uses. It is recomputed HERE from the LOCKED
+    // row images — a previously returned preflight plan is never trusted.
+    // It enforces the conservation gates (QUANTITY + COMPONENT modes), the
+    // growth-identity route (BISCUIT / CHILD / REJECT), the missing-biscuit
+    // rejection and the GROWTH usable-output configuration-integrity rule.
+    let openSiblingCount = 0;
+    if (issue.machine_process_id) {
+      const { rows: [s] } = await client.query(
+        `SELECT COUNT(*)::int AS open_siblings FROM lot_process_issues
+         WHERE machine_process_id = $1 AND status = 'OPEN' AND id <> $2`,
+        [issue.machine_process_id, issueId]
+      );
+      openSiblingCount = s.open_siblings;
     }
-
-    // Phase 1 growth-identity routing — decided ONCE from backend-calculated
-    // quantities. BISCUIT = full ALL-USABLE single-line return references the
-    // existing biscuit; REJECT = any partial or mixed return containing a
-    // usable growth output; CHILD = untouched legacy behaviour (damaged-only,
-    // non-growth, seed_remove/COMPONENT mode, or no biscuit).
-    // Biscuit-input returns (the process lot IS the biscuit — growth again /
-    // laser ops) are handled by the dedicated in-place branch in the line
-    // loop; the growth-identity route must not re-evaluate (or reject) them.
-    const growthRoute = isGrowthRun
-      ? { route: 'CHILD' }
-      : resolveGrowthReturnRoute({
-          isGrowthGroupIssue, isComponentMode, biscuit,
-          lines, allowedOutputs, currentRemaining, remainingAfter,
-        });
-    if (growthRoute.route === 'REJECT') throw new Error(growthRoute.reason);
+    const plan = buildReturnPlan({
+      issue, processLot, biscuit, allowedOutputs, lines,
+      measurements, openSiblingCount, biscuitCandidateCount,
+    });
+    if (!plan.valid) throw new Error(plan.error);
+    const remainingAfter = plan.remaining_after;
+    // The in-place biscuit-input path (growth again / laser ops) keeps its
+    // dedicated branch in the line loop below; routesToBiscuit is ONLY the
+    // full usable Growth Return that references the existing biscuit.
+    const routesToBiscuit = plan.route === 'BISCUIT' && !plan.growth_run_input;
 
     // 3. Create lot_process_returns header (backward compat summary)
     const returnNum   = await genReturnNum(client);
@@ -1149,7 +1192,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // of a full usable Growth Return. Captured from the LOCKED pre-images —
     // growth_run_cycles alone cannot restore length/width or the consumed seed
     // process lot. NULL for every other return type.
-    const preState = growthRoute.route === 'BISCUIT' ? {
+    const preState = routesToBiscuit ? {
       route: 'BISCUIT',
       remaining_before: currentRemaining,
       process_lot: {
@@ -1211,7 +1254,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       // run_no untouched). No nextReturnLotCode, no inventory INSERT — the
       // biscuit's status advances via the existing completion flow
       // (OUTPUT_BASED → advanceGrowthRunToStock).
-      if (growthRoute.route === 'BISCUIT') {
+      if (routesToBiscuit) {
         await client.query(
           `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
            VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -1318,7 +1361,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // before/after dimensions are preserved.
     const measureTarget = isGrowthRun
       ? processLot
-      : (growthRoute.route === 'BISCUIT' ? biscuit : null);
+      : (routesToBiscuit ? biscuit : null);
     if (measureTarget && measurements && (
       (measurements.weight != null && measurements.weight !== '') ||
       (measurements.height != null && measurements.height !== '') ||

@@ -2,7 +2,9 @@
 // (pure function, no DB). Covers self-audit test cases 1–6.
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { resolveGrowthReturnRoute, reversalBlockReason } = require('../services/returnRouting');
+const {
+  resolveGrowthReturnRoute, buildReturnPlan, reversalBlockReason,
+} = require('../services/returnRouting');
 
 const biscuit = { id: 42, lot_number: 'SSD074-JUN26-015', run_no: 1 };
 const allowedOutputs = [
@@ -59,11 +61,12 @@ test('6b: non-GROWTH process (laser/cuts/seed_remove) untouched', () => {
   assert.equal(r.route, 'CHILD');
 });
 
-test('6c: usable output overridden to growth_diamond (seed_remove) untouched', () => {
+test('6c: GROWTH usable with INCORRECT override (growth_diamond) → REJECT (config-integrity)', () => {
   const r = resolveGrowthReturnRoute({ ...base,
     allowedOutputs: [{ type: 'usable', item_category_override: 'growth_diamond' }],
     lines: [{ type: 'usable', qty: 9 }], currentRemaining: 9, remainingAfter: 0 });
-  assert.equal(r.route, 'CHILD');
+  assert.equal(r.route, 'REJECT');
+  assert.match(r.reason, /configuration is invalid/);
 });
 
 test('GROWTH usable/growth_run full return WITHOUT biscuit → REJECT (data-integrity)', () => {
@@ -91,11 +94,176 @@ test('decimal-safe: 8.99995 of 9 within epsilon routes to biscuit', () => {
   assert.equal(r.route, 'BISCUIT');
 });
 
-test('usable without growth_run override → CHILD (generic processes)', () => {
+test('GROWTH usable with MISSING growth_run override → REJECT (config-integrity)', () => {
   const r = resolveGrowthReturnRoute({ ...base,
     allowedOutputs: [{ type: 'usable', suffix: 'R', status: 'IN STOCK' }],
     lines: [{ type: 'usable', qty: 9 }], currentRemaining: 9, remainingAfter: 0 });
-  assert.equal(r.route, 'CHILD');
+  assert.equal(r.route, 'REJECT');
+  assert.match(r.reason, /must map to the existing Growth Run identity/);
+});
+
+// ── buildReturnPlan — the shared preflight/transaction resolver ───────────────
+// Same pure function behind POST /:id/return/validate AND the locked posting
+// transaction. Fixtures mirror the expected live case: issue PI-202607-0190,
+// seed process lot 1199-02, biscuit SSD087-JUL26-028 (Run R1).
+const planIssue = {
+  status: 'OPEN', issue_number: 'PI-202607-0190', issued_qty: 9,
+  remaining_in_process: 9, process_group: 'GROWTH', process_type: 'growth',
+  machine_process_id: 5,
+};
+const seedProcessLot = {
+  id: 7, category: 'seed', lot_code: '1199-02', lot_number: '1199-02',
+  qty: 9, weight: 25.65, status: 'IN PROCESS',
+};
+const planBiscuit = {
+  id: 42, lot_number: 'SSD087-JUL26-028', run_no: 1, qty: 1, weight: 91.2,
+  status: 'IN PROCESS', machine_process_id: 5,
+};
+const planBase = {
+  issue: planIssue, processLot: seedProcessLot, biscuit: planBiscuit,
+  allowedOutputs, lines: [{ type: 'usable', qty: 9 }],
+  openSiblingCount: 0, biscuitCandidateCount: 1,
+};
+
+test('plan 1: full usable + biscuit → BISCUIT targeting SSD087-JUL26-028, no new lot', () => {
+  const p = buildReturnPlan(planBase);
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'BISCUIT');
+  assert.equal(p.target_lot_id, 42);
+  assert.equal(p.target_lot_code, 'SSD087-JUL26-028');
+  assert.equal(p.growth_number, 'SSD087-JUL26-028');
+  assert.equal(p.run_no, 1);
+  assert.equal(p.will_create_new_lot, false);
+  assert.equal(p.is_final, true);
+  assert.equal(p.reversal_supported, true);
+  assert.equal(p.projected_issue_status, 'RETURNED');
+  assert.equal(p.projected_inventory_status, 'IN STOCK');
+});
+
+test('plan 2: partial usable (5 of 9) → REJECT', () => {
+  const p = buildReturnPlan({ ...planBase,
+    lines: [{ type: 'usable', qty: 5 }], remainingAfterInput: 4 });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Phase 1/);
+});
+
+test('plan 3: mixed usable (7 usable + 2 damaged) → REJECT', () => {
+  const p = buildReturnPlan({ ...planBase,
+    lines: [{ type: 'usable', qty: 7 }, { type: 'damaged', qty: 2 }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Phase 1/);
+});
+
+test('plan 4: ZERO biscuit candidates → REJECT (never a replacement Growth identity)', () => {
+  const p = buildReturnPlan({ ...planBase, biscuit: null, biscuitCandidateCount: 0 });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Growth biscuit or Growth Number was not found/);
+});
+
+test('plan 4b: MULTIPLE biscuit candidates → REJECT (identity conflict, never pick a row)', () => {
+  const p = buildReturnPlan({ ...planBase, biscuit: null, biscuitCandidateCount: 2 });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Multiple Growth biscuits were found/);
+});
+
+test('plan 4c: multiple candidates block even a damaged-only return on the conflicted process', () => {
+  const p = buildReturnPlan({ ...planBase, biscuit: null, biscuitCandidateCount: 3,
+    lines: [{ type: 'damaged', qty: 3 }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /identity conflict/);
+});
+
+test('plan 5: GROWTH usable with MISSING growth_run override → REJECT', () => {
+  const p = buildReturnPlan({ ...planBase,
+    allowedOutputs: [{ type: 'usable', suffix: 'R', status: 'IN STOCK' }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /configuration is invalid/);
+});
+
+test('plan 6: GROWTH usable with INCORRECT override → REJECT', () => {
+  const p = buildReturnPlan({ ...planBase,
+    allowedOutputs: [{ type: 'usable', suffix: 'R', status: 'IN STOCK', item_category_override: 'growth_diamond' }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /must map to the existing Growth Run identity/);
+});
+
+test('plan 7: damaged-only → CHILD, creates a new lot, not reversible', () => {
+  const p = buildReturnPlan({ ...planBase,
+    lines: [{ type: 'damaged', qty: 3 }], remainingAfterInput: 6 });
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'CHILD');
+  assert.equal(p.will_create_new_lot, true);
+  assert.equal(p.reversal_supported, false);
+  assert.equal(p.is_final, false);
+  assert.equal(p.projected_issue_status, 'OPEN');
+});
+
+test('plan 8: non-GROWTH usable → legacy CHILD behaviour', () => {
+  const p = buildReturnPlan({ ...planBase,
+    issue: { ...planIssue, process_group: 'LASER', process_type: 'edge_cut' },
+    allowedOutputs: [{ type: 'usable', suffix: 'R', status: 'IN STOCK' }] });
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'CHILD');
+  assert.equal(p.will_create_new_lot, true);
+});
+
+test('plan 9a: COMPONENT mode (seed_remove) unchanged — per-group equality holds', () => {
+  const compOutputs = [
+    { type: 'S',  label: 'Recovered Seed', suffix: 'S',  status: 'IN STOCK', component: 'seed',    type_kind: 'usable' },
+    { type: 'GD', label: 'Growth Diamond', suffix: 'GD', status: 'IN STOCK', component: 'diamond', type_kind: 'usable' },
+  ];
+  const p = buildReturnPlan({ ...planBase, allowedOutputs: compOutputs,
+    lines: [{ type: 'S', qty: 9 }, { type: 'GD', qty: 9 }] });
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'CHILD');
+  assert.equal(p.remaining_after, 0);
+  assert.equal(p.is_final, true);
+});
+
+test('plan 9b: COMPONENT mode — a short group is rejected (groups never summed)', () => {
+  const compOutputs = [
+    { type: 'S',  suffix: 'S',  status: 'IN STOCK', component: 'seed' },
+    { type: 'GD', suffix: 'GD', status: 'IN STOCK', component: 'diamond' },
+  ];
+  const p = buildReturnPlan({ ...planBase, allowedOutputs: compOutputs,
+    lines: [{ type: 'S', qty: 9 }, { type: 'GD', qty: 5 }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /diamond outputs total 5\.0000/);
+});
+
+test('plan: over-return (12 of 9) → Balance mismatch', () => {
+  const p = buildReturnPlan({ ...planBase, lines: [{ type: 'usable', qty: 12 }] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Balance mismatch/);
+});
+
+test('plan: falsified remaining_in_process=0 with partial qty → REJECT as partial, never BISCUIT', () => {
+  // Outstanding 9, client submits 5 usable and LIES that remaining is 0.
+  // remaining is SERVER-calculated (9 - 5 = 4), so the plan rejects as a
+  // partial growth return — the falsified field cannot reach the BISCUIT route.
+  const p = buildReturnPlan({ ...planBase,
+    lines: [{ type: 'usable', qty: 5 }], remainingAfterInput: 0, remaining_in_process: 0 });
+  assert.equal(p.valid, false);
+  assert.notEqual(p.route, 'BISCUIT');
+  assert.match(p.error, /Phase 1/);
+});
+
+test('plan: biscuit-INPUT return (growth again / laser) stays in place, not the growth-return path', () => {
+  const p = buildReturnPlan({ ...planBase,
+    processLot: { ...planBiscuit, category: 'growth_run', lot_code: null },
+    biscuit: null });
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'BISCUIT');
+  assert.equal(p.growth_run_input, true);
+  assert.equal(p.will_create_new_lot, false);
+  assert.equal(p.target_lot_code, 'SSD087-JUL26-028');
+  assert.equal(p.reversal_supported, false);
+});
+
+test('plan: issue no longer OPEN → invalid', () => {
+  const p = buildReturnPlan({ ...planBase, issue: { ...planIssue, status: 'RETURNED' } });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /already RETURNED/);
 });
 
 // ── Reversal eligibility (phase60) — reversalBlockReason() truth table ────────
