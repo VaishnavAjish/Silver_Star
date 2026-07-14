@@ -151,7 +151,7 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 
   let dimStr = '—';
   if (machine.dim_length != null && machine.dim_width != null && machine.dim_height != null) {
-    dimStr = `${parseFloat(machine.dim_length).toFixed(2)} × ${parseFloat(machine.dim_width).toFixed(2)} × ${parseFloat(machine.dim_height).toFixed(2)} mm`;
+    dimStr = `${parseFloat(machine.dim_length).toFixed(2)} × ${parseFloat(machine.dim_width).toFixed(2)} × ${parseFloat(machine.dim_height).toFixed(2)}`;
   }
 
   const operatorDisplay = machine.operator_name 
@@ -160,7 +160,7 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 
   return (
     <div style={{
-      background: '#fff', border: `1px solid ${cfg.border}`, borderRadius: 8,
+      background: '#fff', border: `1px solid #E0E0E0`, borderRadius: 8,
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
@@ -1316,9 +1316,8 @@ export default function ManufacturingDashboard() {
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="page-section page-actions-bar no-print">
-        <div className="fg" style={{ minWidth: 200 }}>
-          <label>Search</label>
+      <div className="page-section page-actions-bar no-print" style={{ background: '#fff', border: 'none', padding: '0 0 16px 0', display: 'flex', alignItems: 'flex-end', gap: 16 }}>
+        <div style={{ flex: '1 1 200px' }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 6,
             border: '1px solid var(--g300)', borderRadius: 'var(--radius)',
@@ -1329,7 +1328,7 @@ export default function ManufacturingDashboard() {
             <Search size={12} color="#9E9E9E" />
             <input
               style={{ border: 'none', outline: 'none', boxShadow: 'none', fontSize: 12, width: '100%', height: '100%', background: 'transparent', padding: 0, margin: 0 }}
-              placeholder="Search machine…"
+              placeholder="Search machine, lot, growth no..."
               value={filters.search}
               onChange={e => setFilter('search')(e.target.value)}
               onFocus={() => setSearchFocused(true)}
