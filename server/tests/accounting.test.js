@@ -558,5 +558,5 @@ test('negative stock is blocked', () => withDb(async client => {
 }));
 
 test.after(async () => {
-  await pool.end();
+  await pool.shutdown();
 });
