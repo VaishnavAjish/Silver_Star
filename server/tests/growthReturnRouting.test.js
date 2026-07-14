@@ -4,7 +4,41 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   resolveGrowthReturnRoute, buildReturnPlan, reversalBlockReason,
+  normalizeGrowthUsableOutputs,
 } = require('../services/returnRouting');
+
+// ── normalizeGrowthUsableOutputs — ProcessMaster write guardrail ──────────────
+test('normalize: GROWTH usable rule without override is forced to growth_run', () => {
+  const input = [
+    { type: 'usable', suffix: 'R', status: 'IN STOCK' },
+    { type: 'damaged', suffix: 'D', status: 'DAMAGED' },
+  ];
+  const out = normalizeGrowthUsableOutputs('GROWTH', input);
+  assert.equal(out[0].item_category_override, 'growth_run');
+  assert.equal(out[1].item_category_override, undefined);
+  // immutability: the input rule object is never mutated
+  assert.equal(input[0].item_category_override, undefined);
+});
+
+test('normalize: already-correct GROWTH config passes through unchanged', () => {
+  const input = [{ type: 'usable', suffix: 'R', status: 'IN STOCK', item_category_override: 'growth_run' }];
+  const out = normalizeGrowthUsableOutputs('GROWTH', input);
+  assert.deepEqual(out, input);
+});
+
+test('normalize: COMPONENT-mode config (seed_remove style) is never touched', () => {
+  const input = [
+    { type: 'S',  suffix: 'S',  status: 'IN STOCK', component: 'seed' },
+    { type: 'GD', suffix: 'GD', status: 'IN STOCK', component: 'diamond' },
+  ];
+  assert.deepEqual(normalizeGrowthUsableOutputs('GROWTH', input), input);
+});
+
+test('normalize: non-GROWTH groups are returned untouched', () => {
+  const input = [{ type: 'usable', suffix: 'R', status: 'IN STOCK' }];
+  assert.deepEqual(normalizeGrowthUsableOutputs('LASER', input), input);
+  assert.deepEqual(normalizeGrowthUsableOutputs(null, input), input);
+});
 
 const biscuit = { id: 42, lot_number: 'SSD074-JUN26-015', run_no: 1 };
 const allowedOutputs = [

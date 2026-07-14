@@ -358,9 +358,34 @@ function reversalBlockReason({ header, pre, issue, biscuit, machineProcess }) {
   return null;
 }
 
+/**
+ * Config-write guardrail (routes/processMaster.js): on a GROWTH-group process
+ * every usable output rule MUST map to the existing Growth Run identity —
+ * buildReturnPlan hard-rejects anything else at return time. Normalizing at
+ * write time means an admin cannot save a configuration the engine will
+ * refuse (the live 'pr-01' failure). Pure and immutable: returns new objects,
+ * never mutates. COMPONENT-mode configs (seed_remove) and non-GROWTH groups
+ * are returned untouched.
+ *
+ * @param {string|null} processGroup
+ * @param {Array<object>|any} outputs  allowed_outputs as sent by the client
+ * @returns {Array<object>|any}
+ */
+function normalizeGrowthUsableOutputs(processGroup, outputs) {
+  if (String(processGroup || '').toUpperCase() !== 'GROWTH') return outputs;
+  if (!Array.isArray(outputs)) return outputs;
+  if (outputs.some(o => o && o.component)) return outputs; // COMPONENT mode — never touched
+  return outputs.map(o =>
+    o && o.type === 'usable' && o.item_category_override !== 'growth_run'
+      ? { ...o, item_category_override: 'growth_run' }
+      : o
+  );
+}
+
 module.exports = {
   resolveAllowedOutputs,
   resolveGrowthReturnRoute,
   buildReturnPlan,
+  normalizeGrowthUsableOutputs,
   reversalBlockReason,
 };

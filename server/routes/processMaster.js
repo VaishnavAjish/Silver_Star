@@ -2,6 +2,7 @@ const express  = require('express');
 const pool     = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const { normalizeGrowthUsableOutputs } = require('../services/returnRouting');
 
 const router = express.Router();
 
@@ -119,7 +120,9 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
         process_group,
         input_item_category ? String(input_item_category).trim() : null,
         eligible_machine_type ? String(eligible_machine_type).trim() : null,
-        JSON.stringify(allowed_outputs),
+        // GROWTH usable rules are forced to map to the existing Growth Run
+        // identity — the Return Engine hard-rejects any other configuration.
+        JSON.stringify(normalizeGrowthUsableOutputs(process_group, allowed_outputs)),
       ]
     );
     dispatchEvent('process_master.created', { id: rows[0].id, process_code: rows[0].process_code, process_name: rows[0].process_name, module: 'manufacturing' });
@@ -210,7 +213,15 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
         eligible_machine_type !== undefined
           ? (eligible_machine_type ? String(eligible_machine_type).trim() : null)
           : p.eligible_machine_type,
-        allowed_outputs !== undefined ? JSON.stringify(allowed_outputs) : null,
+        // Normalize against the EFFECTIVE group (patched or existing) so a
+        // GROWTH process can never be saved with a usable rule the Return
+        // Engine would reject.
+        allowed_outputs !== undefined
+          ? JSON.stringify(normalizeGrowthUsableOutputs(
+              process_group !== undefined ? process_group : p.process_group,
+              allowed_outputs
+            ))
+          : null,
         parseInt(req.params.id),
       ]
     );

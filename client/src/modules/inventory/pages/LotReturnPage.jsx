@@ -698,16 +698,26 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                         </SelectDropdown>
                       </td>
                       <td style={{ padding: '6px 8px' }}>
-                        <SelectDropdown
-                          value={line.item_id || ''}
-                          onChange={e => updateLine(line._id, 'item_id', e.target.value)}
-                          style={{ width: '100%' }}
-                        >
-                          <option value="">— Inherit Parent —</option>
-                          {items.map(i => (
-                            <option key={i.id} value={i.id}>{i.name}</option>
-                          ))}
-                        </SelectDropdown>
+                        {identity && identity.will_create_new_lot === false ? (
+                          // Server-owned line: the return references the EXISTING
+                          // Growth biscuit — the backend ignores item_id entirely,
+                          // so no manual category input is offered.
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--g600)' }}>
+                            {issue.growth_item_name || 'Growth Run'}
+                            <span style={{ color: 'var(--g400)', fontWeight: 400 }}> · server</span>
+                          </span>
+                        ) : (
+                          <SelectDropdown
+                            value={line.item_id || ''}
+                            onChange={e => updateLine(line._id, 'item_id', e.target.value)}
+                            style={{ width: '100%' }}
+                          >
+                            <option value="">— Inherit Parent —</option>
+                            {items.map(i => (
+                              <option key={i.id} value={i.id}>{i.name}</option>
+                            ))}
+                          </SelectDropdown>
+                        )}
                       </td>
                       <td style={{ padding: '6px 8px' }}>
                         <input
