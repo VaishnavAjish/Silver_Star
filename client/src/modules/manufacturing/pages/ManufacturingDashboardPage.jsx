@@ -196,12 +196,6 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
                 <span>{processMap?.get(machine.process_type)?.process_name || machine.process_type}</span>
               </>
             )}
-            {machine.process_number && (
-              <>
-                <span style={{ color: '#BDBDBD' }}>•</span>
-                <span>{machine.process_number}</span>
-              </>
-            )}
           </div>
           <div style={{ fontSize: 11, color: '#616161', marginTop: 6, fontWeight: 500 }}>
             {operatorDisplay}
