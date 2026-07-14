@@ -95,7 +95,7 @@ router.get('/kpi', authenticate, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/machines', authenticate, async (req, res) => {
   try {
-    const { dept, status, operator, process_type, overdue, search, limit = 200, offset = 0 } = req.query;
+    const { dept, status, operator, process_type, overdue, search, length_min, length_max, height_min, height_max, limit = 200, offset = 0 } = req.query;
 
     const params = [];
     const where  = ['1=1'];
@@ -123,6 +123,13 @@ router.get('/machines', authenticate, async (req, res) => {
     if (overdue === 'true') {
       where.push(`mp.expected_completion_at IS NOT NULL AND mp.expected_completion_at < NOW() AND mp.status = 'running'`);
     }
+
+    const subWhere = [];
+    if (length_min) subWhere.push(`dim_length >= ${parseFloat(length_min)}`);
+    if (length_max) subWhere.push(`dim_length <= ${parseFloat(length_max)}`);
+    if (height_min) subWhere.push(`dim_height >= ${parseFloat(height_min)}`);
+    if (height_max) subWhere.push(`dim_height <= ${parseFloat(height_max)}`);
+    const subWhereClause = subWhere.length > 0 ? `WHERE ${subWhere.join(' AND ')}` : '';
 
     const { rows } = await pool.query(`
       SELECT * FROM (
@@ -167,7 +174,10 @@ router.get('/machines', authenticate, async (req, res) => {
           gr.weight_gain         AS weight_gain,
           gr.growth_pct          AS growth_pct,
           gr.weight              AS biscuit_weight,
-          gr.status              AS biscuit_status
+          gr.status              AS biscuit_status,
+          (SELECT i.dim_length FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_length,
+          (SELECT i.dim_depth FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_width,
+          (SELECT i.dim_height FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_height
         FROM machines m
         LEFT JOIN departments d ON d.id = m.department_id
         LEFT JOIN locations   l ON l.id = m.location_id
@@ -181,6 +191,7 @@ router.get('/machines', authenticate, async (req, res) => {
         WHERE ${where.join(' AND ')}
         ORDER BY m.id, CASE mp.status WHEN 'running' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END
       ) sub
+      ${subWhereClause}
       ORDER BY
         CASE sub.machine_status
           WHEN 'running'          THEN 1

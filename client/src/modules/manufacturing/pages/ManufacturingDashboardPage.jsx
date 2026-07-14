@@ -6,7 +6,7 @@ import {
   Activity, AlertTriangle, ChevronRight, ChevronLeft, Clock, Cpu,
   Play, Pause, CheckCircle, Wrench, RefreshCw, Search, Filter,
   X, Plus, Zap, Timer, Package, TrendingUp, AlertCircle, Bell,
-  Layers, User, Calendar, LayoutGrid, List, ArrowUp, ArrowDown,
+  Layers, User, Calendar, LayoutGrid, List, ArrowUp, ArrowDown, MoreVertical,
 } from 'lucide-react';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useManufacturingSync } from '../../../shared/hooks/useModuleSync';
@@ -147,20 +147,31 @@ function KpiCard({ def, value }) {
 const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, processMap }) {
   const cfg = MACHINE_STATUS_CFG[machine.machine_status] || MACHINE_STATUS_CFG.idle;
   const hasProcess = !!machine.process_id;
+  const [showMenu, setShowMenu] = useState(false);
+
+  let dimStr = '—';
+  if (machine.dim_length != null && machine.dim_width != null && machine.dim_height != null) {
+    dimStr = `${parseFloat(machine.dim_length).toFixed(2)} × ${parseFloat(machine.dim_width).toFixed(2)} × ${parseFloat(machine.dim_height).toFixed(2)} mm`;
+  }
+
+  const operatorDisplay = machine.operator_name 
+    ? `${machine.operator_name} (${machine.location_name || 'No Location'})` 
+    : (machine.location_name || 'No Location');
 
   return (
     <div style={{
       background: '#fff', border: `1px solid ${cfg.border}`, borderRadius: 10,
       boxShadow: cfg.glow !== 'none' ? cfg.glow : '0 1px 3px rgba(0,0,0,.05)',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {/* Header */}
       <div style={{
         background: cfg.bg, borderBottom: `1px solid ${cfg.border}`,
         padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 8,
+        borderTopLeftRadius: 10, borderTopRightRadius: 10,
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 12, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {machine.name}
           </div>
           <div style={{ fontSize: 10, color: '#616161', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -177,94 +188,117 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
       </div>
 
       {/* Body */}
-      <div style={{ padding: '8px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          {/* RULE 4: Run Number is primary — operators/production track by Run No.
-              Process number is kept visible but secondary. */}
-          <span style={{ fontSize: 11, fontWeight: 700, color: machine.growth_run_number ? '#1565C0' : '#9E9E9E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <div style={{ padding: '12px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: machine.growth_run_number ? '#1565C0' : '#424242' }}>
             {machine.growth_run_number || machine.process_number || 'No active process'}
-          </span>
-          {machine.process_type && (() => {
-            const proc = processMap?.get(machine.process_type);
-            const catClr = CATEGORY_COLORS[proc?.category] || CATEGORY_COLORS.PRIMARY;
-            return (
-              <span style={{
-                fontSize: 9, fontWeight: 600, padding: '1px 6px',
-                background: catClr.bg, color: catClr.color, borderRadius: 8,
-              }}>
-                {proc?.process_name || machine.process_type}
-              </span>
-            );
-          })()}
+          </div>
+          {machine.growth_run_number && machine.process_number && (
+            <div style={{ fontSize: 9, color: '#9E9E9E', marginTop: 2 }}>{machine.process_number}</div>
+          )}
         </div>
-        {machine.growth_run_number && machine.process_number && (
-          <div style={{ fontSize: 9, color: '#9E9E9E', marginTop: -2 }}>{machine.process_number}</div>
-        )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#616161' }}>
-          <User size={10} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {machine.operator_name || <span style={{ color: '#BDBDBD' }}>Unassigned</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#424242' }}>
+          <User size={12} color="#9E9E9E" />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>
+            {operatorDisplay}
           </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+          <StatCell label="Qty" value={machine.seeds_issued > 0 ? `${machine.seeds_issued} pcs` : '—'} />
+          <StatCell label="Dimension" value={dimStr} />
         </div>
 
         {hasProcess && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#616161', marginBottom: 2 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Clock size={10} /> {fmtRuntime(machine.runtime_hours)}
-              </span>
-              {machine.target_runtime_hours && (
-                <span style={{ color: '#9E9E9E' }}>/ {machine.target_runtime_hours}h</span>
-              )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+            <div>
+              <div style={{ fontSize: 9, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>Elapsed</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, fontWeight: 600, color: '#424242' }}>
+                {fmtRuntime(machine.runtime_hours)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>Target</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
+                {machine.target_runtime_hours ? `${machine.target_runtime_hours}h` : '—'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {hasProcess && (
+          <div style={{ marginBottom: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 600, color: '#424242', marginBottom: 4 }}>
+              <span style={{ color: '#9E9E9E' }}>Progress</span>
+              <span>{Math.min(100, Math.round(((machine.runtime_hours || 0) / machine.target_runtime_hours) * 100) || 0)}%</span>
             </div>
             <ProgressBar value={machine.runtime_hours || 0} max={machine.target_runtime_hours} status={machine.machine_status} />
           </div>
         )}
 
         {hasProcess && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 6px', marginTop: 2 }}>
-            <StatCell label="Seeds" value={machine.seeds_issued > 0 ? `${machine.seeds_issued} pcs` : '—'} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
             <StatCell label="Yield" value={machine.expected_rough_qty ? `${machine.expected_rough_qty} ct` : '—'} />
-            <StatCell label="Height" value={machine.expected_height ? `${machine.expected_height} mm` : '—'} />
             <StatCell label="ETA" value={fmtETA(machine.expected_completion_at)?.text || '—'} />
           </div>
         )}
-
-        {machine.department_name && (
-          <div style={{ fontSize: 9, color: '#9E9E9E', marginTop: 1 }}>{machine.department_name}</div>
-        )}
       </div>
 
-      {/* Actions */}
-      <div style={{ borderTop: '1px solid #F5F5F5', padding: '5px 8px', display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        {machine.machine_status === 'idle' && (
-          <ActionBtn icon={Play} label="Start" color="#2E7D32" onClick={() => onAction('start', machine)} />
-        )}
-        {machine.machine_status === 'awaiting_output' && machine.process_id && (
-          <ActionBtn icon={Package} label="Returns" color="#7B1FA2"
-            onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`)} />
-        )}
-        {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
+      {/* Actions (Icon Only) */}
+      <div style={{ borderTop: '1px solid #F5F5F5', padding: '6px', display: 'flex', justifyContent: 'flex-end', position: 'relative' }}>
+        <button
+          onClick={() => setShowMenu(!showMenu)}
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#F5F5F5'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <MoreVertical size={16} color="#757575" />
+        </button>
+
+        {showMenu && (
           <>
-            <ActionBtn icon={Pause} label="Hold" color="#E65100" onClick={() => onAction('hold', machine)} />
-            <ActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', machine)} />
+            <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setShowMenu(false)} />
+            <div style={{
+              position: 'absolute', right: 8, bottom: 36, background: '#fff',
+              border: '1px solid #E0E0E0', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              padding: 4, width: 220, zIndex: 11, display: 'flex', flexDirection: 'column', gap: 2,
+            }}>
+              <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                Machine Actions
+              </div>
+              {machine.machine_status === 'idle' && (
+                <ActionMenuItem icon={Play} label="Start" desc="Begin a new process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('start', machine); }} />
+              )}
+              {machine.machine_status === 'awaiting_output' && machine.process_id && (
+                <ActionMenuItem icon={Package} label="Returns" desc="Process returns from this machine." color="#7B1FA2" onClick={() => { setShowMenu(false); onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`); }} />
+              )}
+              {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
+                <>
+                  <ActionMenuItem icon={Pause} label="Put On Hold" desc="Pause the current process temporarily." color="#E65100" onClick={() => { setShowMenu(false); onAction('hold', machine); }} />
+                  <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                </>
+              )}
+              {machine.process_status === 'hold' && (
+                <>
+                  <ActionMenuItem icon={Play} label="Resume" desc="Resume the paused process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('resume', machine); }} />
+                  <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                </>
+              )}
+              {['idle', 'running', 'hold'].includes(machine.machine_status) && (
+                <ActionMenuItem icon={Wrench} label="Maintenance" desc="Move this machine to maintenance mode." color="#F57F17" onClick={() => { setShowMenu(false); onAction('maintenance', machine); }} />
+              )}
+              {machine.machine_status !== 'breakdown' && (
+                <ActionMenuItem icon={AlertTriangle} label="Report Breakdown" desc="Stop the machine and record a breakdown." color="#C62828" onClick={() => { setShowMenu(false); onAction('breakdown', machine); }} />
+              )}
+              {['maintenance', 'breakdown', 'cleaning'].includes(machine.machine_status) && (
+                <ActionMenuItem icon={CheckCircle} label="Set Idle" desc="Mark machine as ready for production." color="#757575" onClick={() => { setShowMenu(false); onAction('idle', machine); }} />
+              )}
+            </div>
           </>
-        )}
-        {machine.process_status === 'hold' && (
-          <>
-            <ActionBtn icon={Play} label="Resume" color="#2E7D32" onClick={() => onAction('resume', machine)} />
-            <ActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', machine)} />
-          </>
-        )}
-        {['idle', 'running', 'hold'].includes(machine.machine_status) && (
-          <ActionBtn icon={Wrench} label="Maintenance" color="#F57F17" onClick={() => onAction('maintenance', machine)} />
-        )}
-        {machine.machine_status !== 'breakdown' && (
-          <ActionBtn icon={AlertTriangle} label="Breakdown" color="#C62828" onClick={() => onAction('breakdown', machine)} />
-        )}
-        {['maintenance', 'breakdown', 'cleaning'].includes(machine.machine_status) && (
-          <ActionBtn icon={CheckCircle} label="Set Idle" color="#757575" onClick={() => onAction('idle', machine)} />
         )}
       </div>
     </div>
@@ -274,9 +308,29 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 function StatCell({ label, value }) {
   return (
     <div>
-      <div style={{ color: '#9E9E9E', fontSize: 9, textTransform: 'uppercase', letterSpacing: '.3px' }}>{label}</div>
-      <div style={{ fontWeight: 600, color: '#424242', fontFamily: 'var(--mono)', fontSize: 10 }}>{value}</div>
+      <div style={{ color: '#9E9E9E', fontSize: 9, textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 600, color: '#424242', fontSize: 11 }}>{value}</div>
     </div>
+  );
+}
+
+function ActionMenuItem({ icon: Icon, label, desc, color, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px',
+        background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = '#F5F5F5'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <Icon size={14} color={color} style={{ flexShrink: 0, marginTop: 2 }} />
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#212121', marginBottom: 2 }}>{label}</div>
+        <div style={{ fontSize: 10, color: '#757575' }}>{desc}</div>
+      </div>
+    </button>
   );
 }
 
@@ -323,16 +377,20 @@ function GActionBtn({ icon: Icon, label, color, onClick }) {
 // ══════════════════════════════════════════════════════════════════════════════
 function GridView({ machines, sortConfig, onSort, onAction, onNavigate, processMap }) {
   const cols = [
-    { key: 'code', label: 'Machine', w: 150 },
+    { key: 'code', label: 'Machine', w: 130 },
     { key: 'machine_status', label: 'Status', w: 104 },
-    { key: 'operator_name', label: 'Operator', w: 120 },
+    { key: 'operator_name', label: 'Operator / Location', w: 140 },
     { key: 'process_type', label: 'Type', w: 90 },
-    { key: 'seeds_issued', label: 'Seeds', w: 68 },
-    { key: 'runtime_hours', label: 'Runtime', w: 110 },
-    { key: 'target_runtime_hours', label: 'Target', w: 68 },
+    { key: 'growth_run_number', label: 'Growth No.', w: 130 },
+    { key: 'process_number', label: 'Run', w: 70 },
+    { key: 'seeds_issued', label: 'Qty (pcs)', w: 75 },
+    { key: 'dim_length', label: 'Length', w: 60 },
+    { key: 'dim_width', label: 'Width', w: 60 },
+    { key: 'dim_height', label: 'Height', w: 60 },
+    { key: 'runtime_hours', label: 'Elapsed', w: 80 },
+    { key: 'target_runtime_hours', label: 'Target', w: 75 },
     { key: '_pct', label: 'Progress', w: 80 },
-    { key: 'expected_rough_qty', label: 'Exp. Yield', w: 86 },
-    { key: 'expected_completion_at', label: 'ETA', w: 84 },
+    { key: 'expected_rough_qty', label: 'Yield', w: 70 },
     { key: '_alerts', label: 'Alerts', w: 64 },
     { key: null, label: 'Actions', w: 240 },
   ];
@@ -409,9 +467,9 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
       <td style={{ ...TD, textAlign: 'center', color: '#BDBDBD', fontSize: 11, width: 36 }}>{idx + 1}</td>
 
       {/* Machine */}
-      <td style={{ ...TD, width: 150 }}>
+      <td style={{ ...TD, width: 130 }}>
         <div style={{ fontWeight: 700, fontFamily: 'var(--mono)', fontSize: 12 }}>{m.name}</div>
-        <div style={{ fontSize: 10, color: '#9E9E9E', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 10, color: '#9E9E9E', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {m.code}
         </div>
       </td>
@@ -429,8 +487,8 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
       </td>
 
       {/* Operator */}
-      <td style={{ ...TD, width: 120, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {m.operator_name || <span style={{ color: '#BDBDBD' }}>—</span>}
+      <td style={{ ...TD, width: 140, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {m.operator_name ? `${m.operator_name} (${m.location_name || 'No Location'})` : (m.location_name || <span style={{ color: '#BDBDBD' }}>—</span>)}
       </td>
 
       {/* Process Type */}
@@ -446,30 +504,56 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
         })() : <span style={{ color: '#BDBDBD' }}>—</span>}
       </td>
 
-      {/* Seeds Issued */}
-      <td style={{ ...TD, width: 68, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
+      {/* Growth No. */}
+      <td style={{ ...TD, width: 130 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: m.growth_run_number ? '#1565C0' : '#424242' }}>
+          {m.growth_run_number || <span style={{ color: '#BDBDBD' }}>—</span>}
+        </span>
+      </td>
+
+      {/* Run */}
+      <td style={{ ...TD, width: 70 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
+          {m.process_number || <span style={{ color: '#BDBDBD' }}>—</span>}
+        </span>
+      </td>
+
+      {/* Qty (pcs) */}
+      <td style={{ ...TD, width: 75, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
         {hasProcess && m.seeds_issued > 0
           ? <span style={{ color: '#424242' }}>{m.seeds_issued}</span>
           : <span style={{ color: '#BDBDBD' }}>—</span>
         }
       </td>
 
-      {/* Runtime */}
-      <td style={{ ...TD, width: 110 }}>
+      {/* Length */}
+      <td style={{ ...TD, width: 60, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
+        {m.dim_length != null ? parseFloat(m.dim_length).toFixed(2) : <span style={{ color: '#BDBDBD' }}>—</span>}
+      </td>
+
+      {/* Width */}
+      <td style={{ ...TD, width: 60, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
+        {m.dim_width != null ? parseFloat(m.dim_width).toFixed(2) : <span style={{ color: '#BDBDBD' }}>—</span>}
+      </td>
+
+      {/* Height */}
+      <td style={{ ...TD, width: 60, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
+        {m.dim_height != null ? parseFloat(m.dim_height).toFixed(2) : <span style={{ color: '#BDBDBD' }}>—</span>}
+      </td>
+
+      {/* Elapsed */}
+      <td style={{ ...TD, width: 80 }}>
         {hasProcess ? (
           <>
-            <div style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12 }}>
+            <div style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 11 }}>
               {fmtRuntime(m.runtime_hours)}
             </div>
-            {runtimePct != null && (
-              <MiniBar value={m.runtime_hours} max={m.target_runtime_hours} status={m.machine_status} />
-            )}
           </>
         ) : <span style={{ color: '#BDBDBD' }}>—</span>}
       </td>
 
-      {/* Target Runtime */}
-      <td style={{ ...TD, width: 68, fontFamily: 'var(--mono)', color: '#757575', textAlign: 'right', paddingRight: 12 }}>
+      {/* Target */}
+      <td style={{ ...TD, width: 75, fontFamily: 'var(--mono)', color: '#757575', textAlign: 'right', paddingRight: 12 }}>
         {m.target_runtime_hours ? `${m.target_runtime_hours}h` : <span style={{ color: '#BDBDBD' }}>—</span>}
       </td>
 
@@ -484,16 +568,11 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
       </td>
 
       {/* Expected Yield */}
-      <td style={{ ...TD, width: 86, fontFamily: 'var(--mono)', color: '#4527A0', textAlign: 'right', paddingRight: 12 }}>
+      <td style={{ ...TD, width: 70, fontFamily: 'var(--mono)', color: '#4527A0', textAlign: 'right', paddingRight: 12 }}>
         {m.expected_rough_qty
-          ? `${parseFloat(m.expected_rough_qty).toFixed(2)} ct`
+          ? `${parseFloat(m.expected_rough_qty).toFixed(2)}`
           : <span style={{ color: '#BDBDBD' }}>—</span>
         }
-      </td>
-
-      {/* ETA */}
-      <td style={{ ...TD, width: 84 }}>
-        <ETACell dt={m.expected_completion_at} />
       </td>
 
       {/* Alerts */}
@@ -1024,6 +1103,7 @@ export default function ManufacturingDashboard() {
   // ── Shared filters ───────────────────────────────────────────────────────────
   const [filters, setFilters] = usePersistedFilters('mfg_dashboard_filters', {
     dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
+    length_min: '', length_max: '', height_min: '', height_max: '',
   });
   const setFilter = k => v => setFilters(f => ({ ...f, [k]: v }));
 
