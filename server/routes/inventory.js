@@ -3,6 +3,8 @@ const pool = require('../db/pool');
 const cache = require('../db/cache');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getInventoryValuationLines, round2 } = require('../services/inventoryAccounting');
+const { createOrFetchLegacyGroup } = require('../services/transactionGrouping');
+const reversalOrchestrator = require('../services/reversalOrchestrator');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 
@@ -211,9 +213,9 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
         value: parseFloat(totalsR.rows[0].total_value),
       },
     });
-  } catch (err) { 
+  } catch (err) {
     logger.error('[inventory] GET / error:', { error: err.message, stack: err.stack });
-    res.status(500).json({ error: err.message }); 
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -224,7 +226,7 @@ router.get('/filters/active', authenticate, async (req, res) => {
       pool.query(`
         SELECT id::text, name FROM locations
         UNION
-        SELECT DISTINCT inv.source_module as id, INITCAP(inv.source_module) as name 
+        SELECT DISTINCT inv.source_module as id, INITCAP(inv.source_module) as name
         FROM inventory inv
         LEFT JOIN departments d ON inv.department_id = d.id
         WHERE inv.source_module IS NOT NULL AND inv.source_module != ''
@@ -511,6 +513,10 @@ router.get('/:id/history', authenticate, async (req, res) => {
         -- Creation/intake event
         SELECT inv.created_at::text AS ts,
                COALESCE(inv.source_type::text, inv.operation_type::text, 'purchase') AS event_type,
+               'INVENTORY_MOVEMENT'::text AS event_class,
+               TRUE AS affects_qty_balance,
+               TRUE AS affects_weight_balance,
+               TRUE AS affects_value_balance,
                NULL::text AS user,
                NULL::text AS source_loc, NULL::text AS dest_loc,
                inv.status::text AS status_change,
@@ -522,7 +528,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::text AS doc_no,
                NULL::int AS return_id,
                'ACTIVE'::text AS txn_status,
-               FALSE AS reversible
+               FALSE AS reversible,
+               'inventory'::text AS source_type,
+               inv.id::int AS source_id
         FROM inventory inv
         WHERE inv.id = $1
 
@@ -531,6 +539,16 @@ router.get('/:id/history', authenticate, async (req, res) => {
         -- Generic Op-log entries (including Process Issued/Returned)
         SELECT ol.performed_at::text AS ts,
                ol.operation::text AS event_type,
+               CASE
+                 WHEN ol.operation IN ('issue', 'return_usable', 'return_reject', 'return_scrap', 'seed_consumed', 'issue_receive') THEN 'INVENTORY_MOVEMENT'::text
+                 ELSE 'INFORMATIONAL'::text
+               END AS event_class,
+               CASE
+                 WHEN ol.operation IN ('issue', 'seed_consumed') THEN TRUE
+                 ELSE FALSE
+               END AS affects_qty_balance,
+               FALSE AS affects_weight_balance,
+               FALSE AS affects_value_balance,
                u.full_name::text AS user,
                NULL::text AS source_loc, NULL::text AS dest_loc,
                ol.new_status::text AS status_change,
@@ -538,17 +556,24 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::text AS dimension_change,
                ol.notes::text AS remarks,
                'op_log'::text AS source,
-               ol.qty_delta::numeric AS qty_delta,
+               CASE
+                 WHEN ol.operation IN ('issue', 'return_usable', 'return_reject', 'return_scrap', 'seed_consumed') THEN ol.qty_delta::numeric
+                 ELSE NULL::numeric
+               END AS qty_delta,
                COALESCE(pi.issue_number, pr.return_number)::text AS doc_no,
                pr.id::int AS return_id,
                CASE WHEN pr.status = 'REVERSED' THEN 'REVERSED' ELSE 'ACTIVE' END AS txn_status,
-               -- Deterministic reversal eligibility: ONLY the canonical
-               -- return_usable event of an ACTIVE return carrying a pre_state
-               -- snapshot (full usable Growth Return, phase60) is reversible.
-               -- PK join (pr.id = ol.reference_id) — no fan-out.
                (pr.pre_state IS NOT NULL
                 AND COALESCE(pr.status, 'ACTIVE') <> 'REVERSED'
-                AND ol.operation = 'return_usable') AS reversible
+                AND ol.operation = 'return_usable') AS reversible,
+               CASE
+                 WHEN ol.operation = 'return_usable' AND pr.id IS NOT NULL THEN 'lot_process_return'::text
+                 ELSE 'lot_op_log'::text
+               END AS source_type,
+               CASE
+                 WHEN ol.operation = 'return_usable' AND pr.id IS NOT NULL THEN pr.id::int
+                 ELSE ol.id::int
+               END AS source_id
         FROM lot_op_log ol
         LEFT JOIN users u ON u.id = ol.performed_by
         LEFT JOIN lot_process_issues pi
@@ -562,6 +587,10 @@ router.get('/:id/history', authenticate, async (req, res) => {
         -- Movements (Splits, Stock Transfers, Consumptions) — parent perspective
         SELECT lm.movement_date::text AS ts,
                (lm.movement_type::text || '_out') AS event_type,
+               'INVENTORY_MOVEMENT'::text AS event_class,
+               TRUE AS affects_qty_balance,
+               FALSE AS affects_weight_balance,
+               FALSE AS affects_value_balance,
                u.full_name::text AS user,
                NULL::text AS source_loc, NULL::text AS dest_loc,
                'CONSUMED'::text AS status_change,
@@ -569,11 +598,13 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::text AS dimension_change,
                lm.notes::text AS remarks,
                'movement'::text AS source,
-               NULL::numeric AS qty_delta,
+               -(lmp.quantity_consumed::numeric) AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
                'ACTIVE'::text AS txn_status,
-               FALSE AS reversible
+               FALSE AS reversible,
+               'lot_movement_parents'::text AS source_type,
+               lmp.id::int AS source_id
         FROM lot_movement_parents lmp
         JOIN lot_movements lm ON lm.id = lmp.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -584,6 +615,10 @@ router.get('/:id/history', authenticate, async (req, res) => {
         -- Child perspective
         SELECT lm.movement_date::text AS ts,
                (lm.movement_type::text || '_in') AS event_type,
+               'INVENTORY_MOVEMENT'::text AS event_class,
+               FALSE AS affects_qty_balance, -- Child handled by 'creation'
+               FALSE AS affects_weight_balance,
+               FALSE AS affects_value_balance,
                u.full_name::text AS user,
                NULL::text AS source_loc, NULL::text AS dest_loc,
                'IN STOCK'::text AS status_change,
@@ -591,11 +626,13 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::text AS dimension_change,
                lm.notes::text AS remarks,
                'movement'::text AS source,
-               NULL::numeric AS qty_delta,
+               lmc.quantity::numeric AS qty_delta,
                NULL::text AS doc_no,
                NULL::int AS return_id,
                'ACTIVE'::text AS txn_status,
-               FALSE AS reversible
+               FALSE AS reversible,
+               'lot_movement_children'::text AS source_type,
+               lmc.id::int AS source_id
         FROM lot_movement_children lmc
         JOIN lot_movements lm ON lm.id = lmc.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -606,6 +643,10 @@ router.get('/:id/history', authenticate, async (req, res) => {
         -- Growth Run Cycles (Dimension/Weight changes)
         SELECT grc.created_at::text AS ts,
                (COALESCE(pm.process_name::text, grc.process_type::text, 'Growth Cycle') || ' (#' || grc.cycle_no::text || ')') AS event_type,
+               'INFORMATIONAL'::text AS event_class,
+               FALSE AS affects_qty_balance,
+               TRUE AS affects_weight_balance,
+               FALSE AS affects_value_balance,
                u.full_name::text AS user,
                NULL::text AS source_loc, NULL::text AS dest_loc,
                NULL::text AS status_change,
@@ -617,7 +658,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                NULL::text AS doc_no,
                NULL::int AS return_id,
                'ACTIVE'::text AS txn_status,
-               FALSE AS reversible
+               FALSE AS reversible,
+               'growth_run_cycles'::text AS source_type,
+               grc.id::int AS source_id
         FROM growth_run_cycles grc
         LEFT JOIN machine_processes mp ON mp.id = grc.machine_process_id
         LEFT JOIN process_master pm ON pm.process_code = mp.process_type
@@ -625,27 +668,186 @@ router.get('/:id/history', authenticate, async (req, res) => {
         WHERE grc.growth_run_id = $1
       ),
       with_balance AS (
-        -- Running balance over the FULL chronology (before filters) so a date
-        -- filter never distorts qty_after. Only creation + op_log deltas count.
+        -- Running balance over the FULL chronology. Only affects_qty_balance events count.
         SELECT e.*,
-               SUM(CASE WHEN e.source IN ('creation', 'op_log')
-                        THEN COALESCE(e.qty_delta, 0) ELSE 0 END)
-                 OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after
-        FROM all_events e
+               SUM(CASE
+                     WHEN e.operation IN ('creation', 'purchase_receipt', 'opening', 'child_lot_creation') THEN COALESCE(e.qty_delta, 0)
+                     WHEN e.operation IN ('issue', 'seed_consumed', 'consumption') THEN COALESCE(e.qty_delta, 0)
+                     WHEN e.operation IN ('split_out', 'transfer_out') THEN COALESCE(e.qty_delta, 0)
+                     WHEN e.operation IN ('split_in', 'transfer_in') THEN COALESCE(e.qty_delta, 0)
+                     WHEN e.operation = 'adjustment' THEN COALESCE(e.qty_delta, 0)
+                     WHEN e.operation IN ('growth_run_created', 'return_usable', 'return_reject', 'return_scrap') THEN 0
+                     WHEN e.operation IN ('return_reversed') THEN 0
+                     WHEN e.operation IN ('informational') THEN 0
+                     ELSE 0
+                   END) OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after
+        FROM (
+          -- Intercept affects_qty_balance mapping directly in this wrapper so that `mappedRows` reads it
+          SELECT a.*,
+                 CASE
+                   WHEN a.event_type IN ('creation', 'purchase_receipt', 'opening', 'child_lot_creation') THEN TRUE
+                   WHEN a.event_type IN ('issue', 'seed_consumed', 'consumption') THEN TRUE
+                   WHEN a.event_type IN ('split_out', 'transfer_out') THEN TRUE
+                   WHEN a.event_type IN ('split_in', 'transfer_in') THEN TRUE
+                   WHEN a.event_type = 'adjustment' THEN TRUE
+                   WHEN a.event_type IN ('growth_run_created', 'return_usable', 'return_reject', 'return_scrap') THEN FALSE
+                   WHEN a.event_type IN ('return_reversed') THEN FALSE
+                   WHEN a.event_type IN ('informational') THEN FALSE
+                   ELSE a.affects_qty_balance -- fallback to source definition
+                 END AS explicit_affects_qty,
+                 -- provide a stable 'operation' column for the SUM logic above
+                 COALESCE(a.event_type, a.source) AS operation
+          FROM all_events a
+        ) e
+      ),
+      latest_mov AS (
+        SELECT MAX(ts) as max_mov_ts FROM with_balance WHERE affects_qty_balance = TRUE AND txn_status = 'ACTIVE'
       )
-      SELECT *, COUNT(*) OVER () AS total_count
-      FROM with_balance
-      WHERE ($2::date IS NULL OR ts::timestamp >= $2::date)
-        AND ($3::date IS NULL OR ts::timestamp < ($3::date + INTERVAL '1 day'))
-        AND ($4::text IS NULL OR source = $4::text)
-      ORDER BY ts DESC
+      SELECT wb.*, COUNT(*) OVER () AS total_count,
+             (wb.source_type || ':' || wb.source_id) AS canonical_transaction_key,
+             (wb.ts = lm.max_mov_ts) AS is_latest_mov,
+             CASE
+               WHEN wb.reversible AND (wb.ts = lm.max_mov_ts) THEN TRUE
+               ELSE FALSE
+             END AS preliminary_can_cancel
+      FROM with_balance wb
+      CROSS JOIN latest_mov lm
+      WHERE ($2::date IS NULL OR wb.ts::timestamp >= $2::date)
+        AND ($3::date IS NULL OR wb.ts::timestamp < ($3::date + INTERVAL '1 day'))
+        AND ($4::text IS NULL OR wb.source = $4::text)
+      ORDER BY wb.ts DESC
       LIMIT $5 OFFSET $6
     `, [lotId, date_from || null, date_to || null, source || null, limit, offset]);
 
-    res.json({ data: rows, total: rows.length ? parseInt(rows[0].total_count) : 0 });
+    // Map rows to explicitly match the requested API payload structure for history
+    const mappedRows = rows.map(r => ({
+      ...r,
+      affects_qty_balance: r.explicit_affects_qty,
+      history_id: r.canonical_transaction_key, // For frontend backward compatibility, though they should use canonical key
+      can_view_union: r.return_id != null || r.source_type === 'lot_movement_parents' || r.source_type === 'lot_movement_children' || r.source_type === 'lot_process_issue' || r.source_type === 'lot_process_return',
+      can_view_action: true,
+      can_cancel: r.preliminary_can_cancel,
+    }));
+
+    res.json({ data: mappedRows, total: rows.length ? parseInt(rows[0].total_count) : 0 });
   } catch (err) {
     logger.error('[inventory] history error:', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
+  }
+});
+
+// P2: Server-Authoritative Eligibility Check
+router.get('/history/eligibility', authenticate, async (req, res) => {
+  try {
+    const { canonical_transaction_key, lot_id } = req.query;
+    if (!canonical_transaction_key || !lot_id) {
+      return res.status(400).json({ error: 'Missing canonical_transaction_key or lot_id.' });
+    }
+    const eligibility = await reversalOrchestrator.getReversalEligibility(canonical_transaction_key, parseInt(lot_id, 10));
+    res.json(eligibility);
+  } catch (err) {
+    logger.error('[inventory] history eligibility error:', { error: err.message, stack: err.stack });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// P2: View Union (Exact Backend Resolver)
+router.get('/history/union', authenticate, async (req, res) => {
+  try {
+    const { canonical_transaction_key, lot_id } = req.query;
+    if (!canonical_transaction_key || !lot_id) {
+      return res.status(400).json({ error: 'Missing canonical_transaction_key or lot_id.' });
+    }
+    const parts = canonical_transaction_key.split(':');
+    if (parts.length < 2) return res.status(400).json({ error: 'Invalid canonical key format.' });
+
+    const sourceType = parts[0];
+    const sourceId = parseInt(parts[1], 10);
+    const parsedLotId = parseInt(lot_id, 10);
+
+    // We determine EXACT grouping based on the type of record
+    let unionEvents = [];
+
+    // lot_process_return source (Growth Return)
+    if (sourceType === 'lot_process_return') {
+      const { rows: prRows } = await pool.query('SELECT pre_state FROM lot_process_returns WHERE id = $1', [sourceId]);
+      if (!prRows.length) return res.status(404).json({ error: 'Return not found' });
+      const pre = prRows[0].pre_state;
+      if (!pre || (pre.biscuit.id !== parsedLotId && pre.process_lot.id !== parsedLotId)) {
+        return res.status(403).json({ error: 'Cross-lot canonical keys rejected.' });
+      }
+
+      const { rows: exactRows } = await pool.query(`
+        SELECT ol.*, u.full_name as user
+        FROM lot_op_log ol
+        LEFT JOIN users u ON u.id = ol.performed_by
+        WHERE ol.reference_type = 'lot_process_return' AND ol.reference_id = $1
+        ORDER BY ol.performed_at ASC
+      `, [sourceId]);
+      unionEvents = exactRows.map(r => ({ ...r, grouping_quality: 'EXACT' }));
+    }
+    // lot_op_log source
+    else if (sourceType === 'lot_op_log') {
+      const { rows: opLogRows } = await pool.query('SELECT lot_id, reference_type, reference_id FROM lot_op_log WHERE id = $1', [sourceId]);
+      if (!opLogRows.length) return res.status(404).json({ error: 'Transaction not found' });
+      if (opLogRows[0].lot_id !== parsedLotId) {
+        return res.status(403).json({ error: 'Cross-lot canonical keys rejected.' });
+      }
+
+      if (opLogRows[0].reference_type && opLogRows[0].reference_id) {
+        const refType = opLogRows[0].reference_type;
+        const refId = opLogRows[0].reference_id;
+        const { rows: exactRows } = await pool.query(`
+          SELECT ol.*, u.full_name as user
+          FROM lot_op_log ol
+          LEFT JOIN users u ON u.id = ol.performed_by
+          WHERE ol.reference_type = $1 AND ol.reference_id = $2
+          ORDER BY ol.performed_at ASC
+        `, [refType, refId]);
+        unionEvents = exactRows.map(r => ({ ...r, grouping_quality: 'EXACT' }));
+      }
+    }
+    // movement source
+    else if (sourceType === 'lot_movement_parents' || sourceType === 'lot_movement_children') {
+      const idCol = sourceType === 'lot_movement_parents' ? 'parent_id' : 'child_id';
+      const query = sourceType === 'lot_movement_parents'
+        : 'SELECT movement_id FROM lot_movement_children WHERE id = $1';
+      const { rows: movRows } = await pool.query(query, [sourceId]);
+      if (movRows.length > 0) {
+        const movId = movRows[0].movement_id;
+        const { rows: mParents } = await pool.query('SELECT * FROM lot_movement_parents WHERE movement_id = $1', [movId]);
+        const { rows: mChildren } = await pool.query('SELECT * FROM lot_movement_children WHERE movement_id = $1', [movId]);
+        unionEvents = [
+          ...mParents.map(r => ({ ...r, source_type: 'lot_movement_parents', grouping_quality: 'EXACT' })),
+          ...mChildren.map(r => ({ ...r, source_type: 'lot_movement_children', grouping_quality: 'EXACT' }))
+        ];
+      }
+    }
+
+    res.json({ data: unionEvents });
+  } catch (err) {
+    logger.error('[inventory] history union error:', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// P2: Unified Reversal Endpoint
+router.post('/history/reverse', authenticate, async (req, res) => {
+  try {
+    const { canonical_transaction_key, reason, lot_id } = req.body;
+    if (!canonical_transaction_key || !reason || !lot_id) {
+      return res.status(400).json({ error: 'Missing required reversal fields.' });
+    }
+    const result = await reversalOrchestrator.reverseTransaction({
+      canonical_transaction_key,
+      lotId: parseInt(lot_id, 10),
+      reason,
+      userId: req.user.id
+    });
+    res.json(result);
+  } catch (err) {
+    logger.error('[inventory] history reverse error:', { error: err.message, stack: err.stack });
+    res.status(400).json({ error: err.message });
   }
 });
 
