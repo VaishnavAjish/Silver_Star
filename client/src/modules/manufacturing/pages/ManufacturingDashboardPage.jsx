@@ -160,97 +160,101 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 
   return (
     <div style={{
-      background: '#fff', border: `1px solid ${cfg.border}`, borderRadius: 10,
-      boxShadow: cfg.glow !== 'none' ? cfg.glow : '0 1px 3px rgba(0,0,0,.05)',
+      background: '#fff', border: `1px solid ${cfg.border}`, borderRadius: 8,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {/* Header */}
       <div style={{
-        background: cfg.bg, borderBottom: `1px solid ${cfg.border}`,
-        padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 8,
-        borderTopLeftRadius: 10, borderTopRightRadius: 10,
+        padding: '12px 12px 4px 12px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8,
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {machine.name}
           </div>
-          <div style={{ fontSize: 10, color: '#616161', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontSize: 11, color: '#757575', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
             {machine.code}
           </div>
         </div>
         <span style={{
-          display: 'inline-block', padding: '2px 7px', borderRadius: 10,
-          fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-          background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+          fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
+          background: '#fff', color: cfg.color, border: `1px solid ${cfg.color}`,
         }}>
           {cfg.label}
         </span>
       </div>
 
       {/* Body */}
-      <div style={{ padding: '12px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: '8px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: machine.growth_run_number ? '#1565C0' : '#424242' }}>
-            {machine.growth_run_number || machine.process_number || 'No active process'}
+          <div style={{ fontSize: 11, fontWeight: 700, color: machine.growth_run_number ? '#1565C0' : '#424242', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span>{machine.growth_run_number || 'No active process'}</span>
+            {machine.process_type && (
+              <>
+                <span style={{ color: '#BDBDBD' }}>•</span>
+                <span>{processMap?.get(machine.process_type)?.process_name || machine.process_type}</span>
+              </>
+            )}
+            {machine.process_number && (
+              <>
+                <span style={{ color: '#BDBDBD' }}>•</span>
+                <span>{machine.process_number}</span>
+              </>
+            )}
           </div>
-          {machine.growth_run_number && machine.process_number && (
-            <div style={{ fontSize: 9, color: '#9E9E9E', marginTop: 2 }}>{machine.process_number}</div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#424242' }}>
-          <User size={12} color="#9E9E9E" />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>
+          <div style={{ fontSize: 11, color: '#616161', marginTop: 6, fontWeight: 500 }}>
             {operatorDisplay}
-          </span>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
-          <StatCell label="Qty" value={machine.seeds_issued > 0 ? `${machine.seeds_issued} pcs` : '—'} />
-          <StatCell label="Dimension" value={dimStr} />
+          <StatCell label="Qty" value={machine.seeds_issued > 0 ? `${Number(machine.seeds_issued).toLocaleString()} pcs` : '—'} />
+          <StatCell label="Dimension (mm)" value={dimStr} />
         </div>
 
         {hasProcess && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
-            <div>
-              <div style={{ fontSize: 9, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>Elapsed</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 11, fontWeight: 600, color: '#424242' }}>
-                {fmtRuntime(machine.runtime_hours)}
-              </div>
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 8 }}>
+              <StatCell label="Elapsed" value={fmtRuntime(machine.runtime_hours)} />
+              <StatCell label="Target" value={machine.target_runtime_hours ? `${machine.target_runtime_hours}h 00m` : '—'} />
             </div>
-            <div>
-              <div style={{ fontSize: 9, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>Target</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
-                {machine.target_runtime_hours ? `${machine.target_runtime_hours}h` : '—'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: 4, background: '#EEEEEE', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ height: '100%', background: cfg.color, width: `${Math.min(100, Math.round(((machine.runtime_hours || 0) / machine.target_runtime_hours) * 100) || 0)}%`, borderRadius: 2 }} />
               </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#212121', width: 32, textAlign: 'right' }}>
+                {Math.min(100, Math.round(((machine.runtime_hours || 0) / machine.target_runtime_hours) * 100) || 0)}%
+              </span>
             </div>
           </div>
         )}
 
         {hasProcess && (
-          <div style={{ marginBottom: 2 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 600, color: '#424242', marginBottom: 4 }}>
-              <span style={{ color: '#9E9E9E' }}>Progress</span>
-              <span>{Math.min(100, Math.round(((machine.runtime_hours || 0) / machine.target_runtime_hours) * 100) || 0)}%</span>
-            </div>
-            <ProgressBar value={machine.runtime_hours || 0} max={machine.target_runtime_hours} status={machine.machine_status} />
-          </div>
-        )}
-
-        {hasProcess && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
-            <StatCell label="Yield" value={machine.expected_rough_qty ? `${machine.expected_rough_qty} ct` : '—'} />
+            <StatCell label="Yield" value={machine.expected_rough_qty ? `${machine.expected_rough_qty}%` : '—'} />
             <StatCell label="ETA" value={fmtETA(machine.expected_completion_at)?.text || '—'} />
           </div>
         )}
       </div>
 
       {/* Actions (Icon Only) */}
-      <div style={{ borderTop: '1px solid #F5F5F5', padding: '6px', display: 'flex', justifyContent: 'flex-end', position: 'relative' }}>
+      <div style={{ padding: '4px 12px 12px 12px', display: 'flex', justifyContent: 'flex-end', position: 'relative' }}>
+        {machine.machine_status === 'awaiting_output' && machine.process_id && (
+          <button
+            onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`)}
+            style={{
+              background: '#fff', border: '1px solid #E0E0E0', color: '#1565C0', borderRadius: 4, padding: '4px 12px',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, marginRight: 'auto'
+            }}
+          >
+            <Package size={12} /> Details
+          </button>
+        )}
         <button
           onClick={() => setShowMenu(!showMenu)}
           style={{
-            background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4,
+            background: 'transparent', border: '1px solid #E0E0E0', cursor: 'pointer', padding: 4, borderRadius: 4,
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}
           onMouseEnter={e => { e.currentTarget.style.background = '#F5F5F5'; }}
@@ -308,8 +312,8 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 function StatCell({ label, value }) {
   return (
     <div>
-      <div style={{ color: '#9E9E9E', fontSize: 9, textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontWeight: 600, color: '#424242', fontSize: 11 }}>{value}</div>
+      <div style={{ color: '#757575', fontSize: 10, marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 700, color: '#212121', fontSize: 11 }}>{value}</div>
     </div>
   );
 }
@@ -1229,7 +1233,7 @@ export default function ManufacturingDashboard() {
   };
 
   const clearFilters = useCallback(() => {
-    setFilters({ dept: '', status: '', operator: '', process_type: '', overdue: '', search: '' });
+    setFilters({ dept: '', status: '', operator: '', process_type: '', overdue: '', search: '', length_min: '', length_max: '', height_min: '', height_max: '' });
   }, []);
   const [searchFocused, setSearchFocused] = useState(false);
 
@@ -1370,12 +1374,30 @@ export default function ManufacturingDashboard() {
           </SelectDropdown>
         </div>
 
+        <div className="fg">
+          <label>Length (mm)</label>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input type="number" placeholder="Min" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_min} onChange={e => setFilter('length_min')(e.target.value)} />
+            <span style={{ color: '#9E9E9E' }}>-</span>
+            <input type="number" placeholder="Max" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.length_max} onChange={e => setFilter('length_max')(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="fg">
+          <label>Height (mm)</label>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input type="number" placeholder="Min" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_min} onChange={e => setFilter('height_min')(e.target.value)} />
+            <span style={{ color: '#9E9E9E' }}>-</span>
+            <input type="number" placeholder="Max" style={{ width: 60, padding: '4px 6px', border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 11 }} value={filters.height_max} onChange={e => setFilter('height_max')(e.target.value)} />
+          </div>
+        </div>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', paddingBottom: 2, whiteSpace: 'nowrap' }}>
           <input type="checkbox"
             checked={filters.overdue === 'true'}
             onChange={e => setFilter('overdue')(e.target.checked ? 'true' : '')}
           />
-          Overdue
+          Overdue Only
         </label>
 
         {activeFilters && (
