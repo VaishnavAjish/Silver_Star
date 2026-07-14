@@ -196,17 +196,13 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
                 <span>{processMap?.get(machine.process_type)?.process_name || machine.process_type}</span>
               </>
             )}
+            {machine.run_no && (
+              <>
+                <span style={{ color: '#BDBDBD' }}>•</span>
+                <span>R{machine.run_no}</span>
+              </>
+            )}
           </div>
-          {machine.run_no && (
-            <div style={{ marginTop: 6 }}>
-              <span style={{
-                fontSize: 10, fontWeight: 700, color: '#0277BD',
-                border: '1px solid #0277BD', padding: '1px 4px', borderRadius: 4,
-              }}>
-                R{machine.run_no}
-              </span>
-            </div>
-          )}
           <div style={{ fontSize: 11, color: '#616161', marginTop: 6, fontWeight: 500 }}>
             {operatorDisplay}
           </div>
@@ -390,8 +386,7 @@ function GridView({ machines, sortConfig, onSort, onAction, onNavigate, processM
     { key: 'operator_name', label: 'Operator / Location', w: 140 },
     { key: 'process_type', label: 'Type', w: 90 },
     { key: 'growth_run_number', label: 'Growth No.', w: 130 },
-    { key: 'run_no', label: 'Run No', w: 70 },
-    { key: 'process_number', label: 'Run', w: 70 },
+    { key: 'run_no', label: 'RUN', w: 70 },
     { key: 'seeds_issued', label: 'Qty (pcs)', w: 75 },
     { key: 'dim_length', label: 'Length', w: 60 },
     { key: 'dim_width', label: 'Width', w: 60 },
@@ -527,12 +522,7 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
         </span>
       </td>
 
-      {/* Run */}
-      <td style={{ ...TD, width: 70 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
-          {m.process_number || <span style={{ color: '#BDBDBD' }}>—</span>}
-        </span>
-      </td>
+
 
       {/* Qty (pcs) */}
       <td style={{ ...TD, width: 75, fontFamily: 'var(--mono)', textAlign: 'right', paddingRight: 12 }}>
