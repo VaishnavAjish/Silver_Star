@@ -380,6 +380,7 @@ function GridView({ machines, sortConfig, onSort, onAction, onNavigate, processM
     { key: 'operator_name', label: 'Operator / Location', w: 140 },
     { key: 'process_type', label: 'Type', w: 90 },
     { key: 'growth_run_number', label: 'Growth No.', w: 130 },
+    { key: 'run_no', label: 'Run No', w: 70 },
     { key: 'process_number', label: 'Run', w: 70 },
     { key: 'seeds_issued', label: 'Qty (pcs)', w: 75 },
     { key: 'dim_length', label: 'Length', w: 60 },
@@ -506,6 +507,13 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
       <td style={{ ...TD, width: 130 }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: m.growth_run_number ? '#1565C0' : '#424242' }}>
           {m.growth_run_number || <span style={{ color: '#BDBDBD' }}>—</span>}
+        </span>
+      </td>
+
+      {/* Run No */}
+      <td style={{ ...TD, width: 70 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
+          {m.run_no ? `R${m.run_no}` : <span style={{ color: '#BDBDBD' }}>—</span>}
         </span>
       </td>
 

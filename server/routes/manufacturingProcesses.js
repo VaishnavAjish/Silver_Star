@@ -167,6 +167,7 @@ router.get('/machines', authenticate, async (req, res) => {
            WHERE  mpm.process_id = mp.id) AS materials_issued,
           -- Phase 32: Growth Run (Biscuit) for Control Tower display
           gr.lot_number          AS growth_run_number,
+          gr.run_no              AS run_no,
           gr.id                  AS growth_run_id,
           gr.seed_height_at_in   AS seed_height,
           gr.dim_height          AS final_height,
