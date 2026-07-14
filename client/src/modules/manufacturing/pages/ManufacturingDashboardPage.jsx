@@ -1099,6 +1099,15 @@ export default function ManufacturingDashboard() {
     );
   }, []);
 
+  // ── View mode: persisted to localStorage ──
+  const [viewMode, setViewMode] = useState(
+    () => localStorage.getItem('mfg_view_mode') || 'chamber'
+  );
+  const switchView = useCallback((mode) => {
+    setViewMode(mode);
+    localStorage.setItem('mfg_view_mode', mode);
+  }, []);
+
   // ── Shared filters ───────────────────────────────────────────────────────────
   const [filters, setFilters] = usePersistedFilters('mfg_dashboard_filters', {
     dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
@@ -1251,6 +1260,34 @@ export default function ManufacturingDashboard() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
 
+          {/* View toggle */}
+          <div style={{
+            display: 'flex', border: '1px solid #E0E0E0', borderRadius: 6,
+            overflow: 'hidden', flexShrink: 0,
+          }}>
+            {[
+              { mode: 'chamber', Icon: LayoutGrid, label: 'Chamber' },
+              { mode: 'grid', Icon: List, label: 'Grid' },
+            ].map(({ mode, Icon, label }, i) => (
+              <button
+                key={mode}
+                onClick={() => switchView(mode)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '4px 11px', fontSize: 11, fontWeight: 600,
+                  background: viewMode === mode ? 'var(--brand, #2E7D32)' : '#fff',
+                  color: viewMode === mode ? '#fff' : '#616161',
+                  border: 'none',
+                  borderLeft: i > 0 ? '1px solid #E0E0E0' : 'none',
+                  cursor: 'pointer',
+                  transition: 'background .15s, color .15s',
+                }}
+              >
+                <Icon size={11} />{label}
+              </button>
+            ))}
+          </div>
+
           <button
             className="btn btn-sm"
             style={{ position: 'relative' }}
@@ -1386,55 +1423,53 @@ export default function ManufacturingDashboard() {
 
       {/* ── Main content ── */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-          {loading ? (
-            <div className="empty-state" style={{ padding: 80 }}><div className="spinner" /></div>
-          ) : sortedMachines.length === 0 ? (
-            <div className="empty-state" style={{ padding: 80 }}>
-              <Cpu size={36} style={{ opacity: .25 }} />
-              <p style={{ marginTop: 12, color: '#9E9E9E', fontSize: 13 }}>No machines found</p>
-            </div>
-          ) : (
-            <>
-              {/* CHAMBER VIEW SECTION */}
-              <div style={{ padding: '16px 16px 8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ fontSize: 11, fontWeight: 800, color: '#2E7D32', margin: 0, textTransform: 'uppercase', letterSpacing: '.5px' }}>Chamber View</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: '#616161' }}>View all ({sortedMachines.length})</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="icon-btn" style={{ padding: 2, height: 20, width: 20 }}><ChevronLeft size={14} /></button>
-                    <button className="icon-btn" style={{ padding: 2, height: 20, width: 20 }}><ChevronRight size={14} /></button>
-                  </div>
-                </div>
+
+        {/* Chamber View */}
+        {viewMode === 'chamber' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+            {loading ? (
+              <div className="empty-state" style={{ padding: 80 }}><div className="spinner" /></div>
+            ) : sortedMachines.length === 0 ? (
+              <div className="empty-state" style={{ padding: 80 }}>
+                <Cpu size={36} style={{ opacity: .25 }} />
+                <p style={{ marginTop: 12, color: '#9E9E9E', fontSize: 13 }}>No machines found</p>
               </div>
-              
-              <div className="hide-scroll" style={{ padding: '0 16px', display: 'flex', gap: 10, overflowX: 'auto', flexWrap: 'nowrap', flexShrink: 0, paddingBottom: 8 }}>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                gap: 10,
+              }}>
                 {sortedMachines.map(m => (
-                  <div key={m.id} style={{ flexShrink: 0, width: 260 }}>
-                    <MachineCard machine={m} onAction={handleAction} onNavigate={handleNavigate} processMap={processMap} />
-                  </div>
+                  <MachineCard key={m.id} machine={m} onAction={handleAction} onNavigate={handleNavigate} processMap={processMap} />
                 ))}
               </div>
+            )}
+          </div>
+        )}
 
-              {/* LIST VIEW SECTION */}
-              <div style={{ padding: '16px 16px 8px 16px' }}>
-                <h2 style={{ fontSize: 11, fontWeight: 800, color: '#2E7D32', margin: 0, textTransform: 'uppercase', letterSpacing: '.5px' }}>Process Overview (List View)</h2>
+        {/* Process Overview (Grid / List View) */}
+        {viewMode === 'grid' && (
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {loading ? (
+              <div className="empty-state" style={{ padding: 80 }}><div className="spinner" /></div>
+            ) : sortedMachines.length === 0 ? (
+              <div className="empty-state" style={{ padding: 80 }}>
+                <Cpu size={36} style={{ opacity: .25 }} />
+                <p style={{ marginTop: 12, color: '#9E9E9E', fontSize: 13 }}>No machines found</p>
               </div>
-              
-              <div style={{ padding: '0 16px 16px 16px', display: 'flex', flexDirection: 'column', minHeight: 400 }}>
-                <GridView
-                  machines={sortedMachines}
-                  sortConfig={sortConfig}
-                  onSort={toggleSort}
-                  onAction={handleAction}
-                  onNavigate={handleNavigate}
-                  processMap={processMap}
-                />
-              </div>
-            </>
-          )}
-        </div>
+            ) : (
+              <GridView
+                machines={sortedMachines}
+                sortConfig={sortConfig}
+                onSort={toggleSort}
+                onAction={handleAction}
+                onNavigate={handleNavigate}
+                processMap={processMap}
+              />
+            )}
+          </div>
+        )}
 
         {/* Alert Rail */}
         {showAlerts && (
