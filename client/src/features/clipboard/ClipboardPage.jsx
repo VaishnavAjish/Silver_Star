@@ -31,6 +31,7 @@ export default function ClipboardPage() {
   const [activeModal, setActiveModal] = useState(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   import('react').then(({ useEffect }) => {
     if (!actionsOpen) return;
@@ -96,27 +97,33 @@ export default function ClipboardPage() {
   };
 
   /* ── Clear All ── */
-  const removeAllRows = async () => {
-    if (window.confirm('Clear the entire clipboard?')) {
-      await clear();
-      setSelectedIds(new Set());
-      toast('Clipboard cleared');
-    }
+  const removeAllRows = () => {
+    setConfirmDialog({
+      message: 'Clear the entire clipboard?',
+      onConfirm: async () => {
+        await clear();
+        setSelectedIds(new Set());
+        toast('Clipboard cleared');
+      }
+    });
   };
 
   /* ── Remove Selected ── */
-  const removeSelectedRows = async () => {
+  const removeSelectedRows = () => {
     if (selectedIds.size === 0) {
       toast('Please select items to remove');
       return;
     }
-    if (window.confirm(`Remove ${selectedIds.size} item(s) from clipboard?`)) {
-      for (const id of selectedIds) {
-        await remove(id);
+    setConfirmDialog({
+      message: `Remove ${selectedIds.size} item(s) from clipboard?`,
+      onConfirm: async () => {
+        for (const id of selectedIds) {
+          await remove(id);
+        }
+        setSelectedIds(new Set());
+        toast('Selected items removed');
       }
-      setSelectedIds(new Set());
-      toast('Selected items removed');
-    }
+    });
   };
 
   /* ── Export ── */
@@ -398,6 +405,20 @@ export default function ClipboardPage() {
               {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'return' && <LotReturnPage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); loadClipboard(); }} onCancel={() => setActiveModal(null)} />}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Custom Confirm Dialog ── */}
+      {confirmDialog && (
+        <div className="modal-overlay" onClick={() => setConfirmDialog(null)} style={{ zIndex: 2000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal" style={{ background: '#fff', borderRadius: 8, width: 400, maxWidth: '90vw', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#333' }}>Confirm Action</h3>
+            <p style={{ margin: 0, fontSize: 14, color: '#666' }}>{confirmDialog.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 10 }}>
+              <button onClick={() => setConfirmDialog(null)} style={btn}>Cancel</button>
+              <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} style={{ ...btnPrimary, background: '#0D7C5F', borderColor: '#0D7C5F' }}>OK</button>
             </div>
           </div>
         </div>
