@@ -493,97 +493,136 @@ router.get('/:id/movement-ledger', authenticate, async (req, res) => {
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/inventory/:id/history
+// GET /api/inventory/:id/history — Unified Lot Transaction Register (P1 read-model)
+// Query params: date_from, date_to (YYYY-MM-DD), source (creation|op_log|movement|growth_cycle),
+//               limit (default 50), offset. Response: { data, total }.
+// qty_after is RECONSTRUCTED from creation + op_log deltas only (movement rows
+// mirror op_log for splits, so they are excluded from the running sum to avoid
+// double counting). P2 stores authoritative balances at write time.
+// txn_status is 'ACTIVE' for every row until the P2 reversal engine lands.
 router.get('/:id/history', authenticate, async (req, res) => {
   const lotId = parseInt(req.params.id);
+  const { date_from, date_to, source } = req.query;
+  const limit  = Math.min(parseInt(req.query.limit)  || 50, 10000);
+  const offset = parseInt(req.query.offset) || 0;
   try {
-    const { rows: events } = await pool.query(`
-      -- Creation/intake event
-      SELECT inv.created_at::text AS ts,
-             COALESCE(inv.source_type::text, inv.operation_type::text, 'purchase') AS event_type,
-             NULL::text AS user,
-             NULL::text AS source_loc, NULL::text AS dest_loc,
-             inv.status::text AS status_change,
-             NULL::text AS weight_change,
-             NULL::text AS dimension_change,
-             inv.remarks::text AS remarks,
-             'creation'::text AS source
-      FROM inventory inv
-      WHERE inv.id = $1
+    const { rows } = await pool.query(`
+      WITH all_events AS (
+        -- Creation/intake event
+        SELECT inv.created_at::text AS ts,
+               COALESCE(inv.source_type::text, inv.operation_type::text, 'purchase') AS event_type,
+               NULL::text AS user,
+               NULL::text AS source_loc, NULL::text AS dest_loc,
+               inv.status::text AS status_change,
+               NULL::text AS weight_change,
+               NULL::text AS dimension_change,
+               inv.remarks::text AS remarks,
+               'creation'::text AS source,
+               inv.qty::numeric AS qty_delta,
+               NULL::text AS doc_no
+        FROM inventory inv
+        WHERE inv.id = $1
 
-      UNION ALL
+        UNION ALL
 
-      -- Generic Op-log entries (including Process Issued/Returned)
-      SELECT ol.performed_at::text AS ts,
-             ol.operation::text AS event_type,
-             u.full_name::text AS user,
-             NULL::text AS source_loc, NULL::text AS dest_loc,
-             ol.new_status::text AS status_change,
-             CASE WHEN ol.qty_delta IS NOT NULL THEN (ol.qty_delta::text || ' units') ELSE NULL END AS weight_change,
-             NULL::text AS dimension_change,
-             ol.notes::text AS remarks,
-             'op_log'::text AS source
-      FROM lot_op_log ol
-      LEFT JOIN users u ON u.id = ol.performed_by
-      WHERE ol.lot_id = $1
+        -- Generic Op-log entries (including Process Issued/Returned)
+        SELECT ol.performed_at::text AS ts,
+               ol.operation::text AS event_type,
+               u.full_name::text AS user,
+               NULL::text AS source_loc, NULL::text AS dest_loc,
+               ol.new_status::text AS status_change,
+               CASE WHEN ol.qty_delta IS NOT NULL THEN (ol.qty_delta::text || ' units') ELSE NULL END AS weight_change,
+               NULL::text AS dimension_change,
+               ol.notes::text AS remarks,
+               'op_log'::text AS source,
+               ol.qty_delta::numeric AS qty_delta,
+               COALESCE(pi.issue_number, pr.return_number)::text AS doc_no
+        FROM lot_op_log ol
+        LEFT JOIN users u ON u.id = ol.performed_by
+        LEFT JOIN lot_process_issues pi
+               ON ol.reference_type = 'lot_process_issue' AND pi.id = ol.reference_id
+        LEFT JOIN lot_process_returns pr
+               ON ol.reference_type = 'lot_process_return' AND pr.id = ol.reference_id
+        WHERE ol.lot_id = $1
 
-      UNION ALL
+        UNION ALL
 
-      -- Movements (Splits, Stock Transfers, Consumptions)
-      -- Parent perspective
-      SELECT lm.movement_date::text AS ts,
-             (lm.movement_type::text || '_out') AS event_type,
-             u.full_name::text AS user,
-             NULL::text AS source_loc, NULL::text AS dest_loc,
-             'CONSUMED'::text AS status_change,
-             ('-' || lmp.quantity_consumed::text) AS weight_change,
-             NULL::text AS dimension_change,
-             lm.notes::text AS remarks,
-             'movement'::text AS source
-      FROM lot_movement_parents lmp
-      JOIN lot_movements lm ON lm.id = lmp.movement_id
-      LEFT JOIN users u ON u.id = lm.created_by
-      WHERE lmp.parent_lot_id = $1
+        -- Movements (Splits, Stock Transfers, Consumptions) — parent perspective
+        SELECT lm.movement_date::text AS ts,
+               (lm.movement_type::text || '_out') AS event_type,
+               u.full_name::text AS user,
+               NULL::text AS source_loc, NULL::text AS dest_loc,
+               'CONSUMED'::text AS status_change,
+               ('-' || lmp.quantity_consumed::text) AS weight_change,
+               NULL::text AS dimension_change,
+               lm.notes::text AS remarks,
+               'movement'::text AS source,
+               NULL::numeric AS qty_delta,
+               NULL::text AS doc_no
+        FROM lot_movement_parents lmp
+        JOIN lot_movements lm ON lm.id = lmp.movement_id
+        LEFT JOIN users u ON u.id = lm.created_by
+        WHERE lmp.parent_lot_id = $1
 
-      UNION ALL
+        UNION ALL
 
-      -- Child perspective
-      SELECT lm.movement_date::text AS ts,
-             (lm.movement_type::text || '_in') AS event_type,
-             u.full_name::text AS user,
-             NULL::text AS source_loc, NULL::text AS dest_loc,
-             'IN STOCK'::text AS status_change,
-             ('+' || lmc.quantity::text) AS weight_change,
-             NULL::text AS dimension_change,
-             lm.notes::text AS remarks,
-             'movement'::text AS source
-      FROM lot_movement_children lmc
-      JOIN lot_movements lm ON lm.id = lmc.movement_id
-      LEFT JOIN users u ON u.id = lm.created_by
-      WHERE lmc.child_lot_id = $1
+        -- Child perspective
+        SELECT lm.movement_date::text AS ts,
+               (lm.movement_type::text || '_in') AS event_type,
+               u.full_name::text AS user,
+               NULL::text AS source_loc, NULL::text AS dest_loc,
+               'IN STOCK'::text AS status_change,
+               ('+' || lmc.quantity::text) AS weight_change,
+               NULL::text AS dimension_change,
+               lm.notes::text AS remarks,
+               'movement'::text AS source,
+               NULL::numeric AS qty_delta,
+               NULL::text AS doc_no
+        FROM lot_movement_children lmc
+        JOIN lot_movements lm ON lm.id = lmc.movement_id
+        LEFT JOIN users u ON u.id = lm.created_by
+        WHERE lmc.child_lot_id = $1
 
-      UNION ALL
+        UNION ALL
 
-      -- Growth Run Cycles (Dimension/Weight changes)
-      SELECT grc.created_at::text AS ts,
-             (COALESCE(pm.process_name::text, grc.process_type::text, 'Growth Cycle') || ' (#' || grc.cycle_no::text || ')') AS event_type,
-             u.full_name::text AS user,
-             NULL::text AS source_loc, NULL::text AS dest_loc,
-             NULL::text AS status_change,
-             ('Weight: ' || COALESCE(grc.prev_weight::text, '0') || ' → ' || COALESCE(grc.new_weight::text, '0')) AS weight_change,
-             ('Height: ' || COALESCE(grc.prev_height::text, '0') || ' → ' || COALESCE(grc.new_height::text, '0') || ' (+' || COALESCE(grc.growth_mm::text, '0') || ' ' || COALESCE(grc.dim_unit::text, 'mm') || ')') AS dimension_change,
-             grc.remarks::text AS remarks,
-             'growth_cycle'::text AS source
-      FROM growth_run_cycles grc
-      LEFT JOIN machine_processes mp ON mp.id = grc.machine_process_id
-      LEFT JOIN process_master pm ON pm.process_code = mp.process_type
-      LEFT JOIN users u ON u.id = grc.performed_by
-      WHERE grc.growth_run_id = $1
+        -- Growth Run Cycles (Dimension/Weight changes)
+        SELECT grc.created_at::text AS ts,
+               (COALESCE(pm.process_name::text, grc.process_type::text, 'Growth Cycle') || ' (#' || grc.cycle_no::text || ')') AS event_type,
+               u.full_name::text AS user,
+               NULL::text AS source_loc, NULL::text AS dest_loc,
+               NULL::text AS status_change,
+               ('Weight: ' || COALESCE(grc.prev_weight::text, '0') || ' → ' || COALESCE(grc.new_weight::text, '0')) AS weight_change,
+               ('Height: ' || COALESCE(grc.prev_height::text, '0') || ' → ' || COALESCE(grc.new_height::text, '0') || ' (+' || COALESCE(grc.growth_mm::text, '0') || ' ' || COALESCE(grc.dim_unit::text, 'mm') || ')') AS dimension_change,
+               grc.remarks::text AS remarks,
+               'growth_cycle'::text AS source,
+               NULL::numeric AS qty_delta,
+               NULL::text AS doc_no
+        FROM growth_run_cycles grc
+        LEFT JOIN machine_processes mp ON mp.id = grc.machine_process_id
+        LEFT JOIN process_master pm ON pm.process_code = mp.process_type
+        LEFT JOIN users u ON u.id = grc.performed_by
+        WHERE grc.growth_run_id = $1
+      ),
+      with_balance AS (
+        -- Running balance over the FULL chronology (before filters) so a date
+        -- filter never distorts qty_after. Only creation + op_log deltas count.
+        SELECT e.*,
+               SUM(CASE WHEN e.source IN ('creation', 'op_log')
+                        THEN COALESCE(e.qty_delta, 0) ELSE 0 END)
+                 OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after,
+               'ACTIVE'::text AS txn_status
+        FROM all_events e
+      )
+      SELECT *, COUNT(*) OVER () AS total_count
+      FROM with_balance
+      WHERE ($2::date IS NULL OR ts::timestamp >= $2::date)
+        AND ($3::date IS NULL OR ts::timestamp < ($3::date + INTERVAL '1 day'))
+        AND ($4::text IS NULL OR source = $4::text)
+      ORDER BY ts DESC
+      LIMIT $5 OFFSET $6
+    `, [lotId, date_from || null, date_to || null, source || null, limit, offset]);
 
-      ORDER BY ts ASC
-    `, [lotId]);
-
-    res.json(events);
+    res.json({ data: rows, total: rows.length ? parseInt(rows[0].total_count) : 0 });
   } catch (err) {
     logger.error('[inventory] history error:', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });

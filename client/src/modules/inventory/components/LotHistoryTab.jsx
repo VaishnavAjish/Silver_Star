@@ -1,34 +1,110 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
-import { History, Package, RotateCcw, Box, User, ArrowRight } from 'lucide-react';
+import Paginator from '../../../shared/components/Paginator';
+import SelectDropdown from '../../../shared/components/SelectDropdown';
+import DatePicker from '../../../shared/components/DatePicker';
+import { History, Download, User, X } from 'lucide-react';
+
+// ── Unified Lot Transaction Register (P1 read-model) ──────────────────────────
+// Dense register over GET /api/inventory/:id/history ({ data, total }).
+// Balance After is reconstructed from creation + op_log deltas (see backend
+// comment); authoritative stored balances arrive with the P2 ledger.
+// txn_status is ACTIVE for every row until the P2 reversal engine lands —
+// the Active/Reversed filter is wired now so the UI is forward-compatible.
+
+const SOURCE_OPTIONS = [
+  { value: '',             label: 'All Sources' },
+  { value: 'creation',     label: 'Creation' },
+  { value: 'op_log',       label: 'Operations' },
+  { value: 'movement',     label: 'Movements' },
+  { value: 'growth_cycle', label: 'Growth Cycles' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'ALL',      label: 'All' },
+  { value: 'ACTIVE',   label: 'Active' },
+  { value: 'REVERSED', label: 'Reversed' },
+];
+
+const SOURCE_COLOR = {
+  creation:     { color: '#2E7D32', bg: '#E8F5E9' },
+  op_log:       { color: '#6A1B9A', bg: '#F3E5F5' },
+  movement:     { color: '#E65100', bg: '#FFF3E0' },
+  growth_cycle: { color: '#1565C0', bg: '#E3F2FD' },
+};
+
+const PER_PAGE = 50;
+
+function fmtNum(v) {
+  if (v == null || v === '') return '—';
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? '—' : n.toFixed(4);
+}
 
 export default function LotHistoryTab({ lotId }) {
   const api = useApi();
-  const [events, setEvents] = useState([]);
+  const [rows,    setRows]    = useState([]);
+  const [total,   setTotal]   = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error,   setError]   = useState(null);
+
+  const [status,   setStatus]   = useState('ALL');
+  const [source,   setSource]   = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+  const [page,     setPage]     = useState(1);
+
+  const hasFilters = !!(source || dateFrom || dateTo || status !== 'ALL');
+
+  const buildParams = useCallback((limit, offset) => {
+    const p = new URLSearchParams({ limit, offset });
+    if (source)   p.set('source', source);
+    if (dateFrom) p.set('date_from', dateFrom);
+    if (dateTo)   p.set('date_to', dateTo);
+    return p;
+  }, [source, dateFrom, dateTo]);
 
   useEffect(() => {
     let mounted = true;
-    api.get(`/api/inventory/${lotId}/history`)
+    setLoading(true);
+    api.get(`/api/inventory/${lotId}/history?${buildParams(PER_PAGE, (page - 1) * PER_PAGE)}`)
       .then(res => {
-        if (mounted) {
-          setEvents(res);
-          setLoading(false);
-        }
+        if (!mounted) return;
+        setRows(res.data || []);
+        setTotal(res.total ?? 0);
+        setError(null);
       })
-      .catch(err => {
-        if (mounted) {
-          setError(err.message);
-          setLoading(false);
-        }
-      });
+      .catch(err => { if (mounted) setError(err.message); })
+      .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [lotId, api]);
+  }, [lotId, page, buildParams]);
 
-  if (loading) {
-    return <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" /></div>;
-  }
+  // Status filter is client-side until P2 (every row is ACTIVE today).
+  const visible = status === 'ALL' ? rows : rows.filter(r => (r.txn_status || 'ACTIVE') === status);
+
+  const exportCsv = async () => {
+    try {
+      const res = await api.get(`/api/inventory/${lotId}/history?${buildParams(10000, 0)}`);
+      const all = (res.data || []).filter(r => status === 'ALL' || (r.txn_status || 'ACTIVE') === status);
+      const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const header = ['Date', 'Doc No', 'Type', 'Source', 'Status Change', 'Qty Delta', 'Balance After', 'Txn Status', 'Details', 'Remarks', 'Operator'];
+      const lines = all.map(r => [
+        r.ts, r.doc_no, r.event_type, r.source, r.status_change,
+        r.qty_delta, r.qty_after, r.txn_status,
+        [r.weight_change, r.dimension_change].filter(Boolean).join(' | '),
+        r.remarks, r.user,
+      ].map(esc).join(','));
+      const blob = new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' });
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: `lot-${lotId}-transactions.csv`,
+      });
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { /* surfaced by the grid error state on next load */ }
+  };
+
+  const clearFilters = () => { setStatus('ALL'); setSource(''); setDateFrom(''); setDateTo(''); setPage(1); };
 
   if (error) {
     return (
@@ -38,85 +114,130 @@ export default function LotHistoryTab({ lotId }) {
     );
   }
 
-  if (events.length === 0) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center', color: 'var(--g400)', fontStyle: 'italic', border: '1px dashed var(--g300)', borderRadius: 8 }}>
-        No history recorded for this lot.
-      </div>
-    );
-  }
+  const pages = Math.ceil(total / PER_PAGE);
 
   return (
-    <div style={{ padding: '0' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--brand-dark)', marginBottom: 14, paddingBottom: 5, borderBottom: '2px solid var(--brand-50)' }}>
+    <div>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px',
+        color: 'var(--brand-dark)', marginBottom: 10, paddingBottom: 5, borderBottom: '2px solid var(--brand-50)' }}>
         <History size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-        Unified History Timeline
+        Transaction Register
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {events.map((evt, idx) => {
-          const isGrowthCycle = evt.source === 'growth_cycle';
-          const isCreation = evt.source === 'creation';
-          const isMovement = evt.source === 'movement';
-
-          return (
-            <div key={idx} style={{
-              background: '#fff', border: '1px solid var(--g200)', borderRadius: 8, padding: '12px 16px',
-              borderLeft: isGrowthCycle ? '4px solid #1565C0' : isCreation ? '4px solid #2E7D32' : '4px solid var(--g300)'
-            }}>
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--g900)' }}>
-                    {evt.event_type}
-                  </div>
-                  {evt.status_change && (
-                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'var(--g100)', color: 'var(--g700)', fontWeight: 600 }}>
-                      → {evt.status_change}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--g500)', fontFamily: 'var(--mono)' }}>
-                  {new Date(evt.ts).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
-                </div>
-              </div>
-
-              {/* Attributes Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-                {evt.weight_change && (
-                  <div style={{ fontSize: 12, color: 'var(--g700)' }}>
-                    <strong>Weight Change:</strong> {evt.weight_change}
-                  </div>
-                )}
-                {evt.dimension_change && (
-                  <div style={{ fontSize: 12, color: 'var(--g700)' }}>
-                    <strong>Dimensions:</strong> {evt.dimension_change}
-                  </div>
-                )}
-                {(evt.source_loc || evt.dest_loc) && (
-                  <div style={{ fontSize: 12, color: 'var(--g700)', gridColumn: '1 / -1' }}>
-                    <strong>Location:</strong> {evt.source_loc || '—'} <ArrowRight size={10} style={{ margin: '0 4px', verticalAlign: 'middle' }} /> {evt.dest_loc || '—'}
-                  </div>
-                )}
-              </div>
-
-              {/* Footer / Meta */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g100)' }}>
-                {evt.remarks ? (
-                  <div style={{ fontSize: 11, color: 'var(--g600)', fontStyle: 'italic', maxWidth: '70%' }}>
-                    "{evt.remarks}"
-                  </div>
-                ) : <div />}
-                {evt.user && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--g500)' }}>
-                    <User size={10} /> {evt.user}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      {/* ── Filter bar ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div className="filter-field" style={{ width: 130 }}>
+          <label className="filter-label">Status</label>
+          <SelectDropdown value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}>
+            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </SelectDropdown>
+        </div>
+        <div className="filter-field" style={{ width: 150 }}>
+          <label className="filter-label">Source</label>
+          <SelectDropdown value={source} onChange={e => { setSource(e.target.value); setPage(1); }}>
+            {SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </SelectDropdown>
+        </div>
+        <div className="filter-field" style={{ width: 150 }}>
+          <label className="filter-label">From</label>
+          <DatePicker value={dateFrom} onChange={v => { setDateFrom(v); setPage(1); }} className="dp-compact" placeholder="From date" />
+        </div>
+        <div className="filter-field" style={{ width: 150 }}>
+          <label className="filter-label">To</label>
+          <DatePicker value={dateTo} onChange={v => { setDateTo(v); setPage(1); }} className="dp-compact" placeholder="To date" />
+        </div>
+        {hasFilters && (
+          <button className="btn btn-sm" onClick={clearFilters}><X size={11} /> Clear</button>
+        )}
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--g500)' }}>
+          {total} transaction{total !== 1 ? 's' : ''}
+        </span>
+        <button className="btn btn-sm" onClick={exportCsv} disabled={loading || total === 0}>
+          <Download size={11} /> Export CSV
+        </button>
       </div>
+
+      {/* ── Register grid ── */}
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" /></div>
+      ) : visible.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--g400)', fontStyle: 'italic',
+          border: '1px dashed var(--g300)', borderRadius: 8 }}>
+          {hasFilters ? 'No transactions match the current filters.' : 'No history recorded for this lot.'}
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--g200)', borderRadius: 8 }}>
+          <table className="dgrid" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: 128 }}>Date</th>
+                <th style={{ width: 110 }}>Doc No</th>
+                <th style={{ width: 130 }}>Type</th>
+                <th style={{ width: 92 }}>Source</th>
+                <th style={{ width: 88 }}>Status →</th>
+                <th style={{ width: 78 }} className="num">Qty Δ</th>
+                <th style={{ width: 90 }} className="num">Balance After</th>
+                <th style={{ width: 72 }}>Txn</th>
+                <th>Details / Remarks</th>
+                <th style={{ width: 110 }}>Operator</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r, i) => {
+                const sc = SOURCE_COLOR[r.source] || { color: 'var(--g600)', bg: 'var(--g100)' };
+                const delta = r.qty_delta != null ? parseFloat(r.qty_delta) : null;
+                const details = [r.weight_change, r.dimension_change, r.remarks].filter(Boolean).join(' · ');
+                return (
+                  <tr key={`${r.ts}-${i}`}>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
+                      {new Date(r.ts).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{r.doc_no || '—'}</td>
+                    <td style={{ fontSize: 11, fontWeight: 600 }}>{r.event_type}</td>
+                    <td>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
+                        color: sc.color, background: sc.bg, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                        {r.source?.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 11 }}>{r.status_change || '—'}</td>
+                    <td className="num" style={{ fontSize: 11, fontFamily: 'var(--mono)',
+                      color: delta == null ? 'var(--g400)' : delta < 0 ? '#C62828' : '#2E7D32' }}>
+                      {delta == null ? '—' : (delta > 0 ? `+${fmtNum(delta)}` : fmtNum(delta))}
+                    </td>
+                    <td className="num" style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700 }}>
+                      {fmtNum(r.qty_after)}
+                    </td>
+                    <td>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
+                        color: r.txn_status === 'REVERSED' ? '#C62828' : '#2E7D32',
+                        background: r.txn_status === 'REVERSED' ? '#FFEBEE' : '#E8F5E9' }}>
+                        {r.txn_status || 'ACTIVE'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--g600)' }}>{details || '—'}</td>
+                    <td style={{ fontSize: 11 }}>
+                      {r.user
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <User size={10} /> {r.user}
+                          </span>
+                        : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Pagination ── */}
+      {pages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+          <Paginator page={page} totalPages={pages} onPage={p => setPage(p)} />
+        </div>
+      )}
     </div>
   );
 }
