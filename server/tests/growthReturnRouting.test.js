@@ -2,7 +2,7 @@
 // (pure function, no DB). Covers self-audit test cases 1–6.
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { resolveGrowthReturnRoute } = require('../services/returnRouting');
+const { resolveGrowthReturnRoute, reversalBlockReason } = require('../services/returnRouting');
 
 const biscuit = { id: 42, lot_number: 'SSD074-JUN26-015', run_no: 1 };
 const allowedOutputs = [
@@ -96,4 +96,74 @@ test('usable without growth_run override → CHILD (generic processes)', () => {
     allowedOutputs: [{ type: 'usable', suffix: 'R', status: 'IN STOCK' }],
     lines: [{ type: 'usable', qty: 9 }], currentRemaining: 9, remainingAfter: 0 });
   assert.equal(r.route, 'CHILD');
+});
+
+// ── Reversal eligibility (phase60) — reversalBlockReason() truth table ────────
+const pre = {
+  route: 'BISCUIT',
+  remaining_before: 9,
+  process_lot: { id: 7, qty: 9, weight: 25.65, total_value: 100, status: 'IN PROCESS' },
+  biscuit: { id: 42, lot_number: 'SSD074-JUN26-015', run_no: 1, machine_process_id: 5,
+             status: 'IN PROCESS', weight: 91.2, dim_length: 26, dim_depth: 13,
+             dim_height: 0.3, dim_unit: 'mm' },
+  machine_id: 3,
+};
+const activeHeader = { status: 'ACTIVE', is_final: true };
+const returnedIssue = { status: 'RETURNED' };
+const okBiscuit = { lot_number: 'SSD074-JUN26-015', run_no: 1, machine_process_id: 5, status: 'IN STOCK' };
+const runningMp = { status: 'running' };
+
+test('reversal: eligible full usable growth return → null (allowed)', () => {
+  assert.equal(reversalBlockReason({
+    header: activeHeader, pre, issue: returnedIssue, biscuit: okBiscuit, machineProcess: runningMp,
+  }), null);
+});
+
+test('reversal B: already REVERSED → controlled duplicate error', () => {
+  assert.equal(reversalBlockReason({
+    header: { ...activeHeader, status: 'REVERSED' }, pre, issue: returnedIssue,
+    biscuit: okBiscuit, machineProcess: runningMp,
+  }), 'This Growth Return has already been reversed.');
+});
+
+test('reversal: no pre_state snapshot (legacy/non-biscuit return) → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre: null, issue: returnedIssue,
+    biscuit: okBiscuit, machineProcess: runningMp,
+  }), /Only the full usable Growth Return/);
+});
+
+test('reversal C: run_no advanced (Growth Again started) → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre, issue: returnedIssue,
+    biscuit: { ...okBiscuit, run_no: 2 }, machineProcess: runningMp,
+  }), /Growth Again has already started/);
+});
+
+test('reversal F: biscuit no longer IN STOCK → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre, issue: returnedIssue,
+    biscuit: { ...okBiscuit, status: 'IN PROCESS' }, machineProcess: runningMp,
+  }), /downstream activity exists/);
+});
+
+test('reversal: biscuit repointed to another process → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre, issue: returnedIssue,
+    biscuit: { ...okBiscuit, machine_process_id: 9 }, machineProcess: runningMp,
+  }), /issued to another process/);
+});
+
+test('reversal: issue state changed since return → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre, issue: { status: 'OPEN' },
+    biscuit: okBiscuit, machineProcess: runningMp,
+  }), /issue state changed/);
+});
+
+test('reversal: completed machine process → rejected', () => {
+  assert.match(reversalBlockReason({
+    header: activeHeader, pre, issue: returnedIssue,
+    biscuit: okBiscuit, machineProcess: { status: 'completed' },
+  }), /already completed/);
 });

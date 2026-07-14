@@ -519,7 +519,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                inv.remarks::text AS remarks,
                'creation'::text AS source,
                inv.qty::numeric AS qty_delta,
-               NULL::text AS doc_no
+               NULL::text AS doc_no,
+               NULL::int AS return_id,
+               'ACTIVE'::text AS txn_status
         FROM inventory inv
         WHERE inv.id = $1
 
@@ -536,7 +538,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                ol.notes::text AS remarks,
                'op_log'::text AS source,
                ol.qty_delta::numeric AS qty_delta,
-               COALESCE(pi.issue_number, pr.return_number)::text AS doc_no
+               COALESCE(pi.issue_number, pr.return_number)::text AS doc_no,
+               pr.id::int AS return_id,
+               CASE WHEN pr.status = 'REVERSED' THEN 'REVERSED' ELSE 'ACTIVE' END AS txn_status
         FROM lot_op_log ol
         LEFT JOIN users u ON u.id = ol.performed_by
         LEFT JOIN lot_process_issues pi
@@ -558,7 +562,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                lm.notes::text AS remarks,
                'movement'::text AS source,
                NULL::numeric AS qty_delta,
-               NULL::text AS doc_no
+               NULL::text AS doc_no,
+               NULL::int AS return_id,
+               'ACTIVE'::text AS txn_status
         FROM lot_movement_parents lmp
         JOIN lot_movements lm ON lm.id = lmp.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -577,7 +583,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                lm.notes::text AS remarks,
                'movement'::text AS source,
                NULL::numeric AS qty_delta,
-               NULL::text AS doc_no
+               NULL::text AS doc_no,
+               NULL::int AS return_id,
+               'ACTIVE'::text AS txn_status
         FROM lot_movement_children lmc
         JOIN lot_movements lm ON lm.id = lmc.movement_id
         LEFT JOIN users u ON u.id = lm.created_by
@@ -596,7 +604,9 @@ router.get('/:id/history', authenticate, async (req, res) => {
                grc.remarks::text AS remarks,
                'growth_cycle'::text AS source,
                NULL::numeric AS qty_delta,
-               NULL::text AS doc_no
+               NULL::text AS doc_no,
+               NULL::int AS return_id,
+               'ACTIVE'::text AS txn_status
         FROM growth_run_cycles grc
         LEFT JOIN machine_processes mp ON mp.id = grc.machine_process_id
         LEFT JOIN process_master pm ON pm.process_code = mp.process_type
@@ -609,8 +619,7 @@ router.get('/:id/history', authenticate, async (req, res) => {
         SELECT e.*,
                SUM(CASE WHEN e.source IN ('creation', 'op_log')
                         THEN COALESCE(e.qty_delta, 0) ELSE 0 END)
-                 OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after,
-               'ACTIVE'::text AS txn_status
+                 OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after
         FROM all_events e
       )
       SELECT *, COUNT(*) OVER () AS total_count

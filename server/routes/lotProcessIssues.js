@@ -930,9 +930,9 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
   return `${parentCode}-${suffixChar}${maxN + 1}`;
 }
 
-// Growth-identity routing decision — pure helper, unit-tested in
-// tests/growthReturnRouting.test.js (see services/returnRouting.js).
-const { resolveGrowthReturnRoute } = require('../services/returnRouting');
+// Growth-identity routing + reversal eligibility — pure helpers, unit-tested
+// in tests/growthReturnRouting.test.js (see services/returnRouting.js).
+const { resolveGrowthReturnRoute, reversalBlockReason } = require('../services/returnRouting');
 
 // ── CREATE RETURN ──────────────────────────────────────────────────────────────
 // Accepts multi-line returns, partial returns, and five return types.
@@ -1145,18 +1145,40 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const aggDamaged  = lines.filter(l => l.type === 'damaged').reduce((s, l) => s + parseFloat(l.qty), 0);
     const aggConsumed = lines.filter(l => l.type === 'consumed').reduce((s, l) => s + parseFloat(l.qty), 0);
 
+    // Immutable pre-return snapshot (phase60) enabling the admin-only reversal
+    // of a full usable Growth Return. Captured from the LOCKED pre-images —
+    // growth_run_cycles alone cannot restore length/width or the consumed seed
+    // process lot. NULL for every other return type.
+    const preState = growthRoute.route === 'BISCUIT' ? {
+      route: 'BISCUIT',
+      remaining_before: currentRemaining,
+      process_lot: {
+        id: processLot.id, qty: processLot.qty, weight: processLot.weight,
+        total_value: processLot.total_value, status: processLot.status,
+      },
+      biscuit: {
+        id: biscuit.id, lot_number: biscuit.lot_number, status: biscuit.status,
+        run_no: biscuit.run_no, machine_process_id: biscuit.machine_process_id,
+        weight: biscuit.weight, dim_length: biscuit.dim_length,
+        dim_depth: biscuit.dim_depth, dim_height: biscuit.dim_height,
+        dim_unit: biscuit.dim_unit,
+      },
+      machine_id: issue.machine_id,
+    } : null;
+
     const { rows: [ret] } = await client.query(
       `INSERT INTO lot_process_returns
          (return_number, issue_id, return_date,
           usable_qty, damaged_qty, consumed_qty,
-          remarks, created_by, is_final, remaining_after)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          remarks, created_by, is_final, remaining_after, pre_state)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
       [
         returnNum, issueId,
         return_date || new Date().toISOString().split('T')[0],
         aggUsable, aggDamaged, aggConsumed,
         notes || null, req.user.id, isFinal, remainingAfter,
+        preState ? JSON.stringify(preState) : null,
       ]
     );
 
@@ -1459,6 +1481,172 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       is_final:        isFinal,
       remaining_after: remainingAfter,
       outcomes,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    return res.status(400).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// ── REVERSE A FULL USABLE GROWTH RETURN (admin only, phase60) ─────────────────
+// "Cancel" = immutable reversal: the original return stays visible as REVERSED;
+// the pre_state snapshot restores the exact pre-return manufacturing state.
+// Growth Number, run_no and the biscuit inventory id never change.
+router.post('/returns/:returnId/reverse', authenticate, authorize('admin'), async (req, res) => {
+  const returnId = parseInt(req.params.returnId);
+  const reason   = (req.body?.reason || '').trim();
+  if (!reason)
+    return res.status(400).json({ error: 'A reversal reason is required.' });
+
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Lock the return header
+    const { rows: [header] } = await client.query(
+      `SELECT * FROM lot_process_returns WHERE id = $1 FOR UPDATE`, [returnId]);
+    if (!header) throw new Error('Return not found.');
+
+    const pre = header.pre_state || null;
+
+    // 2. Lock the issue
+    const { rows: [issue] } = await client.query(
+      `SELECT * FROM lot_process_issues WHERE id = $1 FOR UPDATE`, [header.issue_id]);
+
+    // 3. Lock the biscuit (when the snapshot names one)
+    let biscuit = null;
+    if (pre?.biscuit?.id) {
+      const { rows } = await client.query(
+        `SELECT * FROM inventory WHERE id = $1 FOR UPDATE`, [pre.biscuit.id]);
+      biscuit = rows[0] || null;
+    }
+    let machineProcess = null;
+    if (pre?.biscuit?.machine_process_id) {
+      const { rows } = await client.query(
+        `SELECT * FROM machine_processes WHERE id = $1 FOR UPDATE`, [pre.biscuit.machine_process_id]);
+      machineProcess = rows[0] || null;
+    }
+
+    // 4. Row-state eligibility (pure, unit-tested) …
+    const blocked = reversalBlockReason({ header, pre, issue, biscuit, machineProcess });
+    if (blocked) throw new Error(blocked);
+
+    // … plus downstream-dependency checks. Conservative: any later activity
+    // on the biscuit or the seed process lot blocks the reversal.
+    const lotIds = [pre.biscuit.id, pre.process_lot.id];
+    const { rows: laterIssues } = await client.query(
+      `SELECT 1 FROM lot_process_issues
+       WHERE source_lot_id = ANY($1::int[]) AND created_at > $2 LIMIT 1`,
+      [lotIds, header.created_at]);
+    if (laterIssues.length)
+      throw new Error('A later process issue (Growth Again / Laser) exists — cannot reverse.');
+
+    const { rows: laterMoves } = await client.query(
+      `SELECT 1 FROM lot_movement_parents lmp
+         JOIN lot_movements lm ON lm.id = lmp.movement_id
+        WHERE lmp.parent_lot_id = ANY($1::int[]) AND lm.movement_date >= $2::date
+       UNION ALL
+       SELECT 1 FROM lot_movement_children lmc
+         JOIN lot_movements lm ON lm.id = lmc.movement_id
+        WHERE lmc.child_lot_id = ANY($1::int[]) AND lm.movement_date >= $2::date
+       LIMIT 1`,
+      [lotIds, header.created_at]);
+    if (laterMoves.length)
+      throw new Error('A later transfer/split/mix movement exists — cannot reverse.');
+
+    const { rows: laterOps } = await client.query(
+      `SELECT 1 FROM lot_op_log
+        WHERE lot_id = ANY($1::int[])
+          AND performed_at > $2
+          AND NOT (reference_type = 'lot_process_return' AND reference_id = $3)
+        LIMIT 1`,
+      [lotIds, header.created_at, header.id]);
+    if (laterOps.length)
+      throw new Error('Later activity exists on this lot — cannot reverse.');
+
+    // 5. Mark the original REVERSED (immutable — never deleted)
+    await client.query(
+      `UPDATE lot_process_returns
+          SET status = 'REVERSED', reversed_by = $1, reversed_at = NOW(), reversal_reason = $2
+        WHERE id = $3`,
+      [req.user.id, reason, header.id]);
+
+    // 6. Reopen the issue with its exact pre-return outstanding quantity
+    await client.query(
+      `UPDATE lot_process_issues
+          SET remaining_in_process = $1, status = 'OPEN', updated_at = NOW()
+        WHERE id = $2`,
+      [pre.remaining_before, issue.id]);
+
+    // 7. Restore the consumed seed process lot
+    await client.query(
+      `UPDATE inventory SET qty = $1, weight = $2, total_value = $3, status = $4, updated_at = NOW()
+        WHERE id = $5`,
+      [pre.process_lot.qty, pre.process_lot.weight, pre.process_lot.total_value,
+       pre.process_lot.status, pre.process_lot.id]);
+
+    // 8. Restore the biscuit: status + measurements. Same row, same Growth
+    //    Number, same run_no — identity fields are never written here.
+    const measurementsChanged =
+      String(biscuit.weight)     !== String(pre.biscuit.weight) ||
+      String(biscuit.dim_length) !== String(pre.biscuit.dim_length) ||
+      String(biscuit.dim_depth)  !== String(pre.biscuit.dim_depth) ||
+      String(biscuit.dim_height) !== String(pre.biscuit.dim_height);
+    await client.query(
+      `UPDATE inventory
+          SET status = $1, weight = $2, dim_length = $3, dim_depth = $4,
+              dim_height = $5, dim_unit = $6, updated_at = NOW()
+        WHERE id = $7`,
+      [pre.biscuit.status, pre.biscuit.weight, pre.biscuit.dim_length,
+       pre.biscuit.dim_depth, pre.biscuit.dim_height, pre.biscuit.dim_unit,
+       pre.biscuit.id]);
+
+    // 9. Machine back to running (the process itself never completed under
+    //    OUTPUT_BASED; the eligibility gate rejects completed processes).
+    if (pre.machine_id) {
+      const { rows: [mach] } = await client.query(
+        `SELECT status FROM machines WHERE id = $1 FOR UPDATE`, [pre.machine_id]);
+      if (mach && mach.status !== 'running') {
+        await client.query(`UPDATE machines SET status = 'running' WHERE id = $1`, [pre.machine_id]);
+        await logMachineStatus(client, pre.machine_id, mach.status, 'running', req.user.id,
+          `Growth Return ${header.return_number} reversed — process re-activated`);
+      }
+    }
+
+    // 10. Append reversal history (originals are never edited or deleted)
+    await logOp(client, pre.biscuit.id, 'return_reversed', 'lot_process_return', header.id,
+      0, pre.biscuit.status,
+      `Growth Return ${header.return_number} REVERSED by admin — ${reason}`, req.user.id);
+    await logOp(client, pre.process_lot.id, 'return_reversed', 'lot_process_return', header.id,
+      pre.process_lot.qty, pre.process_lot.status,
+      `Growth Return ${header.return_number} REVERSED — process lot restored`, req.user.id);
+
+    // 11. Reversal growth-cycle entry when the return had changed measurements
+    if (measurementsChanged) {
+      await recordGrowthCycle(client, {
+        growthRunId:      pre.biscuit.id,
+        machineProcessId: pre.biscuit.machine_process_id || null,
+        processType:      issue.process_type || null,
+        prevHeight:       biscuit.dim_height,
+        newHeight:        pre.biscuit.dim_height,
+        prevWeight:       biscuit.weight,
+        newWeight:        pre.biscuit.weight,
+        dimLength:        pre.biscuit.dim_length,
+        dimWidth:         pre.biscuit.dim_depth,
+        dimUnit:          pre.biscuit.dim_unit || 'mm',
+        remarks:          `REVERSAL of ${header.return_number}: ${reason}`,
+        performedBy:      req.user.id,
+      });
+    }
+
+    await client.query('COMMIT');
+    return res.json({
+      reversed: true,
+      return_number: header.return_number,
+      issue_id: issue.id,
+      biscuit_id: pre.biscuit.id,
+      growth_number: pre.biscuit.lot_number,
+      run_no: pre.biscuit.run_no,
     });
   } catch (err) {
     await client.query('ROLLBACK');

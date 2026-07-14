@@ -71,4 +71,36 @@ function resolveGrowthReturnRoute({
   };
 }
 
-module.exports = { resolveGrowthReturnRoute };
+/**
+ * Row-state eligibility for reversing a full usable Growth Return (phase60).
+ * Pure — SQL existence checks (later issues/movements/op-log) live in the
+ * endpoint. Returns a human-readable block reason, or null when eligible.
+ *
+ * @param {{ header: object|null, pre: object|null, issue: object|null,
+ *           biscuit: object|null, machineProcess: object|null }} ctx
+ * @returns {string|null}
+ */
+function reversalBlockReason({ header, pre, issue, biscuit, machineProcess }) {
+  if (!header) return 'Return not found.';
+  if ((header.status || 'ACTIVE') === 'REVERSED')
+    return 'This Growth Return has already been reversed.';
+  if (!pre || pre.route !== 'BISCUIT' || !pre.biscuit || !pre.process_lot)
+    return 'Only the full usable Growth Return can be reversed.';
+  if (!header.is_final) return 'Only a final return can be reversed.';
+  if (!issue || issue.status !== 'RETURNED')
+    return 'The process issue state changed since this return — cannot reverse.';
+  if (!biscuit) return 'Growth biscuit not found.';
+  if (biscuit.lot_number !== pre.biscuit.lot_number)
+    return 'Growth Number changed since the return — cannot reverse.';
+  if (parseInt(biscuit.run_no) !== parseInt(pre.biscuit.run_no))
+    return 'Growth Again has already started (run number advanced) — cannot reverse.';
+  if (biscuit.machine_process_id !== pre.biscuit.machine_process_id)
+    return 'The biscuit was issued to another process — cannot reverse.';
+  if (biscuit.status !== 'IN STOCK')
+    return `The biscuit is ${biscuit.status} — downstream activity exists.`;
+  if (machineProcess && machineProcess.status === 'completed')
+    return 'The machine process already completed — cannot reverse.';
+  return null;
+}
+
+module.exports = { resolveGrowthReturnRoute, reversalBlockReason };

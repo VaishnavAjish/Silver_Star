@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
+import toast from 'react-hot-toast';
 import Paginator from '../../../shared/components/Paginator';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import DatePicker from '../../../shared/components/DatePicker';
-import { History, Download, User, X } from 'lucide-react';
+import { History, Download, User, X, RotateCcw } from 'lucide-react';
 
 // ── Unified Lot Transaction Register (P1 read-model) ──────────────────────────
 // Dense register over GET /api/inventory/:id/history ({ data, total }).
@@ -53,6 +54,7 @@ export default function LotHistoryTab({ lotId }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo,   setDateTo]   = useState('');
   const [page,     setPage]     = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const hasFilters = !!(source || dateFrom || dateTo || status !== 'ALL');
 
@@ -77,7 +79,29 @@ export default function LotHistoryTab({ lotId }) {
       .catch(err => { if (mounted) setError(err.message); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [lotId, page, buildParams]);
+  }, [lotId, page, buildParams, refreshKey]);
+
+  // Admin-only reversal of a full usable Growth Return (phase60). The backend
+  // is authoritative on eligibility and permissions — this button only shows
+  // on op-log rows of an ACTIVE usable return so unrelated rows are untouched.
+  const handleReverse = async (r) => {
+    const reason = window.prompt(
+      `Reverse Growth Return ${r.doc_no || ''}?\n\n` +
+      'Impact: the process issue reopens, the Growth biscuit returns to IN PROCESS ' +
+      'with its pre-return measurements, and the seed process lot is restored. ' +
+      'Growth Number and Run Number stay unchanged. The original return remains ' +
+      'visible with status REVERSED.\n\nEnter a mandatory reason:'
+    );
+    if (reason == null) return; // cancelled
+    if (!reason.trim()) { toast.error('A reversal reason is required.'); return; }
+    try {
+      await api.post(`/api/lot-process-issues/returns/${r.return_id}/reverse`, { reason: reason.trim() });
+      toast.success(`Return ${r.doc_no || ''} reversed`);
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      toast.error(err.message || 'Reversal failed');
+    }
+  };
 
   // Status filter is client-side until P2 (every row is ACTIVE today).
   const visible = status === 'ALL' ? rows : rows.filter(r => (r.txn_status || 'ACTIVE') === status);
@@ -215,6 +239,14 @@ export default function LotHistoryTab({ lotId }) {
                         background: r.txn_status === 'REVERSED' ? '#FFEBEE' : '#E8F5E9' }}>
                         {r.txn_status || 'ACTIVE'}
                       </span>
+                      {r.source === 'op_log' && r.return_id && r.event_type === 'return_usable' &&
+                        (r.txn_status || 'ACTIVE') === 'ACTIVE' && (
+                        <button className="icon-btn" title="Reverse this Growth Return (admin)"
+                          onClick={() => handleReverse(r)}
+                          style={{ marginLeft: 4, color: '#C62828', verticalAlign: 'middle' }}>
+                          <RotateCcw size={11} />
+                        </button>
+                      )}
                     </td>
                     <td style={{ fontSize: 11, color: 'var(--g600)' }}>{details || '—'}</td>
                     <td style={{ fontSize: 11 }}>
