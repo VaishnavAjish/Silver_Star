@@ -3,7 +3,6 @@ const pool = require('../db/pool');
 const cache = require('../db/cache');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getInventoryValuationLines, round2 } = require('../services/inventoryAccounting');
-const { createOrFetchLegacyGroup } = require('../services/transactionGrouping');
 const reversalOrchestrator = require('../services/reversalOrchestrator');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
@@ -682,7 +681,7 @@ router.get('/:id/history', authenticate, async (req, res) => {
                      ELSE 0
                    END) OVER (ORDER BY e.ts ASC, e.source ASC ROWS UNBOUNDED PRECEDING) AS qty_after
         FROM (
-          -- Intercept affects_qty_balance mapping directly in this wrapper so that `mappedRows` reads it
+          -- Intercept affects_qty_balance mapping directly in this wrapper so that mappedRows reads it
           SELECT a.*,
                  CASE
                    WHEN a.event_type IN ('creation', 'purchase_receipt', 'opening', 'child_lot_creation') THEN TRUE
@@ -811,6 +810,7 @@ router.get('/history/union', authenticate, async (req, res) => {
     else if (sourceType === 'lot_movement_parents' || sourceType === 'lot_movement_children') {
       const idCol = sourceType === 'lot_movement_parents' ? 'parent_id' : 'child_id';
       const query = sourceType === 'lot_movement_parents'
+        ? 'SELECT movement_id FROM lot_movement_parents WHERE id = $1'
         : 'SELECT movement_id FROM lot_movement_children WHERE id = $1';
       const { rows: movRows } = await pool.query(query, [sourceId]);
       if (movRows.length > 0) {

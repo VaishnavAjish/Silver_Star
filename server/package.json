@@ -42,7 +42,8 @@
     "@opentelemetry/instrumentation-http": "^0.220.0",
     "@opentelemetry/instrumentation-pg": "^0.72.0",
     "@opentelemetry/sdk-node": "^0.220.0",
-    "eslint": "^10.4.0"
+    "eslint": "^10.4.0",
+    "supertest": "^7.2.2"
   },
   "overrides": {
     "uuid": "$uuid"

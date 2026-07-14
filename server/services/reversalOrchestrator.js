@@ -1,5 +1,5 @@
 const pool = require('../db/pool');
-const logger = require('../utils/logger');
+const { logger } = require('../middleware/logger');
 const { reversalBlockReason } = require('./returnRouting');
 const { reverseGrowthReturn } = require('./growthReturnReversal');
 
@@ -15,14 +15,27 @@ const reversalOrchestrator = {
   async getReversalEligibility(canonicalTxKey, lotId) {
     const parts = (canonicalTxKey || '').split(':');
     if (parts.length < 2) return { can_cancel: false, reason: 'Invalid canonical key format.' };
-    const sourceType = parts[0];
-    const sourceId = parseInt(parts[1], 10);
+    let sourceType = parts[0];
+    let sourceId = parseInt(parts[1], 10);
 
-    if (sourceType !== 'lot_op_log') {
-      return { can_cancel: false, reason: 'Safe reversal for this transaction type is not yet available.' };
+    // Resolve lot_op_log → lot_process_return when the op-log row references a return
+    if (sourceType === 'lot_op_log') {
+      const { rows: opRows } = await pool.query(
+        'SELECT lot_id, operation, reference_type, reference_id FROM lot_op_log WHERE id = $1', [sourceId]);
+      if (!opRows.length) return { can_cancel: false, reason: 'Transaction not found.' };
+      const op = opRows[0];
+      if (op.lot_id !== lotId) return { can_cancel: false, reason: 'Cross-lot canonical keys rejected.' };
+
+      // If the op-log row points to a lot_process_return, follow it
+      if (op.reference_type === 'lot_process_return' && op.reference_id) {
+        sourceType = 'lot_process_return';
+        sourceId = op.reference_id;
+      } else {
+        return { can_cancel: false, reason: 'Safe reversal for this transaction type is not yet available.' };
+      }
     }
 
-    // We only support reversing Growth Returns right now, which are mapped to lot_process_return canonical keys.
+    // Growth Return reversal eligibility (the only supported reversal type)
     if (sourceType === 'lot_process_return') {
       const returnId = sourceId;
       const { rows: [header] } = await pool.query(`SELECT * FROM lot_process_returns WHERE id = $1`, [returnId]);
@@ -75,11 +88,6 @@ const reversalOrchestrator = {
 
       return { can_cancel: true, reason: null };
     }
-
-    const { rows: opRows } = await pool.query('SELECT lot_id, operation, reference_type, reference_id FROM lot_op_log WHERE id = $1', [sourceId]);
-    if (!opRows.length) return { can_cancel: false, reason: 'Transaction not found.' };
-    const op = opRows[0];
-    if (op.lot_id !== lotId) return { can_cancel: false, reason: 'Cross-lot canonical keys rejected.' };
 
     return { can_cancel: false, reason: 'Safe reversal for this transaction type is not yet available.' };
   },
