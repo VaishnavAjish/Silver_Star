@@ -197,6 +197,16 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
               </>
             )}
           </div>
+          {machine.run_no && (
+            <div style={{ marginTop: 6 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, color: '#0277BD',
+                border: '1px solid #0277BD', padding: '1px 4px', borderRadius: 4,
+              }}>
+                R{machine.run_no}
+              </span>
+            </div>
+          )}
           <div style={{ fontSize: 11, color: '#616161', marginTop: 6, fontWeight: 500 }}>
             {operatorDisplay}
           </div>
