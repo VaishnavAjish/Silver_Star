@@ -161,7 +161,7 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
   return (
     <div style={{
       background: '#fff', border: `1px solid ${cfg.color}`, borderRadius: 8,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      boxShadow: `0 4px 12px ${cfg.color}33`,
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {/* Header */}
