@@ -313,7 +313,8 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 }); // end MachineCard memo
 
 function LastCompletedRunDisplay({ machine }) {
-  if (machine.machine_status !== 'idle') return null;
+  const status = machine.machine_status || 'idle';
+  if (status !== 'idle') return null;
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #E0E0E0' }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
