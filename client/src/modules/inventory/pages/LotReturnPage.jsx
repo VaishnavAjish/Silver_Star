@@ -126,10 +126,23 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     return Object.fromEntries(returnTypes.map(t => [t.value, t]));
   }, [returnTypes]);
 
-  // Set initial line when returnTypes becomes available
+  // Set initial line(s) when returnTypes becomes available.
+  // Seed Remove (COMPONENT mode): one starter row PER family so both the
+  // Growth Diamond and Recovered Seed sections open populated, matching the
+  // approved dual-family design. Normal processes keep a single starter row.
   useEffect(() => {
     if (returnTypes.length > 0 && lines.length === 0) {
-      setLines([newLine(1, returnTypes[0].value)]);
+      const componentFamilies = [...new Set(
+        returnTypes.filter(t => t.component).map(t => t.component)
+      )];
+      if (componentFamilies.length > 0) {
+        setLines(componentFamilies.map(fam => {
+          const first = returnTypes.find(t => t.component === fam);
+          return newLine(lineIdRef.current++, first.value);
+        }));
+      } else {
+        setLines([newLine(lineIdRef.current++, returnTypes[0].value)]);
+      }
     }
   }, [returnTypes, lines]);
 
@@ -479,7 +492,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         <div style={{ width: 260, borderRight: '1px solid var(--g200)',
           overflow: 'auto', padding: 14, background: 'var(--g50)', flexShrink: 0 }}>
 
-          <Section title="Issue" icon={Package}>
+          <Section title="Issue Summary" icon={Package}>
             <InfoRow label="Issue #"      value={issue.issue_number} mono />
             <InfoRow label="Issue Date"   value={new Date(issue.issue_date).toLocaleDateString('en-IN')} />
             {/* Phase A: the operator returns the Growth Assembly, not the seed */}
