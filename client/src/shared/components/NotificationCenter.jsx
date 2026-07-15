@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRealtime } from '../hooks/useRealtime';
+import { useApi } from '../hooks/useApi';
 
 const MAX_NOTIFICATIONS = 50;
 
@@ -59,14 +60,26 @@ function getEventMeta(topic) {
   };
 }
 
+const ALERT_META = {
+  awaiting_output: { icon: '📦', color: '#7B1FA2', label: 'Awaiting Output' },
+  breakdown:       { icon: '⚠️', color: '#C62828', label: 'Breakdown' },
+  overdue:         { icon: '⏰', color: '#E65100', label: 'Overdue Runtime' },
+  hold:            { icon: '⏸️', color: '#F57F17', label: 'On Hold' },
+  maintenance_due: { icon: '🔧', color: '#7B1FA2', label: 'Maintenance Due' },
+  yield_risk:      { icon: '📉', color: '#C62828', label: 'Yield Risk' },
+};
+
 export function NotificationCenter() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [isLive, setIsLive] = useState(false);
   const [hasEverConnected, setHasEverConnected] = useState(false);
+  const [activeAlerts, setActiveAlerts] = useState([]);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
   const dropdownRef = useRef(null);
   const idRef = useRef(0);
+  const api = useApi();
 
   const addNotification = useCallback((topic, payload) => {
     const meta = getEventMeta(topic);
@@ -118,11 +131,39 @@ export function NotificationCenter() {
 
   const handleOpen = () => {
     setIsOpen(o => !o);
-    if (!isOpen && unreadCount > 0) {
-      setTimeout(() => {
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-        setUnreadCount(0);
-      }, 300);
+    if (!isOpen) {
+      setLoadingAlerts(true);
+      api.get('/api/manufacturing/alerts')
+        .then(res => {
+          const flatAlerts = [];
+          Object.entries(res || {}).forEach(([key, items]) => {
+            if (!ALERT_META[key]) return;
+            items.forEach(item => {
+              let desc = `${item.code} — ${item.name}`;
+              if (item.process_number) desc += ` • ${item.process_number}`;
+              if (key === 'overdue' && item.runtime_hours != null && item.target_runtime_hours != null) {
+                const rh = Math.floor(item.runtime_hours);
+                const rm = Math.round((item.runtime_hours - rh) * 60);
+                desc += ` • ${rh}h ${rm}m / ${item.target_runtime_hours}h`;
+              }
+              flatAlerts.push({
+                id: `alert-${key}-${item.process_id || item.id}`,
+                meta: ALERT_META[key],
+                desc,
+              });
+            });
+          });
+          setActiveAlerts(flatAlerts);
+        })
+        .catch(e => console.error('Failed to load active alerts', e))
+        .finally(() => setLoadingAlerts(false));
+
+      if (unreadCount > 0) {
+        setTimeout(() => {
+          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          setUnreadCount(0);
+        }, 300);
+      }
     }
   };
 
@@ -226,6 +267,43 @@ export function NotificationCenter() {
 
           {/* List */}
           <div style={{ overflowY: 'auto', flex: 1 }}>
+            
+            {activeAlerts.length > 0 && (
+              <div style={{ borderBottom: '1px solid #e2e8f0', background: '#FAFAFA', paddingBottom: 4 }}>
+                <div style={{ padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                  Active Alerts ({activeAlerts.length})
+                </div>
+                {activeAlerts.map(a => (
+                  <div key={a.id} style={{
+                    padding: '8px 16px',
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                  }}>
+                    <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{a.meta.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: a.meta.color, fontWeight: 600 }}>
+                        {a.meta.label}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                        {a.desc}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {loadingAlerts && activeAlerts.length === 0 && (
+               <div style={{ padding: '12px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
+                 Checking active alerts...
+               </div>
+            )}
+
+            {notifications.length > 0 && activeAlerts.length > 0 && (
+               <div style={{ padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.5px', background: '#fff' }}>
+                 Recent Events
+               </div>
+            )}
+
             {notifications.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
                 {hasEverConnected || isLive
