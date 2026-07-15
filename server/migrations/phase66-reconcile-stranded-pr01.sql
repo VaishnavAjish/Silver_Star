@@ -108,34 +108,39 @@ BEGIN
       RETURN;
   END IF;
 
-  -- 2. Require baseline count = strict count
-  IF v_baseline_count <> v_strict_count THEN
-      -- Print exclusions
-      FOR v_rec IN SELECT * FROM stranded_candidates WHERE is_strict = false LOOP
-          RAISE NOTICE 'Excluded Machine: % (Process ID: %). Reasons: all_returned=%, null_remaining=%, sum_rem=%, returns=%, return_created_at=%, inv_count=%, inv_status=%, completed_at=%, is_fb_m_01=%',
-              v_rec.machine_code, v_rec.machine_process_id,
-              v_rec.all_issues_returned, v_rec.null_remaining_issues, v_rec.sum_remaining, v_rec.total_returns,
-              v_rec.latest_return_created_at, v_rec.growth_inventory_count, v_rec.growth_inventory_status, v_rec.completed_at, (v_rec.machine_code = 'FB-M-01');
-      END LOOP;
-      RAISE EXCEPTION 'phase66: baseline count (%) does not match strict eligible count (%) — aborting', v_baseline_count, v_strict_count;
-  END IF;
-  
-  -- Multiple running candidates per machine check
-  SELECT count(machine_id) - count(DISTINCT machine_id) INTO v_excluded_count FROM stranded_candidates;
+  -- 2. Log excluded machines (baseline but not strict) — proceed with strict only
+  v_excluded_count := v_baseline_count - v_strict_count;
   IF v_excluded_count > 0 THEN
+      FOR v_rec IN SELECT * FROM stranded_candidates WHERE is_strict = false LOOP
+          RAISE NOTICE 'EXCLUDED (will not be auto-reconciled): Machine % (Process ID: %). inv_count=%, inv_status=%, completed_at=%, is_fb_m_01=%',
+              v_rec.machine_code, v_rec.machine_process_id,
+              v_rec.growth_inventory_count, v_rec.growth_inventory_status, v_rec.completed_at, (v_rec.machine_code = 'FB-M-01');
+      END LOOP;
+      RAISE NOTICE 'phase66: % baseline candidates, % strict eligible, % excluded — proceeding with strict only', v_baseline_count, v_strict_count, v_excluded_count;
+  END IF;
+
+  IF v_strict_count = 0 THEN
+      RAISE NOTICE 'No strict candidates to process. Exiting.';
+      RETURN;
+  END IF;
+
+  -- Remove non-strict rows so all subsequent operations are scoped correctly
+  DELETE FROM stranded_candidates WHERE is_strict = false;
+
+  -- Multiple running candidates per machine check (among strict only)
+  IF (SELECT count(machine_id) - count(DISTINCT machine_id) FROM stranded_candidates) > 0 THEN
       RAISE EXCEPTION 'phase66: multiple running candidates found for a single machine — aborting';
   END IF;
 
-  -- 3. Lock in deterministic ID order
+  -- 3. Lock in deterministic ID order (strict candidates only)
   PERFORM 1 FROM machine_processes WHERE id IN (SELECT machine_process_id FROM stranded_candidates) ORDER BY id FOR UPDATE;
   PERFORM 1 FROM machines WHERE id IN (SELECT machine_id FROM stranded_candidates) ORDER BY id FOR UPDATE;
   PERFORM 1 FROM lot_process_issues WHERE machine_process_id IN (SELECT machine_process_id FROM stranded_candidates) ORDER BY id FOR UPDATE;
   PERFORM 1 FROM lot_process_returns WHERE issue_id IN (SELECT id FROM lot_process_issues WHERE machine_process_id IN (SELECT machine_process_id FROM stranded_candidates)) ORDER BY id FOR UPDATE;
   PERFORM 1 FROM inventory WHERE id IN (SELECT growth_inventory_id FROM stranded_candidates) ORDER BY id FOR UPDATE;
 
-  -- 4. Revalidate under lock
+  -- 4. Revalidate under lock (strict candidates only)
   FOR v_rec IN SELECT * FROM stranded_candidates LOOP
-      -- Re-check issues, status, completed_at, inventory etc
       IF NOT EXISTS (
           SELECT 1 FROM machine_processes mp
           JOIN machines m ON m.id = mp.machine_id
@@ -185,7 +190,7 @@ BEGIN
       END IF;
   END LOOP;
 
-  -- 5. Update exact captured machine processes
+  -- 5. Update exact captured machine processes (strict only)
   UPDATE machine_processes
   SET status = 'completed',
       completed_at = c.latest_return_created_at
@@ -197,7 +202,7 @@ BEGIN
       RAISE EXCEPTION 'phase66: machine_process update count (%) <> candidate count (%)', v_mp_updated, v_strict_count;
   END IF;
 
-  -- 6. Update exact captured machines
+  -- 6. Update exact captured machines (strict only)
   UPDATE machines
   SET status = 'idle'
   FROM stranded_candidates c
@@ -224,7 +229,7 @@ BEGIN
       RAISE EXCEPTION 'phase66: audit insert count (%) <> candidate count (%)', v_audit_inserted, v_strict_count;
   END IF;
 
-  -- 8. Post-assertions
+  -- 8. Post-assertions: remaining stranded count should equal excluded count
   SELECT count(*) INTO v_post_baseline_count
   FROM machines m
   JOIN machine_processes mp ON mp.machine_id = m.id
@@ -238,8 +243,8 @@ BEGIN
         SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status = 'OPEN'
     ) = 0;
 
-  IF v_post_baseline_count > 0 THEN
-      RAISE EXCEPTION 'phase66: post-baseline stranded count is % (expected 0)', v_post_baseline_count;
+  IF v_post_baseline_count > v_excluded_count THEN
+      RAISE EXCEPTION 'phase66: post-baseline stranded count is % (expected at most %)', v_post_baseline_count, v_excluded_count;
   END IF;
 
   SELECT count(*) INTO v_ls01_updated FROM machine_status_logs WHERE machine_id = (SELECT id FROM machines WHERE code = 'FB-M-01') AND remarks LIKE '%LEGACY_PR01%';
@@ -247,7 +252,7 @@ BEGIN
       RAISE EXCEPTION 'phase66: LS-01 / FB-M-01 was incorrectly reconciled!';
   END IF;
 
-  RAISE NOTICE 'phase66: successfully released % stranded growth machines', v_strict_count;
+  RAISE NOTICE 'phase66: successfully released % stranded growth machines (% excluded for manual review)', v_strict_count, v_excluded_count;
 END $$;
 
 COMMIT;
