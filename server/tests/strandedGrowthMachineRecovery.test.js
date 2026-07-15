@@ -28,11 +28,11 @@ describe('Stranded Growth Machine Recovery - Phase 65 & 66', function() {
       // Skipped
     });
 
-    it('Safely locks machine_processes, machines, issues, returns, and inventory in ID order', () => {
+    it('Safely locks machine_processes, machines, issues, returns, and exact inventory in ID order', () => {
       // Skipped
     });
 
-    it('Updates candidate machine_processes status to completed and sets completed_at to latest Return timestamp', () => {
+    it('Actual Return created_at becomes completed_at (return_date is not used)', () => {
       // Skipped
     });
 
@@ -44,11 +44,35 @@ describe('Stranded Growth Machine Recovery - Phase 65 & 66', function() {
       // Skipped
     });
 
-    it('Inserts a machine_status_logs audit trail for each released machine', () => {
+    it('Missing or ambiguous Growth identity aborts', () => {
+      // Skipped
+    });
+    
+    it('Changed Return created_at under lock rolls back', () => {
+      // Skipped
+    });
+
+    it('Existing completed_at aborts', () => {
+      // Skipped
+    });
+
+    it('Inserts exactly one machine_status_logs audit trail for each released machine', () => {
+      // Skipped
+    });
+
+    it('Audit changed_at is execution time, not historical return time', () => {
       // Skipped
     });
 
     it('Throws if any inventory, issue, Return, or genealogy data is unexpectedly modified', () => {
+      // Skipped
+    });
+
+    it('Post-state baseline count is zero', () => {
+      // Skipped
+    });
+
+    it('Rerun is idempotent', () => {
       // Skipped
     });
   });

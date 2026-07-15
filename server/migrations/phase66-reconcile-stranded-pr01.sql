@@ -15,7 +15,7 @@ DECLARE
   v_audit_inserted INTEGER;
   v_ls01_updated INTEGER;
   v_post_baseline_count INTEGER;
-  v_re_run_check INTEGER;
+  v_execution_time TIMESTAMP := NOW();
   
   r RECORD;
 BEGIN
@@ -31,7 +31,7 @@ BEGIN
               SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id
           ) AS total_issues,
           (
-              SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status NOT IN ('RETURNED', 'CANCELLED')
+              SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status = 'OPEN'
           ) AS open_issues,
           (
               SELECT bool_and(status = 'RETURNED') FROM lot_process_issues WHERE machine_process_id = mp.id
@@ -49,11 +49,11 @@ BEGIN
               WHERE i.machine_process_id = mp.id
           ) AS total_returns,
           (
-              SELECT MAX(r.return_date)
+              SELECT MAX(r.created_at)
               FROM lot_process_returns r
               JOIN lot_process_issues i ON i.id = r.issue_id
               WHERE i.machine_process_id = mp.id
-          ) AS latest_return_date,
+          ) AS latest_return_created_at,
           (
               SELECT count(DISTINCT l.id)
               FROM lot_process_issues i
@@ -62,20 +62,18 @@ BEGIN
               WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
           ) AS growth_inventory_count,
           (
-              SELECT l.id
+              SELECT MAX(l.id)
               FROM lot_process_issues i
               JOIN inventory l ON l.id = i.lot_id
               JOIN items it ON it.id = l.item_id
               WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
-              LIMIT 1
           ) AS growth_inventory_id,
           (
-              SELECT l.status
+              SELECT MAX(l.status)
               FROM lot_process_issues i
               JOIN inventory l ON l.id = i.lot_id
               JOIN items it ON it.id = l.item_id
               WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
-              LIMIT 1
           ) AS growth_inventory_status
       FROM machines m
       JOIN machine_processes mp ON mp.machine_id = m.id
@@ -96,11 +94,11 @@ BEGIN
           null_remaining_issues = 0 AND 
           sum_remaining = 0 AND 
           total_returns > 0 AND 
-          latest_return_date IS NOT NULL AND 
+          latest_return_created_at IS NOT NULL AND 
           growth_inventory_count = 1 AND 
           growth_inventory_status = 'IN STOCK' AND 
           completed_at IS NULL AND
-          machine_code <> 'FB-M-01' -- Explicitly exclude LS-01
+          machine_code <> 'FB-M-01'
       ) AS is_strict
   FROM baseline
   WHERE total_issues > 0 AND open_issues = 0; -- Enforce baseline
@@ -117,10 +115,10 @@ BEGIN
   IF v_baseline_count <> v_strict_count THEN
       -- Print exclusions
       FOR r IN SELECT * FROM stranded_candidates WHERE is_strict = false LOOP
-          RAISE NOTICE 'Excluded Machine: % (Process ID: %). Reasons: all_returned=%, null_remaining=%, sum_rem=%, returns=%, return_date=%, inv_count=%, inv_status=%, completed_at=%, is_fb_m_01=%',
+          RAISE NOTICE 'Excluded Machine: % (Process ID: %). Reasons: all_returned=%, null_remaining=%, sum_rem=%, returns=%, return_created_at=%, inv_count=%, inv_status=%, completed_at=%, is_fb_m_01=%',
               r.machine_code, r.machine_process_id,
               r.all_issues_returned, r.null_remaining_issues, r.sum_remaining, r.total_returns,
-              r.latest_return_date, r.growth_inventory_count, r.growth_inventory_status, r.completed_at, (r.machine_code = 'FB-M-01');
+              r.latest_return_created_at, r.growth_inventory_count, r.growth_inventory_status, r.completed_at, (r.machine_code = 'FB-M-01');
       END LOOP;
       RAISE EXCEPTION 'phase66: baseline count (%) does not match strict eligible count (%) — aborting', v_baseline_count, v_strict_count;
   END IF;
@@ -145,15 +143,44 @@ BEGIN
           SELECT 1 FROM machine_processes mp
           JOIN machines m ON m.id = mp.machine_id
           WHERE mp.id = r.machine_process_id
+            AND mp.process_type = 'pr-01'
             AND mp.status = 'running'
             AND m.status = 'awaiting_output'
             AND mp.completed_at IS NULL
       ) THEN
           RAISE EXCEPTION 'phase66: revalidation failed for machine process % (status/completed_at changed)', r.machine_process_id;
       END IF;
+
+      IF (SELECT count(*) FROM lot_process_issues WHERE machine_process_id = r.machine_process_id) <= 0 THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (issue count not positive)', r.machine_process_id;
+      END IF;
       
-      IF (SELECT MAX(ret.return_date) FROM lot_process_returns ret JOIN lot_process_issues i ON i.id = ret.issue_id WHERE i.machine_process_id = r.machine_process_id) <> r.latest_return_date THEN
-          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (return date changed)', r.machine_process_id;
+      IF (SELECT count(*) FROM lot_process_issues WHERE machine_process_id = r.machine_process_id AND status = 'OPEN') <> 0 THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (open issue count changed)', r.machine_process_id;
+      END IF;
+      
+      IF NOT (SELECT bool_and(status = 'RETURNED') FROM lot_process_issues WHERE machine_process_id = r.machine_process_id) THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (not all issues returned)', r.machine_process_id;
+      END IF;
+
+      IF (SELECT count(*) FROM lot_process_issues WHERE machine_process_id = r.machine_process_id AND remaining_in_process IS NULL) > 0 THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (null remaining found)', r.machine_process_id;
+      END IF;
+
+      IF (SELECT COALESCE(SUM(remaining_in_process), -1) FROM lot_process_issues WHERE machine_process_id = r.machine_process_id) <> 0 THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (sum remaining != 0)', r.machine_process_id;
+      END IF;
+
+      IF (SELECT count(ret.id) FROM lot_process_returns ret JOIN lot_process_issues i ON i.id = ret.issue_id WHERE i.machine_process_id = r.machine_process_id) <= 0 THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (return count not positive)', r.machine_process_id;
+      END IF;
+      
+      IF (SELECT MAX(ret.created_at) FROM lot_process_returns ret JOIN lot_process_issues i ON i.id = ret.issue_id WHERE i.machine_process_id = r.machine_process_id) <> r.latest_return_created_at THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (return created_at changed)', r.machine_process_id;
+      END IF;
+
+      IF (SELECT MAX(l.id) FROM lot_process_issues i JOIN inventory l ON l.id = i.lot_id JOIN items it ON it.id = l.item_id WHERE i.machine_process_id = r.machine_process_id AND it.category = 'growth_run') <> r.growth_inventory_id THEN
+          RAISE EXCEPTION 'phase66: revalidation failed for machine process % (growth inventory ID changed)', r.machine_process_id;
       END IF;
 
       IF (SELECT status FROM inventory WHERE id = r.growth_inventory_id) <> 'IN STOCK' THEN
@@ -164,7 +191,7 @@ BEGIN
   -- 5. Update exact captured machine processes
   UPDATE machine_processes
   SET status = 'completed',
-      completed_at = c.latest_return_date
+      completed_at = c.latest_return_created_at
   FROM stranded_candidates c
   WHERE machine_processes.id = c.machine_process_id;
 
@@ -185,13 +212,14 @@ BEGIN
   END IF;
 
   -- 7. Audit log insert
-  INSERT INTO machine_status_logs (machine_id, old_status, new_status, changed_at, remarks)
+  INSERT INTO machine_status_logs (machine_id, old_status, new_status, changed_at, changed_by, remarks)
   SELECT 
       machine_id,
       'awaiting_output',
       'idle',
-      NOW(),
-      'LEGACY_PR01_OUTPUT_BASED_MACHINE_RELEASE_RECONCILIATION | MP_ID: ' || machine_process_id || ' | RETURN_TS: ' || latest_return_date || ' | INV_ID: ' || growth_inventory_id
+      v_execution_time,
+      NULL,
+      'LEGACY_PR01_OUTPUT_BASED_MACHINE_RELEASE_RECONCILIATION | MP_ID: ' || machine_process_id || ' | RETURN_CREATED_AT: ' || latest_return_created_at || ' | INV_ID: ' || growth_inventory_id
   FROM stranded_candidates;
 
   GET DIAGNOSTICS v_audit_inserted = ROW_COUNT;
@@ -210,7 +238,7 @@ BEGIN
         SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id
     ) > 0
     AND (
-        SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status NOT IN ('RETURNED', 'CANCELLED')
+        SELECT count(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status = 'OPEN'
     ) = 0;
 
   IF v_post_baseline_count > 0 THEN
