@@ -487,6 +487,13 @@ export default function LotWorkspacePage() {
                   ['Parent Lot', lot.parent_lot_name || '—'],
                   ['Root Lot', lot.root_lot_name || '—'],
                   ['Item Category', lot.category],
+                  // Phase A (Seed Lifecycle): physical manufacturing condition
+                  // — read-only; NULL means legacy AVAILABLE.
+                  ['Manufacturing State', lot.manufacturing_state || 'AVAILABLE'],
+                  ...(lot.manufacturing_state === 'ATTACHED_TO_GROWTH' && lot.attached_growth_number
+                    ? [['Attached To Growth',
+                        `${lot.attached_growth_number}${lot.attached_run_no != null ? ` (R${lot.attached_run_no})` : ''}`]]
+                    : []),
                   ['Operation Type', lot.operation_type || 'purchase'],
                   ['Split Level', lot.split_level != null ? `Level ${lot.split_level}` : '—'],
                   ['Genealogy Path', lot.genealogy_path || '—'],

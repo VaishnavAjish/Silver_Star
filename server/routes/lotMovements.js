@@ -3,6 +3,8 @@ const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { isSeedItem, nextMixLotCode, childSplitCode, nextSiblingCode, nextLotOpId } = require('../services/seedLotCodeService');
 const { resolveMixDimensions, mixDimensionError } = require('../services/lotDimensions');
+// Phase A (Seed Lifecycle): shared attachment rule — see services/manufacturingState.js
+const { attachmentBlockReason } = require('../services/manufacturingState');
 const { dispatchEvent } = require('../services/eventDispatcher');
 
 const router = express.Router();
@@ -181,6 +183,11 @@ router.post('/split', authenticate, authorize('admin', 'operator'), async (req, 
 
     if (CONSUMED.includes(parent.status))
       throw new Error(`Lot ${parent.lot_number} is already ${parent.status}`);
+
+    // Phase A (Seed Lifecycle): attached Seed is physically embedded in a
+    // Partial Growth Run — never splittable until Seed Remove.
+    const splitAttachBlock = attachmentBlockReason(parent, 'split');
+    if (splitAttachBlock) throw new Error(splitAttachBlock);
 
     const pqty = effQty(parent);
     if (pqty <= 0) throw new Error('Parent lot has zero quantity — cannot split');
@@ -471,6 +478,12 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
     const growthRuns = rows.filter(r => r.category === 'growth_run');
     if (growthRuns.length)
       throw new Error(`Growth Run lots cannot be mixed: ${growthRuns.map(r => r.lot_number).join(', ')}`);
+
+    // Phase A (Seed Lifecycle): attached Seed cannot be mixed until Seed Remove.
+    for (const r of rows) {
+      const mixAttachBlock = attachmentBlockReason(r, 'mixed');
+      if (mixAttachBlock) throw new Error(mixAttachBlock);
+    }
 
     const uniqueItems = [...new Set(rows.map(r => r.item_id))];
     if (uniqueItems.length > 1)

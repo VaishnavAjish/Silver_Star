@@ -562,7 +562,11 @@ router.get('/:id/history', authenticate, async (req, res) => {
                COALESCE(pi.issue_number, pr.return_number)::text AS doc_no,
                pr.id::int AS return_id,
                CASE WHEN pr.status = 'REVERSED' THEN 'REVERSED' ELSE 'ACTIVE' END AS txn_status,
+               -- Phase C: reversal eligibility is POLICY-driven, never mere
+               -- pre_state presence — SEED_REMOVE snapshots carry
+               -- reversal_supported:false and must never enable Cancel.
                (pr.pre_state IS NOT NULL
+                AND COALESCE(pr.pre_state->>'reversal_supported', 'true') <> 'false'
                 AND COALESCE(pr.status, 'ACTIVE') <> 'REVERSED'
                 AND ol.operation = 'return_usable') AS reversible,
                CASE
@@ -873,7 +877,21 @@ router.get('/:id', authenticate, async (req, res) => {
       `SELECT inv.*, i.name as item_name, i.code as item_code, i.category,
               l.name as location_name, v.name as vendor_name,
               COALESCE(pl.lot_code, pl.lot_number) AS parent_lot_name,
-              COALESCE(rl.lot_code, rl.lot_number) AS root_lot_name
+              COALESCE(rl.lot_code, rl.lot_number) AS root_lot_name,
+              -- Phase A (Seed Lifecycle): attached Growth identity DERIVED from
+              -- the existing issue → machine_process → biscuit relationship
+              -- (read-only; no new table; biscuit.run_no stays the single
+              -- authoritative Run source — nothing is stored on the Seed row).
+              (SELECT gb.lot_number FROM lot_process_issues lpi2
+                 JOIN inventory gb ON gb.machine_process_id = lpi2.machine_process_id
+                  AND gb.item_id IN (SELECT id FROM items WHERE category = 'growth_run')
+                WHERE lpi2.process_lot_id = inv.id
+                ORDER BY lpi2.id DESC LIMIT 1) AS attached_growth_number,
+              (SELECT gb.run_no FROM lot_process_issues lpi2
+                 JOIN inventory gb ON gb.machine_process_id = lpi2.machine_process_id
+                  AND gb.item_id IN (SELECT id FROM items WHERE category = 'growth_run')
+                WHERE lpi2.process_lot_id = inv.id
+                ORDER BY lpi2.id DESC LIMIT 1) AS attached_run_no
        FROM inventory inv JOIN items i ON inv.item_id = i.id
        LEFT JOIN locations l ON inv.location_id = l.id
        LEFT JOIN vendors v ON inv.vendor_id = v.id

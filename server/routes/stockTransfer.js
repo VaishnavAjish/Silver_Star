@@ -3,6 +3,8 @@ const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
+// Phase A (Seed Lifecycle): shared attachment rule — see services/manufacturingState.js
+const { attachmentBlockReason } = require('../services/manufacturingState');
 
 const router = express.Router();
 
@@ -400,6 +402,15 @@ router.post('/pending/:id/approve', authenticate, async (req, res) => {
           blockedGrowthRuns.map(l => l.lot_code || l.lot_number || l.id).join(', ')
         }] — they are IN PROCESS (still inside the chamber). Complete the Growth Run Return first to release them to IN STOCK.`,
       });
+    }
+
+    // Phase A (Seed Lifecycle): this approve path deliberately allows
+    // IN PROCESS lots — but an attached Seed (physically embedded in an
+    // active Partial Growth Run) must never move independently of its run.
+    const attachedBlock = lots.map(l => attachmentBlockReason(l, 'transferred')).find(Boolean);
+    if (attachedBlock) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: attachedBlock });
     }
 
     // ── 6. Resolve destination location_id and department ──────────────────

@@ -125,15 +125,61 @@ function resolveGrowthReturnRoute({
  *   measurements: object|undefined,
  *   openSiblingCount: number|null,      // other OPEN issues on the same machine_process
  *   biscuitCandidateCount: number|null, // ALL growth_run rows on the machine_process
+ *   attachedSeed: object|null,          // Phase C — resolved Seed context for Seed Remove:
+ *                                       //   { resolved, candidateCount, rootCount,
+ *                                       //     refWeight, refValue } (null otherwise)
  * }} ctx
  * @returns {object} plan — { valid, error?, route, ... }
  *
  * NOTE: the client's remaining_in_process is deliberately NOT an input —
  * projected remaining is always server-calculated (see QUANTITY branch).
  */
+/**
+ * Phase C — deterministic per-line carrying-value allocation for a Seed Remove
+ * COMPONENT return. Two strictly separate pools (biscuit carrying value →
+ * 'diamond' family; attached-Seed carrying value → 'seed' family), allocated by
+ * actual output weight, with the exact rounding residue assigned to the final
+ * eligible line of each family so no carrying cost is silently lost. Pure;
+ * returns a fresh array (immutable — never mutates its inputs).
+ *
+ * @param {Array<{type,qty,weight}>} lines
+ * @param {Array<{type,component}>} outputs  allowed_outputs
+ * @param {number|string} biscuitPool  biscuit.total_value → 'diamond' family
+ * @param {number|string} seedPool     Σ attached Seed total_value → 'seed' family
+ * @returns {Array<{type,qty,weight,family,value}>}
+ */
+function allocateComponentValues(lines, outputs, biscuitPool, seedPool) {
+  const familyOf = t => (outputs.find(o => o.type === t) || {}).component || 'primary';
+  const rows = (lines || []).map(l => ({
+    type: l.type,
+    qty: parseFloat(l.qty) || 0,
+    weight: parseFloat(l.weight) || 0,
+    family: familyOf(l.type),
+    value: 0,
+  }));
+  const pools = { diamond: parseFloat(biscuitPool) || 0, seed: parseFloat(seedPool) || 0 };
+  for (const family of Object.keys(pools)) {
+    const pool = pools[family];
+    const fam = rows.filter(r => r.family === family && r.qty > 0);
+    const famWeight = fam.reduce((s, r) => s + r.weight, 0);
+    if (fam.length === 0 || !(famWeight > 0)) continue; // planner blocks missing weights upstream
+    let allocated = 0;
+    fam.forEach((r, i) => {
+      if (i < fam.length - 1) {
+        r.value = Math.round((pool * r.weight / famWeight) * 100) / 100;
+        allocated += r.value;
+      } else {
+        r.value = Math.round((pool - allocated) * 100) / 100; // residue → last eligible line
+      }
+    });
+  }
+  return rows;
+}
+
 function buildReturnPlan({
   issue, processLot, biscuit, allowedOutputs,
   lines, measurements, openSiblingCount, biscuitCandidateCount,
+  attachedSeed,
 }) {
   const invalid = error => ({ valid: false, route: 'REJECT', error });
 
@@ -159,12 +205,16 @@ function buildReturnPlan({
     : issuedQty;
 
   const isGrowthRun = processLot.category === 'growth_run';
-  if (isGrowthRun && lines.length > 1)
-    return invalid('Growth Run returns must use a single disposition.');
-
   const isComponentMode = outputs.some(o => o.component);
 
+  // Phase C: a COMPONENT return (Seed Remove) posts MULTIPLE lines against a
+  // biscuit input — the single-disposition rule applies only to QUANTITY-mode
+  // biscuit returns (laser ops / growth again).
+  if (isGrowthRun && !isComponentMode && lines.length > 1)
+    return invalid('Growth Run returns must use a single disposition.');
+
   let returnTotal, remainingAfter;
+  let componentPlan = null; // Phase C: Seed Remove weight/value breakdown
   if (isComponentMode) {
     // The input is wholly transformed — nothing stays in process.
     remainingAfter = 0;
@@ -206,6 +256,74 @@ function buildReturnPlan({
         `Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — ` +
         'a component split cannot create mass.'
       );
+    }
+
+    // ── Phase C: Seed Remove (COMPONENT return of a biscuit input) ───────────
+    // Decisions A (value: two carrying-cost pools, weight-proportional,
+    // residue-to-last) and B (weight: biscuit = full assembly, mandatory
+    // operator line weights, Σgrowth+Σseed+loss = biscuit.weight, seed ceiling).
+    if (isGrowthRun) {
+      // (1) Authoritative attached Seed is mandatory — NO fallback.
+      if (!attachedSeed || !attachedSeed.resolved || (parseInt(attachedSeed.candidateCount) || 0) < 1) {
+        return invalid(
+          'Attached Seed could not be resolved for this Growth Run. Seed Remove ' +
+          'cannot continue without authoritative Seed quantity, weight, value, and genealogy.'
+        );
+      }
+      // (2) Multiple Seed roots without exact per-line attribution → block.
+      if ((parseInt(attachedSeed.rootCount) || 0) > 1) {
+        return invalid(
+          'Multiple attached Seed roots were found for this Growth Run. Seed Remove ' +
+          'cannot continue without exact per-line Seed-root attribution.'
+        );
+      }
+      // (3) Explicit operator weight is mandatory on every qty>0 line; a
+      //     zero-qty line must be zero/blank; no negative weights.
+      for (const l of lines) {
+        const hasW = !(l.weight === undefined || l.weight === null || l.weight === '');
+        const w = hasW ? parseFloat(l.weight) : NaN;
+        if (hasW && w < 0)
+          return invalid(`Negative weight is not allowed (line '${l.type}').`);
+        if (parseFloat(l.qty) > 0) {
+          if (!(w > 0))
+            return invalid(`Seed Remove requires an explicit positive output weight for every line with quantity (line '${l.type}').`);
+        } else if (hasW && Math.abs(w) > EPS) {
+          return invalid(`A zero-quantity line must have zero or blank weight (line '${l.type}').`);
+        }
+      }
+      // (4) Physical balance: Σ output weights + loss = biscuit.weight, loss ≥ 0.
+      const biscuitWeight = parseFloat(processLot.weight || 0);
+      const totalOut = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+      const loss = biscuitWeight - totalOut;
+      if (biscuitWeight > 0 && loss < -EPS)
+        return invalid(
+          `Total output weight ${totalOut.toFixed(4)} exceeds the input assembly ` +
+          `weight ${biscuitWeight.toFixed(4)} — negative process loss is impossible.`
+        );
+      // (5) Secondary Seed validation: Σ seed-family weight ≤ ref + tolerance.
+      const compOf = t => (outputs.find(o => o.type === t) || {}).component;
+      const seedOutWeight = lines.filter(l => compOf(l.type) === 'seed')
+        .reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+      const growthOutWeight = lines.filter(l => compOf(l.type) === 'diamond')
+        .reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+      const refW = attachedSeed.refWeight != null ? parseFloat(attachedSeed.refWeight) : null;
+      if (refW != null && seedOutWeight > refW + EPS)
+        return invalid(
+          `Recovered Seed weight ${seedOutWeight.toFixed(4)} exceeds the attached ` +
+          `Seed reference weight ${refW.toFixed(4)} beyond tolerance.`
+        );
+      // (6) Deterministic two-pool carrying-value allocation.
+      componentPlan = {
+        biscuit_weight: biscuitWeight,
+        growth_out_weight: growthOutWeight,
+        seed_out_weight: seedOutWeight,
+        loss,
+        growth_pool: parseFloat(processLot.total_value) || 0,
+        seed_pool: parseFloat(attachedSeed.refValue) || 0,
+        allocation: allocateComponentValues(
+          lines, outputs, processLot.total_value, attachedSeed.refValue
+        ),
+      };
     }
   } else {
     returnTotal    = lines.reduce((s, l) => s + parseFloat(l.qty), 0);
@@ -261,9 +379,13 @@ function buildReturnPlan({
     return_total: returnTotal,
     remaining_after: remainingAfter,
     projected_issue_status: isFinal ? 'RETURNED' : 'OPEN',
+    component_mode: isComponentMode,
   };
 
-  if (isGrowthRun) {
+  // Phase C: a COMPONENT return of the biscuit (Seed Remove) is NOT an
+  // in-place return — it splits the assembly into diamond + recovered-seed
+  // child lots and consumes the biscuit, releasing the attached Seed.
+  if (isGrowthRun && !isComponentMode) {
     // In-place return of the biscuit itself: it returns to the permanent
     // Growth identity, no lot is created, run_no untouched.
     const finalStatusRule = outputs.find(o => o.type === lines[0].type);
@@ -282,6 +404,7 @@ function buildReturnPlan({
       projected_qty: processLot.qty != null ? parseFloat(processLot.qty) : null,
       projected_weight: processLot.weight != null ? parseFloat(processLot.weight) : null,
       reversal_supported: false,
+      seed_retained: false, // biscuit-input return — no seed process lot here
     };
   }
 
@@ -304,6 +427,10 @@ function buildReturnPlan({
       projected_qty: biscuit.qty != null ? parseFloat(biscuit.qty) : null,
       projected_weight: measuredWeight,
       reversal_supported: true,
+      // Phase B (Seed Lifecycle): the Seed process lot is NOT consumed — it
+      // stays IN PROCESS + ATTACHED_TO_GROWTH inside the biscuit until Seed
+      // Remove, retaining its own qty/weight/carrying value.
+      seed_retained: true,
     };
   }
 
@@ -323,6 +450,23 @@ function buildReturnPlan({
     projected_qty: isFinal ? 0 : (processLot.qty != null ? parseFloat(processLot.qty) : null),
     projected_weight: isFinal ? 0 : (processLot.weight != null ? parseFloat(processLot.weight) : null),
     reversal_supported: false,
+    seed_retained: false, // CHILD route — the input converts into child lots
+    // Phase C: Seed Remove (COMPONENT return of the biscuit) releases the
+    // attached Seed — it retires and its material continues as the
+    // recovered-seed children.
+    seed_released: isGrowthRun && isComponentMode,
+    // Phase C: deterministic weight/value breakdown for Seed Remove (null for
+    // ordinary CHILD returns). Posting recomputes and reuses this under lock.
+    component_allocation: componentPlan ? componentPlan.allocation : null,
+    component_weight: componentPlan ? {
+      biscuit:    componentPlan.biscuit_weight,
+      growth_out: componentPlan.growth_out_weight,
+      seed_out:   componentPlan.seed_out_weight,
+      loss:       componentPlan.loss,
+    } : null,
+    value_pools: componentPlan
+      ? { growth: componentPlan.growth_pool, seed: componentPlan.seed_pool }
+      : null,
   };
 }
 
@@ -386,6 +530,7 @@ module.exports = {
   resolveAllowedOutputs,
   resolveGrowthReturnRoute,
   buildReturnPlan,
+  allocateComponentValues,
   normalizeGrowthUsableOutputs,
   reversalBlockReason,
 };

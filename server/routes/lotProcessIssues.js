@@ -436,6 +436,12 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
         if (CANNOT_ISSUE.includes(lot.status))
           throw new Error(`Lot ${lot.lot_number} is ${lot.status} — cannot issue`);
+
+        // Phase A (Seed Lifecycle): shared attachment guard — an attached Seed
+        // (embedded in an active Partial Growth Run) is never issuable; gives a
+        // clearer reason than the generic status message below.
+        const attachBlock = attachmentBlockReason(lot, 'issued to a process');
+        if (attachBlock) throw new Error(attachBlock);
         // RULE 7: state-machine enforcement. ONLY IN STOCK (or LOW STOCK) lots may
         // be issued to a process. Anything IN PROCESS is already inside a machine
         // and must be blocked — no exceptions. A Growth Run still in the chamber
@@ -580,6 +586,20 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
             ]
           );
           childLot = inserted;
+        }
+
+        // Phase A (Seed Lifecycle): a Seed process lot entering a GROWTH
+        // chamber is physically embedded in the Partial Growth Run — mark it
+        // ATTACHED_TO_GROWTH (covers both the in-place full issue and the
+        // partial-split child). The biscuit itself (Growth Again) is NOT a
+        // seed attachment. The source-lot remainder stays NULL (AVAILABLE).
+        // Requires phase62 — deploy coupling documented in the migration.
+        if (isGrowthGroup && !isGrowthRun) {
+          await client.query(
+            `UPDATE inventory SET manufacturing_state = 'ATTACHED_TO_GROWTH', updated_at = NOW()
+             WHERE id = $1`,
+            [childLot.id]
+          );
         }
 
         // Deduct from source lot.
@@ -937,6 +957,8 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
 const {
   resolveAllowedOutputs, buildReturnPlan, reversalBlockReason,
 } = require('../services/returnRouting');
+// Phase A (Seed Lifecycle): shared attachment rule — see services/manufacturingState.js
+const { attachmentBlockReason } = require('../services/manufacturingState');
 
 // ── RETURN PREFLIGHT (read-only) ──────────────────────────────────────────────
 // POST /:id/return/validate — authoritative Return Plan with ZERO database
@@ -992,6 +1014,40 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
       biscuit = bRows.length === 1 ? bRows[0] : null;
     }
 
+    // Phase C: read-only attached-Seed resolution for the preflight — the
+    // same relational chain the posting transaction re-resolves under
+    // FOR UPDATE, so the UI sees the exact block reasons before submitting.
+    let attachedSeedCtx = null;
+    if (isGrowthRunInput && allowedOutputs.some(o => o.component)) {
+      const { rows: seedRows } = await pool.query(
+        `SELECT s.id, s.root_lot_id, s.weight, s.total_value FROM inventory s
+         WHERE s.manufacturing_state = 'ATTACHED_TO_GROWTH'
+           AND s.status = 'IN PROCESS'
+           AND s.id IN (
+             SELECT gi.process_lot_id FROM lot_process_issues gi
+             WHERE gi.status = 'RETURNED'
+               AND gi.machine_process_id IN (
+                 SELECT grc.machine_process_id FROM growth_run_cycles grc
+                 WHERE grc.growth_run_id = $1 AND grc.machine_process_id IS NOT NULL
+                 UNION
+                 SELECT ol.reference_id FROM lot_op_log ol
+                 WHERE ol.lot_id = $1 AND ol.reference_type = 'machine_process'
+                   AND ol.operation IN ('growth_run_created','growth_again')
+               )
+           )`,
+        [targetLotId]
+      );
+      const seedRoots = [...new Set(seedRows.map(r => r.root_lot_id || r.id))];
+      attachedSeedCtx = {
+        resolved: seedRows.length > 0,
+        candidateCount: seedRows.length,
+        rootCount: seedRoots.length,
+        rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+        refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
+        refValue:  seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+      };
+    }
+
     let openSiblingCount = 0;
     if (issue.machine_process_id) {
       const { rows: [s] } = await pool.query(
@@ -1005,6 +1061,7 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     const plan = buildReturnPlan({
       issue, processLot, biscuit, allowedOutputs, lines,
       measurements, openSiblingCount, biscuitCandidateCount,
+      attachedSeed: attachedSeedCtx,
     });
     if (!plan.valid) return res.json(plan);
 
@@ -1118,7 +1175,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // is the symmetric guard on the return side.)
     const isGrowthRun = processLot.category === 'growth_run';
 
-    if (isGrowthRun && lines.length > 1) {
+    // Phase C: COMPONENT mode (Seed Remove) legitimately posts multiple lines
+    // against a biscuit input — the single-disposition rule is QUANTITY-only.
+    const isComponentReturn = allowedOutputs.some(o => o.component);
+    if (isGrowthRun && !isComponentReturn && lines.length > 1) {
       throw new Error('Growth Run returns must use a single disposition.');
     }
 
@@ -1154,13 +1214,63 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const parentPath  = isSeed ? (processLot.genealogy_path || parentCode) : null;
     const seedLevel   = isSeed ? parentLevel + 1 : null;
 
+    // ── Phase C: authoritative attached-Seed resolution (Seed Remove) ────────
+    // Direct relational chain preferred: this biscuit's growth machine
+    // processes (relational growth_run_cycles rows; the biscuit's op-log
+    // growth references serve only as supporting disambiguation) → their
+    // COMPLETED growth issues (status RETURNED — a reversed growth return
+    // reopens the issue and drops out) → the issues' process lots that are
+    // still physically embedded: manufacturing_state = ATTACHED_TO_GROWTH
+    // AND status = IN PROCESS. ALL candidates are locked. The planner blocks
+    // on 0 candidates and on multiple distinct Seed roots — no fallback
+    // pricing, no guessed genealogy, no root collapsing.
+    let attachedSeeds = [];
+    let attachedSeedCtx = null;
+    if (isGrowthRun && isComponentReturn) {
+      const { rows: seedRows } = await client.query(
+        `SELECT s.* FROM inventory s
+         WHERE s.manufacturing_state = 'ATTACHED_TO_GROWTH'
+           AND s.status = 'IN PROCESS'
+           AND s.id IN (
+             SELECT gi.process_lot_id FROM lot_process_issues gi
+             WHERE gi.status = 'RETURNED'
+               AND gi.machine_process_id IN (
+                 SELECT grc.machine_process_id FROM growth_run_cycles grc
+                 WHERE grc.growth_run_id = $1 AND grc.machine_process_id IS NOT NULL
+                 UNION
+                 SELECT ol.reference_id FROM lot_op_log ol
+                 WHERE ol.lot_id = $1 AND ol.reference_type = 'machine_process'
+                   AND ol.operation IN ('growth_run_created','growth_again')
+               )
+           )
+         ORDER BY s.id
+         FOR UPDATE OF s`,
+        [processLot.id]
+      );
+      attachedSeeds = seedRows;
+      const seedRoots = [...new Set(attachedSeeds.map(r => r.root_lot_id || r.id))];
+      attachedSeedCtx = {
+        resolved: attachedSeeds.length > 0,
+        candidateCount: attachedSeeds.length,
+        rootCount: seedRoots.length,
+        rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+        refWeight: attachedSeeds.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
+        refValue:  attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+      };
+    }
+    // Allocation cursor: plan.component_allocation is index-aligned with the
+    // request lines, and every Seed Remove line flows through the CHILD block
+    // below in order.
+    let componentAllocCursor = 0;
+
     // ── Authoritative return plan ─────────────────────────────────────────────
     // buildReturnPlan is the SAME pure resolver the read-only preflight
     // (POST /:id/return/validate) uses. It is recomputed HERE from the LOCKED
     // row images — a previously returned preflight plan is never trusted.
     // It enforces the conservation gates (QUANTITY + COMPONENT modes), the
     // growth-identity route (BISCUIT / CHILD / REJECT), the missing-biscuit
-    // rejection and the GROWTH usable-output configuration-integrity rule.
+    // rejection, the GROWTH usable-output configuration-integrity rule, and
+    // (Phase C) the Seed Remove weight/value safety gates.
     let openSiblingCount = 0;
     if (issue.machine_process_id) {
       const { rows: [s] } = await client.query(
@@ -1173,6 +1283,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const plan = buildReturnPlan({
       issue, processLot, biscuit, allowedOutputs, lines,
       measurements, openSiblingCount, biscuitCandidateCount,
+      attachedSeed: attachedSeedCtx,
     });
     if (!plan.valid) throw new Error(plan.error);
     const remainingAfter = plan.remaining_after;
@@ -1180,6 +1291,11 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // dedicated branch in the line loop below; routesToBiscuit is ONLY the
     // full usable Growth Return that references the existing biscuit.
     const routesToBiscuit = plan.route === 'BISCUIT' && !plan.growth_run_input;
+
+    // Phase C: attached-Seed resolution and locking happen BEFORE the plan is
+    // computed (see above) — the plan itself validates the attachment context,
+    // the mandatory operator weights, the physical weight balance and the
+    // two-pool carrying-value allocation. No fallback path exists here.
 
     // 3. Create lot_process_returns header (backward compat summary)
     const returnNum   = await genReturnNum(client);
@@ -1275,7 +1391,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
 
       // Growth Run: no clone, no child lot. Record the return against the biscuit
       // itself so history/genealogy stay intact on the single record, then move on.
-      if (isGrowthRun) {
+      // Phase C: NOT for COMPONENT returns (Seed Remove) — those split the
+      // assembly into diamond + recovered-seed CHILD lots below.
+      if (isGrowthRun && !isComponentReturn) {
         await client.query(
           `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
            VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -1392,6 +1510,42 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       await logOp(client, childLot.id, `return_${line.type}`, 'lot_process_return', ret.id,
         qty, lotStatus, `${line.type} return from process (${returnNum})`, req.user.id);
 
+      // Phase C: Seed Remove children — authoritative values, never derived.
+      //   weight = operator-entered line weight EXACTLY (biscuit.weight is the
+      //            full assembly incl. the embedded seed, so proportional
+      //            derivation would double-count across the two families);
+      //   value  = planner's deterministic two-pool allocation (biscuit
+      //            carrying cost → diamond family, attached-Seed carrying
+      //            cost → seed family, residue on each family's last line);
+      //   seed-family rows additionally carry the EXACT original Seed root
+      //   (single root guaranteed by the planner — never the biscuit's own
+      //   root as a guess) and RECOVERED state for BOTH dispositions —
+      //   recovered rows are disposition containers, never new Seed roots.
+      if (isGrowthRun && isComponentReturn) {
+        const alloc = plan.component_allocation
+          ? plan.component_allocation[componentAllocCursor++]
+          : null;
+        const lineWeight = parseFloat(line.weight) || 0;
+        const lineValue  = alloc ? alloc.value : 0;
+        const lineRate   = qty > 0 ? Math.round((lineValue / qty) * 10000) / 10000 : 0;
+        if (outputRule.component === 'seed') {
+          await client.query(
+            `UPDATE inventory
+               SET rate=$1, total_value=$2, weight=$3, root_lot_id=$4,
+                   manufacturing_state='RECOVERED', updated_at=NOW()
+             WHERE id=$5`,
+            [lineRate, lineValue, lineWeight, attachedSeedCtx.rootLotId, childLot.id]
+          );
+        } else {
+          await client.query(
+            `UPDATE inventory
+               SET rate=$1, total_value=$2, weight=$3, updated_at=NOW()
+             WHERE id=$4`,
+            [lineRate, lineValue, lineWeight, childLot.id]
+          );
+        }
+      }
+
       outcomes.push({ type: line.type, lot_id: childLot.id, lot_code: childCode, qty, status: lotStatus });
     }
 
@@ -1399,7 +1553,49 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // post-cut measurements. Apply them to the SAME Growth Run row (in place — no
     // clone, no new genealogy node) and append a cycle-history entry so the
     // before/after dimensions are preserved.
-    const measureTarget = isGrowthRun
+    // ── Phase C item 10: immutable SEED_REMOVE posting snapshot ──────────────
+    // Stored in the EXISTING pre_state JSONB — no new migration required.
+    // reversal_supported:false + policy-driven eligibility: reversalBlockReason
+    // accepts only route='BISCUIT' snapshots, and the history `reversible`
+    // flag additionally requires reversal_supported ≠ 'false'. Seed Remove
+    // cancellation therefore stays DISABLED — snapshot presence alone never
+    // enables Cancel.
+    if (isGrowthRun && isComponentReturn) {
+      const snapshot = {
+        snapshot_type: 'SEED_REMOVE',
+        version: 1,
+        reversal_supported: false,
+        growth_number: processLot.lot_number,
+        run_no: processLot.run_no != null ? parseInt(processLot.run_no) : null,
+        issue_pre: {
+          id: issue.id, status: issue.status,
+          remaining_in_process: issue.remaining_in_process,
+        },
+        biscuit_pre: {
+          id: processLot.id, qty: processLot.qty, weight: processLot.weight,
+          total_value: processLot.total_value, status: processLot.status,
+          root_lot_id: processLot.root_lot_id,
+        },
+        attached_seeds_pre: attachedSeeds.map(s => ({
+          id: s.id, lot_code: s.lot_code || s.lot_number, qty: s.qty,
+          weight: s.weight, total_value: s.total_value, root_lot_id: s.root_lot_id,
+          status: s.status, manufacturing_state: s.manufacturing_state,
+        })),
+        value_pools: plan.value_pools,
+        weight_equation: plan.component_weight,
+        quantity_equation: { input: currentRemaining },
+        outputs: outcomes.map(o => ({ id: o.lot_id, lot_code: o.lot_code, type: o.type, qty: o.qty })),
+        genealogy: { parent_lot_id: processLot.id, seed_root_lot_id: attachedSeedCtx.rootLotId },
+      };
+      await client.query(
+        `UPDATE lot_process_returns SET pre_state = $1 WHERE id = $2`,
+        [JSON.stringify(snapshot), ret.id]
+      );
+    }
+
+    // Phase C: never measure the biscuit on a COMPONENT return — it was just
+    // consumed by the Seed Remove split.
+    const measureTarget = (isGrowthRun && !isComponentReturn)
       ? processLot
       : (routesToBiscuit ? biscuit : null);
     if (measureTarget && measurements && (
@@ -1448,12 +1644,60 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     );
 
     // 6. If final return: consume the process lot.
-    //    EXCEPTION — a Growth Run biscuit is never consumed by a return; it is a
-    //    single lifecycle record that survives downstream processes in place. It
-    //    is consumed only at Growth Output (roughGrowth). So for a biscuit we just
-    //    log the return-complete against the unchanged row.
+    //    EXCEPTION 1 — a Growth Run biscuit is never consumed by a return; it is
+    //    a single lifecycle record that survives downstream processes in place.
+    //    It is consumed only at Growth Output (roughGrowth). So for a biscuit we
+    //    just log the return-complete against the unchanged row.
+    //    EXCEPTION 2 (Phase B, Seed Lifecycle) — the full usable Growth Return
+    //    (BISCUIT route) returns the Growth ASSEMBLY; the Seed inside it is
+    //    NEVER consumed. The Seed process lot keeps its qty, weight and its own
+    //    carrying value (approved valuation: the biscuit carries growth value
+    //    only; assembly value = biscuit value + attached Seed value) and stays
+    //    IN PROCESS + ATTACHED_TO_GROWTH until Seed Remove (Phase C).
     if (isFinal) {
-      if (!isGrowthRun) {
+      if (routesToBiscuit) {
+        await client.query(
+          `UPDATE inventory
+             SET status='IN PROCESS', manufacturing_state='ATTACHED_TO_GROWTH', updated_at=NOW()
+           WHERE id=$1`,
+          [processLot.id]
+        );
+        await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
+          0, 'IN PROCESS',
+          `Growth return final (${returnNum}) — Seed stays ATTACHED_TO_GROWTH inside Growth Run ${biscuit.lot_number} until Seed Remove (qty/weight/value retained)`,
+          req.user.id);
+      } else if (isGrowthRun && isComponentReturn) {
+        // Phase C: Seed Remove split the assembly — the Partial Growth Run is
+        // no longer a usable inventory object. Its material continues as the
+        // diamond + recovered-seed children created above.
+        await client.query(
+          `UPDATE inventory
+             SET qty=0, weight=0, total_value=0, status='CONSUMED',
+                 manufacturing_state='RETIRED', updated_at=NOW()
+           WHERE id=$1`,
+          [processLot.id]
+        );
+        await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
+          -currentRemaining, 'CONSUMED',
+          `Seed Remove final (${returnNum}) — assembly split into Growth Diamond + Recovered Seed`,
+          req.user.id);
+        // The attached Seed identities retire: their material and carrying
+        // value moved onto the RECOVERED seed children (value conservation —
+        // nothing vanishes, nothing duplicates).
+        for (const s of attachedSeeds) {
+          await client.query(
+            `UPDATE inventory
+               SET qty=0, weight=0, total_value=0, status='CONSUMED',
+                   manufacturing_state='RETIRED', updated_at=NOW()
+             WHERE id=$1`,
+            [s.id]
+          );
+          await logOp(client, s.id, 'seed_retired', 'lot_process_return', ret.id,
+            -parseFloat(s.qty || 0), 'CONSUMED',
+            `Seed Remove (${returnNum}) — attached Seed retired; recovered material continues as the RECOVERED seed children of ${processLot.lot_number}`,
+            req.user.id);
+        }
+      } else if (!isGrowthRun) {
         await client.query(
           `UPDATE inventory SET qty=0, weight=0, total_value=0, status='CONSUMED', updated_at=NOW() WHERE id=$1`,
           [processLot.id]

@@ -733,7 +733,18 @@ export default function InventoryPage() {
           ? <span className={`badge ${opBadge[row.operation_type] || 'b-draft'}`}>{row.operation_type}</span>
           : '—';
       case 'status':
-        return <span className={`badge ${statusCls(row.status)}`}>{row.status}</span>;
+        return (
+          <>
+            <span className={`badge ${statusCls(row.status)}`}>{row.status}</span>
+            {row.manufacturing_state === 'ATTACHED_TO_GROWTH' && (
+              <span className="badge"
+                title="Seed physically embedded in an active Partial Growth Run — excluded from available stock until Seed Remove"
+                style={{ marginLeft: 4, background: '#FFF3E0', color: '#E65100', borderColor: '#FFCC80' }}>
+                ATTACHED
+              </span>
+            )}
+          </>
+        );
       case 'split_level':
         return row.split_level != null ? `L${row.split_level}` : '—';
       case 'qty':

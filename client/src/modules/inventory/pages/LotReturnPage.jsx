@@ -250,6 +250,20 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     c => Math.abs((componentTotals[c] || 0) - currentRemaining) <= 0.0001
   );
 
+  // Phase C (Seed Remove): per-family output weight totals + process loss.
+  // Explicit operator weight is MANDATORY on every qty>0 line — the backend
+  // plan rejects otherwise, which keeps Record Return disabled.
+  const familyWeights = {};
+  let missingWeightCount = 0;
+  if (isComponentMode) {
+    for (const l of lines) {
+      const comp = typeMap[l.type]?.component || 'other';
+      const w = parseFloat(l.weight) || 0;
+      familyWeights[comp] = (familyWeights[comp] || 0) + w;
+      if ((parseFloat(l.qty) || 0) > 0 && !(parseFloat(l.weight) > 0)) missingWeightCount++;
+    }
+  }
+
   const inputWeight  = parseFloat(issue?.process_lot_weight || 0);
   const outputWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
   const weightOver   = isComponentMode && inputWeight > 0 && outputWeight > inputWeight + 0.0001;
@@ -511,14 +525,44 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     />
                   );
                 })}
-                {inputWeight > 0 && (
+                {/* Phase C: family weight totals, assembly input and loss.
+                    biscuit.weight IS the full assembly (seed embedded), so the
+                    equation is growth-out + seed-out + loss = input. */}
+                {requiredComponents.map(comp => (
                   <BalanceRow
-                    label="Weight out / in"
-                    value={`${outputWeight.toFixed(4)} / ${inputWeight.toFixed(4)}`}
+                    key={`w-${comp}`}
+                    label={`${comp.charAt(0).toUpperCase() + comp.slice(1)} weight out`}
+                    value={(familyWeights[comp] || 0).toFixed(4)}
                     unit="ct"
-                    color={weightOver ? '#C62828' : '#2E7D32'}
-                    bold
                   />
+                ))}
+                {inputWeight > 0 && (
+                  <>
+                    <BalanceRow
+                      label="Input assembly weight"
+                      value={inputWeight.toFixed(4)}
+                      unit="ct"
+                      bold
+                    />
+                    <BalanceRow
+                      label="Process loss"
+                      value={(inputWeight - outputWeight).toFixed(4)}
+                      unit="ct"
+                      color={inputWeight - outputWeight < -0.0001 ? '#C62828' : 'var(--g600)'}
+                    />
+                    <BalanceRow
+                      label="Weight out / in"
+                      value={`${outputWeight.toFixed(4)} / ${inputWeight.toFixed(4)}`}
+                      unit="ct"
+                      color={weightOver ? '#C62828' : '#2E7D32'}
+                      bold
+                    />
+                  </>
+                )}
+                {missingWeightCount > 0 && (
+                  <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
+                    Weight is required for every line with quantity ({missingWeightCount} missing).
+                  </div>
                 )}
                 <div style={{ fontSize: 10, color: weightOver || !compEqual ? '#C62828' : 'var(--g500)',
                   fontWeight: 600, marginTop: 4 }}>
@@ -743,7 +787,13 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                             value={line[field]}
                             onChange={e => updateLine(line._id, field, e.target.value)}
                             style={{ width: '100%', padding: '5px 6px',
-                              border: '1px solid var(--g300)', borderRadius: 6,
+                              // Phase C: weight is mandatory per qty>0 line in
+                              // COMPONENT (Seed Remove) mode — highlight gaps.
+                              border: `1px solid ${
+                                field === 'weight' && isComponentMode && qtyVal > 0 &&
+                                !(parseFloat(line.weight) > 0)
+                                  ? '#EF9A9A' : 'var(--g300)'
+                              }`, borderRadius: 6,
                               fontSize: 12, fontFamily: 'var(--mono)',
                               outline: 'none', boxSizing: 'border-box',
                               color: 'var(--g700)' }}
@@ -860,6 +910,9 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                   <BalanceRow label="Lot →" value={plan.projected_inventory_status} />
                 )}
                 <BalanceRow label="Reversible" value={plan.reversal_supported ? 'YES' : 'NO'} />
+                {plan.seed_retained != null && (
+                  <BalanceRow label="Seed stays attached" value={plan.seed_retained ? 'YES' : 'NO'} />
+                )}
               </>
             )}
           </div>
