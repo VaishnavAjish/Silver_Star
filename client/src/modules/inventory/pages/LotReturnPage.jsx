@@ -280,17 +280,37 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
 
   const inputWeight  = parseFloat(issue?.process_lot_weight || 0);
   const outputWeight = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
-  const weightOver   = isComponentMode && inputWeight > 0 && outputWeight > inputWeight + 0.0001;
+
+  // Seed Remove weight-balance mode mirrors the server's config-driven rule
+  // (returnRouting.resolveWeightBalanceMode): a component config carrying BOTH
+  // a 'seed' and a 'diamond' family is SEED_REFERENCE_PLUS_GENERATED_GROWTH —
+  // the Growth (diamond) family is an independently measured, UNCAPPED output,
+  // so there is NO combined-mass ceiling. Authority remains the server plan.
+  const componentFamilySet = new Set(returnTypes.filter(t => t.component).map(t => t.component));
+  const isSeedReferenceMode = componentFamilySet.has('seed') && componentFamilySet.has('diamond');
+  const weightOver = isComponentMode && !isSeedReferenceMode
+    && inputWeight > 0 && outputWeight > inputWeight + 0.0001;
 
   const stillIn    = isComponentMode ? 0 : Math.max(0, currentRemaining - linesTotal);
   const difference = currentRemaining - linesTotal;
 
   // Phase 1 Engine: Strict Balance Requirement (QUANTITY mode);
-  // COMPONENT mode: each group equals the input, weight conserved.
+  // COMPONENT mode: each family equals the return quantity; weights validated
+  // per family (seed reference for seed, generated for growth) — no combined
+  // ceiling. Missing line weights block immediately (server also rejects).
   const balanced   = isComponentMode
-    ? (anyQty && compEqual && !weightOver)
+    ? (anyQty && compEqual && !weightOver && missingWeightCount === 0)
     : (Math.abs(difference) <= 0.0001 && linesTotal > 0.0001);
   const overFill   = isComponentMode ? compOver : difference < -0.0001;
+
+  // Seed Remove weight-summary display — prefer authoritative server plan
+  // values; fall back to local family sums for immediate input feedback.
+  const wb = plan?.weight_balance || null;
+  const seedRefDisp   = wb?.seed_reference_weight    != null ? Number(wb.seed_reference_weight)    : inputWeight;
+  const seedOutDisp   = wb?.seed_output_weight       != null ? Number(wb.seed_output_weight)       : (familyWeights.seed || 0);
+  const seedLossDisp  = wb?.seed_loss_weight         != null ? Number(wb.seed_loss_weight)         : Math.max(0, seedRefDisp - seedOutDisp);
+  const growthGenDisp = wb?.growth_generated_weight  != null ? Number(wb.growth_generated_weight)  : (familyWeights.diamond || 0);
+  const combinedDisp  = wb?.combined_output_weight   != null ? Number(wb.combined_output_weight)   : outputWeight;
 
   // Totals per type for balance panel
   const totByType = {};
@@ -545,53 +565,81 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     />
                   );
                 })}
-                {/* Phase C: family weight totals, assembly input and loss.
-                    biscuit.weight IS the full assembly (seed embedded), so the
-                    equation is growth-out + seed-out + loss = input. */}
-                {requiredComponents.map(comp => (
-                  <BalanceRow
-                    key={`w-${comp}`}
-                    label={`${comp.charAt(0).toUpperCase() + comp.slice(1)} weight out`}
-                    value={(familyWeights[comp] || 0).toFixed(4)}
-                    unit="ct"
-                  />
-                ))}
-                {inputWeight > 0 && (
+                {isSeedReferenceMode ? (
+                  /* Seed Remove (SEED_REFERENCE_PLUS_GENERATED_GROWTH): the seed
+                     family is bounded by the Seed reference weight; the Growth
+                     (diamond) family is an INDEPENDENTLY measured, uncapped CVD
+                     output. Seed and Growth weights are never summed against the
+                     input — combined output weight is informational only. */
                   <>
+                    <BalanceRow label="Seed Reference Weight" value={seedRefDisp.toFixed(4)} unit="ct" bold />
+                    <BalanceRow label="Seed Output Weight" value={seedOutDisp.toFixed(4)} unit="ct" />
                     <BalanceRow
-                      label="Input assembly weight"
-                      value={inputWeight.toFixed(4)}
+                      label={seedLossDisp > 0.0001 ? 'Seed Loss' : 'Seed Variance'}
+                      value={seedLossDisp.toFixed(4)}
                       unit="ct"
-                      bold
+                      color={seedOutDisp > seedRefDisp + 0.0001 ? '#C62828' : 'var(--g600)'}
                     />
-                    <BalanceRow
-                      label="Process loss"
-                      value={(inputWeight - outputWeight).toFixed(4)}
-                      unit="ct"
-                      color={inputWeight - outputWeight < -0.0001 ? '#C62828' : 'var(--g600)'}
-                    />
-                    <BalanceRow
-                      label="Weight out / in"
-                      value={`${outputWeight.toFixed(4)} / ${inputWeight.toFixed(4)}`}
-                      unit="ct"
-                      color={weightOver ? '#C62828' : '#2E7D32'}
-                      bold
-                    />
+                    <BalanceRow label="Growth Generated Weight" value={growthGenDisp.toFixed(4)} unit="ct" bold />
+                    <BalanceRow label="Total Physical Output (info only)" value={combinedDisp.toFixed(4)} unit="ct" />
+                    {missingWeightCount > 0 && (
+                      <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
+                        Growth weight is required for every line with quantity ({missingWeightCount} missing).
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, fontWeight: 600, marginTop: 4,
+                      color: (plan && !plan.valid) || !compEqual ? '#C62828' : 'var(--g500)' }}>
+                      {!compEqual
+                        ? 'Each family must equal the return quantity on its own — families are never summed.'
+                        : (plan && !plan.valid)
+                          ? (plan.error || 'Seed-family weight validation failed.')
+                          : 'Component Split — Valid. Seed bounded by reference; Growth measured independently.'}
+                    </div>
+                  </>
+                ) : (
+                  /* Legacy component mode: Σ output weight ≤ input (mass balance). */
+                  <>
+                    {requiredComponents.map(comp => (
+                      <BalanceRow
+                        key={`w-${comp}`}
+                        label={`${comp.charAt(0).toUpperCase() + comp.slice(1)} weight out`}
+                        value={(familyWeights[comp] || 0).toFixed(4)}
+                        unit="ct"
+                      />
+                    ))}
+                    {inputWeight > 0 && (
+                      <>
+                        <BalanceRow label="Input weight" value={inputWeight.toFixed(4)} unit="ct" bold />
+                        <BalanceRow
+                          label="Process loss"
+                          value={(inputWeight - outputWeight).toFixed(4)}
+                          unit="ct"
+                          color={inputWeight - outputWeight < -0.0001 ? '#C62828' : 'var(--g600)'}
+                        />
+                        <BalanceRow
+                          label="Weight out / in"
+                          value={`${outputWeight.toFixed(4)} / ${inputWeight.toFixed(4)}`}
+                          unit="ct"
+                          color={weightOver ? '#C62828' : '#2E7D32'}
+                          bold
+                        />
+                      </>
+                    )}
+                    {missingWeightCount > 0 && (
+                      <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
+                        Weight is required for every line with quantity ({missingWeightCount} missing).
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: weightOver || !compEqual ? '#C62828' : 'var(--g500)',
+                      fontWeight: 600, marginTop: 4 }}>
+                      {weightOver
+                        ? 'Output weight cannot exceed input weight — a component split cannot create mass.'
+                        : !compEqual
+                          ? 'Each group must equal the input quantity on its own — groups are never summed.'
+                          : 'Each group fully accounts for the input. Groups are never summed. Input is fully consumed.'}
+                    </div>
                   </>
                 )}
-                {missingWeightCount > 0 && (
-                  <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
-                    Weight is required for every line with quantity ({missingWeightCount} missing).
-                  </div>
-                )}
-                <div style={{ fontSize: 10, color: weightOver || !compEqual ? '#C62828' : 'var(--g500)',
-                  fontWeight: 600, marginTop: 4 }}>
-                  {weightOver
-                    ? 'Output weight cannot exceed input weight — a component split cannot create mass.'
-                    : !compEqual
-                      ? 'Each group must equal the input quantity on its own — groups are never summed.'
-                      : 'Each group fully accounts for the input. Groups are never summed. Input is fully consumed.'}
-                </div>
               </div>
             ) : (
               <>

@@ -23,6 +23,27 @@ function resolveAllowedOutputs(raw) {
 }
 
 /**
+ * Weight-balance mode, derived from the existing process output configuration
+ * (no new schema). A COMPONENT config that declares BOTH a 'seed' family and a
+ * 'diamond' (generated-growth) family is a Seed Remove split:
+ *
+ *   SEED_REFERENCE_PLUS_GENERATED_GROWTH — the seed family is bounded by the
+ *     Seed reference weight; the diamond family is an INDEPENDENTLY MEASURED,
+ *     uncapped CVD-grown output. Seed and Growth weights are NEVER summed and
+ *     compared against the input — combined output weight is informational only.
+ *
+ *   COMBINED_MASS — legacy default for any other component config: Σ output
+ *     weight may not exceed the input weight (a split cannot create mass).
+ */
+function resolveWeightBalanceMode(outputs) {
+  const families = new Set((outputs || []).filter(o => o && o.component).map(o => o.component));
+  if (families.has('seed') && families.has('diamond')) {
+    return 'SEED_REFERENCE_PLUS_GENERATED_GROWTH';
+  }
+  return 'COMBINED_MASS';
+}
+
+/**
  * Phase 1 growth-identity rule, decided ONCE per return from backend-calculated
  * quantities:
  *
@@ -206,6 +227,7 @@ function buildReturnPlan({
 
   const isGrowthRun = processLot.category === 'growth_run';
   const isComponentMode = outputs.some(o => o.component);
+  const weightBalanceMode = resolveWeightBalanceMode(outputs);
 
   // Growth Diamond → Rough Diamond in-place transformation (configuration-
   // driven — see the full branch below). Detected here so an inherently
@@ -225,7 +247,9 @@ function buildReturnPlan({
     return invalid('Growth Run returns must use a single disposition.');
 
   let returnTotal, remainingAfter;
-  let componentPlan = null; // Phase C: Seed Remove weight/value breakdown
+  let componentPlan = null;    // Phase C: Seed Remove weight/value breakdown
+  let quantityBalance = null;  // authoritative COMPONENT_FAMILY quantity balance
+  let weightBalance = null;    // authoritative weight balance (see weightBalanceMode)
   if (isComponentMode) {
     // The input is wholly transformed — nothing stays in process.
     remainingAfter = 0;
@@ -258,15 +282,21 @@ function buildReturnPlan({
       );
     }
 
-    const inputWeight  = parseFloat(processLot.weight || 0);
-    const outputWeight = lines.reduce((s, l) => (
-      s + (l.weight !== undefined && l.weight !== null && l.weight !== '' ? parseFloat(l.weight) : 0)
-    ), 0);
-    if (inputWeight > 0 && outputWeight > inputWeight + EPS) {
-      return invalid(
-        `Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — ` +
-        'a component split cannot create mass.'
-      );
+    // Legacy combined-mass ceiling: only for non-Seed-Remove component configs.
+    // SEED_REFERENCE_PLUS_GENERATED_GROWTH is EXEMPT — the diamond family is
+    // CVD-grown material measured for the first time at Seed Remove, so
+    // Σ(seed+growth) legitimately exceeds the Seed reference input weight.
+    if (weightBalanceMode === 'COMBINED_MASS') {
+      const inputWeight  = parseFloat(processLot.weight || 0);
+      const outputWeight = lines.reduce((s, l) => (
+        s + (l.weight !== undefined && l.weight !== null && l.weight !== '' ? parseFloat(l.weight) : 0)
+      ), 0);
+      if (inputWeight > 0 && outputWeight > inputWeight + EPS) {
+        return invalid(
+          `Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — ` +
+          'a component split cannot create mass.'
+        );
+      }
     }
 
     // ── Phase C: Seed Remove (COMPONENT return of a biscuit input) ───────────
@@ -302,38 +332,66 @@ function buildReturnPlan({
           return invalid(`A zero-quantity line must have zero or blank weight (line '${l.type}').`);
         }
       }
-      // (4) Physical balance: Σ output weights + loss = biscuit.weight, loss ≥ 0.
-      const biscuitWeight = parseFloat(processLot.weight || 0);
-      const totalOut = lines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
-      const loss = biscuitWeight - totalOut;
-      if (biscuitWeight > 0 && loss < -EPS)
-        return invalid(
-          `Total output weight ${totalOut.toFixed(4)} exceeds the input assembly ` +
-          `weight ${biscuitWeight.toFixed(4)} — negative process loss is impossible.`
-        );
-      // (5) Secondary Seed validation: Σ seed-family weight ≤ ref + tolerance.
+      // (4) Weight balance — SEED_REFERENCE_PLUS_GENERATED_GROWTH.
+      //     Seed and Growth families are validated INDEPENDENTLY. The diamond
+      //     (Growth) family is CVD-grown material, measured for the first time
+      //     here — it is uncapped and never summed with the seed family to test
+      //     against the input. There is NO combined-mass / negative-loss gate.
       const compOf = t => (outputs.find(o => o.type === t) || {}).component;
       const seedOutWeight = lines.filter(l => compOf(l.type) === 'seed')
         .reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
-      const growthOutWeight = lines.filter(l => compOf(l.type) === 'diamond')
+      const growthGeneratedWeight = lines.filter(l => compOf(l.type) === 'diamond')
         .reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
-      const refW = attachedSeed.refWeight != null ? parseFloat(attachedSeed.refWeight) : null;
-      if (refW != null && seedOutWeight > refW + EPS)
+
+      // Seed reference = existing canonical attached-Seed weight (NOT the biscuit
+      // "assembly" weight, which is the Seed reference, not a Seed+Growth mass).
+      const seedRefWeight = attachedSeed.refWeight != null ? parseFloat(attachedSeed.refWeight) : null;
+      // Seed-family output above the reference beyond tolerance (EPS — the
+      // engine's existing weight tolerance) remains INVALID.
+      if (seedRefWeight != null && seedOutWeight > seedRefWeight + EPS)
         return invalid(
-          `Recovered Seed weight ${seedOutWeight.toFixed(4)} exceeds the attached ` +
-          `Seed reference weight ${refW.toFixed(4)} beyond tolerance.`
+          `Recovered Seed weight ${seedOutWeight.toFixed(4)} exceeds the Seed ` +
+          `reference weight ${seedRefWeight.toFixed(4)} beyond tolerance.`
         );
-      // (6) Deterministic two-pool carrying-value allocation.
+      const seedVariance = seedRefWeight != null ? seedRefWeight - seedOutWeight : null;
+      const seedLossWeight = seedVariance != null && seedVariance > 0 ? seedVariance : 0;
+      const combinedOutputWeight = seedOutWeight + growthGeneratedWeight;
+
+      // (5) Deterministic two-pool carrying-value allocation (value conservation
+      //     unchanged — seed pool and growth pool never merge or duplicate).
       componentPlan = {
-        biscuit_weight: biscuitWeight,
-        growth_out_weight: growthOutWeight,
+        biscuit_weight: parseFloat(processLot.weight || 0), // Seed reference (informational)
+        growth_out_weight: growthGeneratedWeight,
         seed_out_weight: seedOutWeight,
-        loss,
+        seed_reference_weight: seedRefWeight,
+        seed_variance: seedVariance,
+        seed_loss: seedLossWeight,
+        combined_output_weight: combinedOutputWeight,
+        loss: seedLossWeight, // process loss is the SEED-side loss only (growth is generated)
         growth_pool: parseFloat(processLot.total_value) || 0,
         seed_pool: parseFloat(attachedSeed.refValue) || 0,
         allocation: allocateComponentValues(
           lines, outputs, processLot.total_value, attachedSeed.refValue
         ),
+      };
+
+      // Authoritative balances surfaced to the client (display-only there).
+      quantityBalance = {
+        return_qty: currentRemaining,
+        seed_family_qty: byComponent.seed || 0,
+        growth_family_qty: byComponent.diamond || 0,
+        seed_balanced: Math.abs((byComponent.seed || 0) - currentRemaining) <= EPS,
+        growth_balanced: Math.abs((byComponent.diamond || 0) - currentRemaining) <= EPS,
+      };
+      weightBalance = {
+        mode: weightBalanceMode,
+        seed_reference_weight: seedRefWeight,
+        seed_output_weight: seedOutWeight,
+        seed_loss_weight: seedLossWeight,
+        seed_variance: seedVariance,
+        growth_generated_weight: growthGeneratedWeight,
+        combined_output_weight: combinedOutputWeight,
+        combined_weight_is_informational: true,
       };
     }
   } else {
@@ -547,6 +605,11 @@ function buildReturnPlan({
     value_pools: componentPlan
       ? { growth: componentPlan.growth_pool, seed: componentPlan.seed_pool }
       : null,
+    // Authoritative Seed Remove balances (server is the single source of truth;
+    // the client displays these and never recomputes its own verdict).
+    weight_balance_mode: weightBalanceMode,
+    quantity_balance: quantityBalance,
+    weight_balance: weightBalance,
   };
 }
 
@@ -608,6 +671,7 @@ function normalizeGrowthUsableOutputs(processGroup, outputs) {
 
 module.exports = {
   resolveAllowedOutputs,
+  resolveWeightBalanceMode,
   resolveGrowthReturnRoute,
   buildReturnPlan,
   allocateComponentValues,

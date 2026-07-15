@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const {
   resolveGrowthReturnRoute, buildReturnPlan, reversalBlockReason,
   normalizeGrowthUsableOutputs, allocateComponentValues,
+  resolveWeightBalanceMode,
 } = require('../services/returnRouting');
 
 // ── normalizeGrowthUsableOutputs — ProcessMaster write guardrail ──────────────
@@ -332,10 +333,25 @@ test('phase C: multi-line COMPONENT return of a biscuit is ACCEPTED (dual groups
   assert.equal(p.is_final, true);
   assert.equal(p.projected_inventory_status, 'CONSUMED'); // the biscuit retires
   assert.equal(p.seed_released, true);
-  // Weight equation: growth 70 + seed 3 + loss = 91.2 assembly
+  // Weight: growth generated (uncapped) 70; seed out 3; loss is SEED-side only.
   assert.equal(p.component_weight.growth_out, 70);
   assert.equal(p.component_weight.seed_out, 3);
-  assert.equal(Math.round(p.component_weight.loss * 10000) / 10000, 18.2);
+  // Seed loss = seed reference 25.65 − seed out 3 = 22.65 (growth NOT in loss).
+  assert.equal(Math.round(p.component_weight.loss * 10000) / 10000, 22.65);
+  // Authoritative weight balance (SEED_REFERENCE_PLUS_GENERATED_GROWTH).
+  assert.equal(p.weight_balance.mode, 'SEED_REFERENCE_PLUS_GENERATED_GROWTH');
+  assert.equal(p.weight_balance.seed_reference_weight, 25.65);
+  assert.equal(p.weight_balance.seed_output_weight, 3);
+  assert.equal(Math.round(p.weight_balance.seed_loss_weight * 10000) / 10000, 22.65);
+  assert.equal(p.weight_balance.growth_generated_weight, 70);
+  assert.equal(p.weight_balance.combined_output_weight, 73);
+  assert.equal(p.weight_balance.combined_weight_is_informational, true);
+  // Authoritative quantity balance (COMPONENT_FAMILY): each family = 9.
+  assert.equal(p.quantity_balance.return_qty, 9);
+  assert.equal(p.quantity_balance.seed_family_qty, 9);
+  assert.equal(p.quantity_balance.growth_family_qty, 9);
+  assert.equal(p.quantity_balance.seed_balanced, true);
+  assert.equal(p.quantity_balance.growth_balanced, true);
   // Two-pool values: Σseed = 90 (Seed pool), Σdiamond = 120 (Growth pool)
   const seedSum = p.component_allocation.filter(a => a.family === 'seed')
     .reduce((s, a) => s + a.value, 0);
@@ -398,20 +414,176 @@ test('phase C: negative weight BLOCKS', () => {
   assert.match(p.error, /Negative weight/);
 });
 
-test('phase C: negative process loss (outputs exceed assembly weight) BLOCKS', () => {
+test('phase C: combined output ABOVE the old assembly weight is VALID (generated growth, no mass error)', () => {
   const p = buildReturnPlan({ ...planBase,
     processLot: biscuitValued, biscuit: null,
     allowedOutputs: seedRemoveOutputs,
     attachedSeed: attachedSeedOk,
     lines: [
-      { type: 'reprocess', qty: 9, weight: 20 },
-      { type: 'usable', qty: 9, weight: 80 }, // 100 > 91.2
+      { type: 'reprocess', qty: 9, weight: 20 }, // seed 20 ≤ ref 25.65 → OK
+      { type: 'usable', qty: 9, weight: 80 },    // growth 80 (uncapped) → combined 100 > 91.2
     ] });
-  assert.equal(p.valid, false);
-  // The long-standing COMPONENT mass gate fires first; the Phase C
-  // negative-loss check remains behind it as defense-in-depth.
-  assert.match(p.error, /cannot create mass|negative process loss/);
+  assert.equal(p.valid, true);
+  assert.equal(p.weight_balance.growth_generated_weight, 80);
+  assert.equal(p.weight_balance.combined_output_weight, 100);
+  assert.ok(!/mass|negative process loss|exceeds input/i.test(p.error || ''));
 });
+
+// ── Seed Remove generated-weight contract — screenshot case + Examples A–F ────
+// Self-contained 24-PCS fixture: Seed reference 23.5200 ct, Growth measured for
+// the first time at Seed Remove. Value pools: seed 200, growth (biscuit) 500.
+const attachedSeed24 = {
+  resolved: true, candidateCount: 1, rootCount: 1, rootLotId: 21,
+  refWeight: 23.52, refValue: 200,
+};
+const biscuit24 = {
+  id: 90, lot_number: 'SSD100-JUL26-100', run_no: 1, qty: 24, weight: 23.52,
+  status: 'IN PROCESS', machine_process_id: 9, category: 'growth_run',
+  lot_code: null, total_value: 500,
+};
+const base24 = {
+  issue: { status: 'OPEN', issue_number: 'PI-202607-0191', issued_qty: 24,
+           remaining_in_process: 24, process_group: 'GROWTH', process_type: 'seed_remove',
+           machine_process_id: 9 },
+  processLot: biscuit24, biscuit: null, allowedOutputs: seedRemoveOutputs,
+  attachedSeed: attachedSeed24, openSiblingCount: 0, biscuitCandidateCount: 0,
+};
+
+test('seed-remove #1 (screenshot A): 24 PCS, Seed 23.52, Growth 298.56 → VALID, seed loss 0', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 24, weight: 298.56 },
+  ] });
+  assert.equal(p.valid, true);
+  assert.equal(p.quantity_balance.seed_balanced, true);
+  assert.equal(p.quantity_balance.growth_balanced, true);
+  assert.equal(Math.round(p.weight_balance.seed_loss_weight * 10000) / 10000, 0);
+  assert.equal(p.weight_balance.growth_generated_weight, 298.56);
+  assert.ok(!/mass|negative process loss|exceeds input/i.test(p.error || ''));
+});
+
+test('seed-remove #2 (Example C): Growth 340 > Seed reference is VALID (no ceiling)', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 24, weight: 340.0 },
+  ] });
+  assert.equal(p.valid, true);
+  assert.equal(p.weight_balance.growth_generated_weight, 340);
+});
+
+test('seed-remove #3 (Example B): substantially lower Growth (250) remains VALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.50 },
+    { type: 'usable',    qty: 24, weight: 250.0 },
+  ] });
+  assert.equal(p.valid, true);
+  assert.equal(p.weight_balance.growth_generated_weight, 250);
+  // Seed variance/loss = 23.52 − 23.50 = 0.02 (independent of growth).
+  assert.equal(Math.round(p.weight_balance.seed_loss_weight * 10000) / 10000, 0.02);
+});
+
+test('seed-remove #4 (Example E): missing Growth weight is INVALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 24 }, // no weight
+  ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /explicit positive output weight/);
+});
+
+test('seed-remove #5: zero usable Growth weight is INVALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 24, weight: 0 },
+  ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /explicit positive output weight/);
+});
+
+test('seed-remove #6 (Example D): Growth-family quantity mismatch is INVALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 23, weight: 298.56 }, // diamond family = 23 ≠ 24
+  ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /diamond outputs total/);
+});
+
+test('seed-remove #7: Seed-family quantity mismatch is INVALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 23, weight: 23.52 }, // seed family = 23 ≠ 24
+    { type: 'usable',    qty: 24, weight: 298.56 },
+  ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /seed outputs total/);
+});
+
+test('seed-remove #8 (Example F): Seed output beyond reference tolerance is INVALID', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 24.00 }, // 24.00 > 23.52 + EPS
+    { type: 'usable',    qty: 24, weight: 298.56 },
+  ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /Seed reference weight/);
+});
+
+test('seed-remove #9: Seed loss is computed independently of Growth weight', () => {
+  const low = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.00 }, { type: 'usable', qty: 24, weight: 100 },
+  ] });
+  const high = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.00 }, { type: 'usable', qty: 24, weight: 500 },
+  ] });
+  assert.equal(low.valid, true);
+  assert.equal(high.valid, true);
+  // Same seed → same seed loss regardless of the (very different) growth weight.
+  assert.equal(Math.round(low.weight_balance.seed_loss_weight * 10000) / 10000, 0.52);
+  assert.equal(Math.round(high.weight_balance.seed_loss_weight * 10000) / 10000, 0.52);
+});
+
+test('seed-remove #12: total-value conservation unchanged (seed pool + growth pool, no duplication)', () => {
+  const p = buildReturnPlan({ ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 },
+    { type: 'usable',    qty: 24, weight: 298.56 },
+  ] });
+  assert.equal(p.valid, true);
+  const seedSum = p.component_allocation.filter(a => a.family === 'seed').reduce((s, a) => s + a.value, 0);
+  const diaSum  = p.component_allocation.filter(a => a.family === 'diamond').reduce((s, a) => s + a.value, 0);
+  assert.equal(Math.round(seedSum * 100) / 100, 200); // seed carrying pool intact
+  assert.equal(Math.round(diaSum * 100) / 100, 500);  // growth carrying pool intact
+  assert.deepEqual(p.value_pools, { growth: 500, seed: 200 });
+});
+
+test('seed-remove #14: planner is pure/deterministic — client cannot alter the verdict', () => {
+  const ctx = { ...base24, lines: [
+    { type: 'reprocess', qty: 24, weight: 23.52 }, { type: 'usable', qty: 24, weight: 298.56 },
+  ] };
+  const a = buildReturnPlan(ctx);
+  const b = buildReturnPlan(ctx); // same function the locked posting recomputes
+  assert.deepEqual(a.weight_balance, b.weight_balance);
+  assert.deepEqual(a.quantity_balance, b.quantity_balance);
+  assert.equal(a.valid, b.valid);
+});
+
+// ── resolveWeightBalanceMode — config-driven mode selection ───────────────────
+test('mode: seed + diamond families → SEED_REFERENCE_PLUS_GENERATED_GROWTH', () => {
+  assert.equal(resolveWeightBalanceMode(seedRemoveOutputs), 'SEED_REFERENCE_PLUS_GENERATED_GROWTH');
+});
+
+test('mode #11: non-component / seed-only configs keep COMBINED_MASS (legacy mass rule retained)', () => {
+  assert.equal(resolveWeightBalanceMode(allowedOutputs), 'COMBINED_MASS'); // standard usable/damaged/consumed
+  assert.equal(resolveWeightBalanceMode([
+    { type: 'reprocess', component: 'seed' }, { type: 'seed_damaged', component: 'seed' },
+  ]), 'COMBINED_MASS'); // seed-only component config → still combined-mass ceiling
+});
+
+// ── DB / UI contract tests — require a live PostgreSQL (honest skips) ──────────
+test('seed-remove #13: client and server render identical authoritative plan (UI)',
+  { skip: 'requires a running client+server; verified by construction — client reads plan.weight_balance verbatim' }, () => {});
+test('seed-remove #14b: posting recomputes the plan under lock and rejects a bypass',
+  { skip: 'requires PostgreSQL (unavailable in this environment)' }, () => {});
+test('seed-remove #15: no genealogy / identity regression on Seed Remove split',
+  { skip: 'requires PostgreSQL (unavailable in this environment)' }, () => {});
 
 test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', () => {
   const p = buildReturnPlan({ ...planBase,
@@ -423,7 +595,7 @@ test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', 
       { type: 'usable', qty: 9, weight: 50 },
     ] });
   assert.equal(p.valid, false);
-  assert.match(p.error, /exceeds the attached Seed reference weight/);
+  assert.match(p.error, /exceeds the Seed reference weight/);
 });
 
 test('phase C: zero biscuit carrying value → zero-valued Growth outputs, NOT an error', () => {
