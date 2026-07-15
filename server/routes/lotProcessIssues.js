@@ -978,15 +978,14 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
  * paths always land on one item record. Called inside a transaction.
  */
 async function ensureRoughItem(client) {
-  let r = await client.query(
-    "SELECT id, unit FROM items WHERE category = 'rough' AND status = 'active' LIMIT 1"
+  const r = await client.query(
+    "SELECT id, default_uom AS unit FROM items WHERE category = 'rough' AND status = 'active'"
   );
   if (r.rows.length === 0) {
-    r = await client.query(`
-      INSERT INTO items (code, name, category, type, status, default_uom)
-      VALUES ('ROUGH-001', 'Rough Diamond', 'rough', 'raw_material', 'active', 'CT')
-      RETURNING id, unit
-    `);
+    throw new Error('Canonical rough item not found — cannot process rough output.');
+  }
+  if (r.rows.length > 1) {
+    throw new Error(`Multiple active canonical rough items found (${r.rows.length}) — database ambiguous.`);
   }
   return r.rows[0];
 }
@@ -1575,15 +1574,17 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         await client.query(
           `UPDATE inventory
              SET item_id    = $1,
-                 weight     = $2,
-                 dim_length = COALESCE($3, dim_length),
-                 dim_depth  = COALESCE($4, dim_depth),
-                 dim_height = COALESCE($5, dim_height),
-                 dim_unit   = COALESCE($6, dim_unit),
+                 unit       = $2,
+                 weight     = $3,
+                 dim_length = COALESCE($4, dim_length),
+                 dim_depth  = COALESCE($5, dim_depth),
+                 dim_height = COALESCE($6, dim_height),
+                 dim_unit   = COALESCE($7, dim_unit),
                  updated_at = NOW()
-           WHERE id = $7`,
+           WHERE id = $8`,
           [
             roughItem.id,
+            roughItem.unit,
             outputWeight,
             measurements && measurements.length != null && measurements.length !== '' ? parseFloat(measurements.length) : null,
             measurements && measurements.width  != null && measurements.width  !== '' ? parseFloat(measurements.width)  : null,
@@ -1625,7 +1626,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         const { rows: ruleItemRows } = await client.query('SELECT * FROM items WHERE category = $1 ORDER BY id LIMIT 1', [outputRule.item_category_override]);
         if (ruleItemRows.length) {
           outItemId = ruleItemRows[0].id;
-          outUnit = ruleItemRows[0].unit;
+          outUnit = ruleItemRows[0].default_uom;
           outRough = ['CTS', 'g', 'mg'].includes(outUnit) || (ruleItemRows[0].category === 'rough_diamond' || ruleItemRows[0].category === 'growth_diamond');
         }
       }
@@ -1634,7 +1635,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         const { rows: iRows } = await client.query('SELECT * FROM items WHERE id = $1', [line.item_id]);
         if (iRows.length) {
           outItemId = iRows[0].id;
-          outUnit = iRows[0].unit;
+          outUnit = iRows[0].default_uom;
           outRough = ['CTS', 'g', 'mg'].includes(outUnit) || (iRows[0].category === 'rough_diamond' || iRows[0].category === 'growth_diamond');
         }
       }
@@ -1862,10 +1863,12 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         if (!seedRow)
           throw new Error('Seed Remove detach: attached Seed identity changed under lock — aborting.');
         const { rows: gdItem } = await client.query(
-          "SELECT id, unit FROM items WHERE category = 'growth_diamond' ORDER BY id LIMIT 1"
+          "SELECT id, default_uom AS unit FROM items WHERE category = 'growth_diamond' AND status = 'active'"
         );
-        if (!gdItem.length)
+        if (gdItem.length === 0)
           throw new Error('Canonical growth_diamond item not found — cannot transform Growth carrier.');
+        if (gdItem.length > 1)
+          throw new Error(`Multiple active canonical growth_diamond items found (${gdItem.length}) — database ambiguous.`);
 
         // Growth carrier: SAME row → growth_diamond, IN STOCK. Value conserved
         // (keeps its own growth pool); qty is the ACTUAL returned Growth qty
@@ -1882,7 +1885,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
                  rate = $10, total_value = $11,
                  manufacturing_state = 'AVAILABLE', updated_at = NOW()
            WHERE id = $12`,
-          [gdItem[0].id, processLot.unit, ct.status, ct.qty, ct.weight,
+          [gdItem[0].id, gdItem[0].unit, ct.status, ct.qty, ct.weight,
            ct.dim_length, ct.dim_depth, ct.dim_height, ct.dim_unit,
            carrierRate, carrierValue, processLot.id]
         );
