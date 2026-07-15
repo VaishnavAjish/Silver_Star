@@ -267,8 +267,8 @@ async function run() {
       lpi.issued_qty,
       lpi.remaining_in_process,
       mp.machine_id,
-      m.machine_name,
-      m.machine_code,
+      m.name            AS machine_name,
+      m.code            AS machine_code,
       mp.process_number,
       mp.status         AS mp_status
     FROM lot_process_issues lpi
@@ -284,7 +284,7 @@ async function run() {
   // Active machine processes for legacy codes
   const activeMpLegacy = (await client.query(`
     SELECT mp.id, mp.process_type, mp.status, mp.machine_id,
-           m.machine_name, m.machine_code,
+           m.name AS machine_name, m.code AS machine_code,
            mp.started_at, mp.completed_at
     FROM machine_processes mp
     LEFT JOIN machines m ON m.id = mp.machine_id
