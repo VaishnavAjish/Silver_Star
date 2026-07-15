@@ -44,6 +44,26 @@ function resolveWeightBalanceMode(outputs) {
 }
 
 /**
+ * Component posting strategy, derived from the existing process output config.
+ *
+ *   DETACH_TRANSFORM_IN_PLACE — Seed Remove asymmetric detach. Recognised when
+ *     the config carries a 'seed' family that releases to the seed category AND
+ *     a 'diamond' family whose usable output transforms the carrier to
+ *     growth_diamond. The existing Growth Run (carrier) row is transformed in
+ *     place to Growth Diamond and the SAME attached Seed row is released in
+ *     place — NO child inventory identities, no -R1/-S1 lots.
+ *
+ *   COMPONENT_CHILD_SPLIT — legacy default: consume the source and create one
+ *     child inventory row per output line.
+ */
+function resolveComponentStrategy(outputs) {
+  const rules = (outputs || []).filter(o => o && o.component);
+  const seedReleases      = rules.some(o => o.component === 'seed'    && o.item_category_override === 'seed');
+  const carrierTransforms = rules.some(o => o.component === 'diamond' && o.item_category_override === 'growth_diamond');
+  return (seedReleases && carrierTransforms) ? 'DETACH_TRANSFORM_IN_PLACE' : 'COMPONENT_CHILD_SPLIT';
+}
+
+/**
  * Phase 1 growth-identity rule, decided ONCE per return from backend-calculated
  * quantities:
  *
@@ -250,6 +270,7 @@ function buildReturnPlan({
   let componentPlan = null;    // Phase C: Seed Remove weight/value breakdown
   let quantityBalance = null;  // authoritative COMPONENT_FAMILY quantity balance
   let weightBalance = null;    // authoritative weight balance (see weightBalanceMode)
+  let detachTargets = null;    // Seed Remove in-place detach carrier + seed targets
   if (isComponentMode) {
     // The input is wholly transformed — nothing stays in process.
     remainingAfter = 0;
@@ -393,6 +414,55 @@ function buildReturnPlan({
         combined_output_weight: combinedOutputWeight,
         combined_weight_is_informational: true,
       };
+
+      // Seed Remove ASYMMETRIC DETACH: transform the existing Growth carrier row
+      // in place (growth_run → growth_diamond) and release the SAME attached Seed
+      // row — no child identities. Authoritative target IDs are resolved HERE by
+      // the shared planner; the client never chooses them, and posting revalidates
+      // them under lock.
+      if (resolveComponentStrategy(outputs) === 'DETACH_TRANSFORM_IN_PLACE') {
+        const seedLines = lines.filter(l => compOf(l.type) === 'seed');
+        const diaLines  = lines.filter(l => compOf(l.type) === 'diamond');
+        if (seedLines.length !== 1 || diaLines.length !== 1)
+          return invalid(
+            'Seed Remove (in-place detach) requires exactly one Recovered-Seed line and one ' +
+            'Growth-Diamond line — splitting a family into multiple dispositions would create ' +
+            'extra inventory identities and is not supported.'
+          );
+        // Exactly one attached Seed identity is required to release in place.
+        if (!attachedSeed.inventoryId)
+          return invalid(
+            'Seed Remove requires exactly one attached Seed inventory identity to release in ' +
+            'place — the attached Seed is missing or ambiguous.'
+          );
+        const seedRule = outputs.find(o => o.type === seedLines[0].type);
+        const diaRule  = outputs.find(o => o.type === diaLines[0].type);
+        const mnum = v => (v != null && v !== '' ? parseFloat(v) : null);
+        detachTargets = {
+          growth_carrier_inventory_id: processLot.id,
+          attached_seed_inventory_id: attachedSeed.inventoryId,
+          carrier_target: {
+            inventory_id: processLot.id,
+            item_category: diaRule.item_category_override || 'growth_diamond',
+            status: diaRule.status || 'IN STOCK',
+            qty: parseFloat(diaLines[0].qty),
+            weight: parseFloat(diaLines[0].weight),
+            // Growth output dimensions (operator-measured); posting COALESCEs so a
+            // blank field never nulls an existing dimension.
+            dim_length: measurements ? mnum(measurements.length) : null,
+            dim_depth:  measurements ? mnum(measurements.width)  : null,
+            dim_height: measurements ? mnum(measurements.height) : null,
+            dim_unit:   measurements && measurements.dim_unit ? measurements.dim_unit : null,
+          },
+          seed_target: {
+            inventory_id: attachedSeed.inventoryId,
+            item_category: seedRule.item_category_override || 'seed',
+            status: seedRule.status || 'IN STOCK',
+            qty: parseFloat(seedLines[0].qty),
+            weight: parseFloat(seedLines[0].weight),
+          },
+        };
+      }
     }
   } else {
     returnTotal    = lines.reduce((s, l) => s + parseFloat(l.qty), 0);
@@ -568,6 +638,34 @@ function buildReturnPlan({
     };
   }
 
+  // Seed Remove ASYMMETRIC DETACH — transform the carrier + release the attached
+  // Seed in place. No child inventory identities; both existing IDs are reused.
+  if (detachTargets) {
+    return {
+      ...common,
+      route: 'DETACH_TRANSFORM',
+      detach_transform: true,
+      in_place: true,
+      strategy: 'DETACH_TRANSFORM_IN_PLACE',
+      will_create_new_lot: false,
+      creates_new_lot: false,
+      growth_carrier_inventory_id: detachTargets.growth_carrier_inventory_id,
+      attached_seed_inventory_id:  detachTargets.attached_seed_inventory_id,
+      carrier_target: detachTargets.carrier_target,
+      seed_target:    detachTargets.seed_target,
+      growth_number:  processLot.lot_number,
+      run_no:         processLot.run_no != null ? parseInt(processLot.run_no) : null,
+      // Value conservation: each identity keeps its own family pool — no dup.
+      value_pools:    componentPlan ? { growth: componentPlan.growth_pool, seed: componentPlan.seed_pool } : null,
+      component_allocation: null,
+      quantity_balance:  quantityBalance,
+      weight_balance:    weightBalance,
+      weight_balance_mode: weightBalanceMode,
+      seed_released: true,
+      reversal_supported: false,
+    };
+  }
+
   // CHILD — legacy child-lot behaviour (per-line codes are generated by the
   // caller with nextReturnLotCode; a pure function cannot read the sequence).
   return {
@@ -672,6 +770,7 @@ function normalizeGrowthUsableOutputs(processGroup, outputs) {
 module.exports = {
   resolveAllowedOutputs,
   resolveWeightBalanceMode,
+  resolveComponentStrategy,
   resolveGrowthReturnRoute,
   buildReturnPlan,
   allocateComponentValues,

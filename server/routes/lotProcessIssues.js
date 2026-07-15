@@ -1084,6 +1084,9 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
         candidateCount: seedRows.length,
         rootCount: seedRoots.length,
         rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+        // Authoritative single attached-Seed identity for the in-place detach
+        // (null when missing/ambiguous → planner rejects the detach).
+        inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
         refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
         refValue:  seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
       };
@@ -1296,6 +1299,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         candidateCount: attachedSeeds.length,
         rootCount: seedRoots.length,
         rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+        inventoryId: attachedSeeds.length === 1 ? attachedSeeds[0].id : null,
         refWeight: attachedSeeds.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
         refValue:  attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
       };
@@ -1337,6 +1341,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // planner-approved): the SAME row changes category/weight/dims — no child
     // lot, no consumption, identity and genealogy untouched.
     const isTransformReturn = plan.route === 'TRANSFORM_IN_PLACE';
+    // Seed Remove ASYMMETRIC DETACH: transform the Growth carrier row in place
+    // and release the SAME attached Seed row — no child inventory identities.
+    const isDetachTransform = plan.route === 'DETACH_TRANSFORM';
 
     // Phase C: attached-Seed resolution and locking happen BEFORE the plan is
     // computed (see above) — the plan itself validates the attachment context,
@@ -1492,6 +1499,25 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       const outputRule = allowedOutputs.find(o => o.type === line.type);
       const suffix     = outputRule.suffix;
       const lotStatus  = outputRule.status;
+
+      // Seed Remove in-place detach: record each family line against its EXISTING
+      // target identity (carrier for diamond, attached Seed for seed) — never a
+      // child lot. The actual in-place row transforms happen in the isFinal block.
+      if (isDetachTransform) {
+        const isSeedFam  = outputRule.component === 'seed';
+        const targetId   = isSeedFam ? plan.attached_seed_inventory_id : plan.growth_carrier_inventory_id;
+        const targetCode = isSeedFam
+          ? (attachedSeeds[0] ? (attachedSeeds[0].lot_code || attachedSeeds[0].lot_number) : null)
+          : (processLot.lot_code || processLot.lot_number);
+        await client.query(
+          `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [ret.id, line.type, qty, targetId, targetCode, line.remarks || null]
+        );
+        outcomes.push({ type: line.type, lot_id: targetId, lot_code: targetCode, qty,
+          weight: parseFloat(line.weight) || 0, status: outputRule.status, in_place: true });
+        continue;
+      }
 
       // Growth Run: no clone, no child lot. Record the return against the biscuit
       // itself so history/genealogy stay intact on the single record, then move on.
@@ -1823,7 +1849,66 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           0, 'IN PROCESS',
           `Growth return final (${returnNum}) — Seed stays ATTACHED_TO_GROWTH inside Growth Run ${biscuit.lot_number} until Seed Remove (qty/weight/value retained)`,
           req.user.id);
-      } else if (isGrowthRun && isComponentReturn) {
+      } else if (isDetachTransform) {
+        // Seed Remove ASYMMETRIC DETACH — transform the Growth carrier row in
+        // place (growth_run → growth_diamond) and release the SAME attached Seed
+        // row. No child inventory identities; both existing IDs are preserved.
+        const ct = plan.carrier_target;
+        const st = plan.seed_target;
+        // Revalidate authoritative targets against the LOCKED row images.
+        if (!ct || !st || ct.inventory_id !== processLot.id)
+          throw new Error('Seed Remove detach: Growth carrier identity changed under lock — aborting.');
+        const seedRow = attachedSeeds.find(s => s.id === st.inventory_id);
+        if (!seedRow)
+          throw new Error('Seed Remove detach: attached Seed identity changed under lock — aborting.');
+        const { rows: gdItem } = await client.query(
+          "SELECT id, unit FROM items WHERE category = 'growth_diamond' ORDER BY id LIMIT 1"
+        );
+        if (!gdItem.length)
+          throw new Error('Canonical growth_diamond item not found — cannot transform Growth carrier.');
+
+        // Growth carrier: SAME row → growth_diamond, IN STOCK. Value conserved
+        // (keeps its own growth pool); qty is the ACTUAL returned Growth qty
+        // (never forced to 1); unit stays the carrier's canonical PCS unit.
+        const carrierValue = parseFloat(processLot.total_value) || 0;
+        const carrierRate  = ct.qty > 0 ? Math.round((carrierValue / ct.qty) * 10000) / 10000 : parseFloat(processLot.rate || 0);
+        await client.query(
+          `UPDATE inventory
+             SET item_id = $1, unit = $2, status = $3, qty = $4, weight = $5,
+                 dim_length = COALESCE($6, dim_length),
+                 dim_depth  = COALESCE($7, dim_depth),
+                 dim_height = COALESCE($8, dim_height),
+                 dim_unit   = COALESCE($9, dim_unit),
+                 rate = $10, total_value = $11,
+                 manufacturing_state = 'AVAILABLE', updated_at = NOW()
+           WHERE id = $12`,
+          [gdItem[0].id, processLot.unit, ct.status, ct.qty, ct.weight,
+           ct.dim_length, ct.dim_depth, ct.dim_height, ct.dim_unit,
+           carrierRate, carrierValue, processLot.id]
+        );
+        await logOp(client, processLot.id, 'seed_remove_carrier_transform', 'lot_process_return', ret.id,
+          0, ct.status,
+          `Seed Remove (${returnNum}) — Growth carrier ${processLot.lot_number} transformed in place ` +
+          `growth_run → growth_diamond (same identity, no -R1): qty ${ct.qty}, weight ${Number(ct.weight).toFixed(4)} ct → ${ct.status}`,
+          req.user.id);
+
+        // Attached Seed: SAME row released back to stock (never consumed).
+        // Root lineage and lot name preserved; dims retained from the row.
+        const seedValue = parseFloat(seedRow.total_value) || 0;
+        const seedRate  = st.qty > 0 ? Math.round((seedValue / st.qty) * 10000) / 10000 : parseFloat(seedRow.rate || 0);
+        await client.query(
+          `UPDATE inventory
+             SET status = $1, qty = $2, weight = $3, rate = $4, total_value = $5,
+                 manufacturing_state = 'AVAILABLE', updated_at = NOW()
+           WHERE id = $6`,
+          [st.status, st.qty, st.weight, seedRate, seedValue, seedRow.id]
+        );
+        await logOp(client, seedRow.id, 'seed_remove_release', 'lot_process_return', ret.id,
+          0, st.status,
+          `Seed Remove (${returnNum}) — attached Seed ${seedRow.lot_code || seedRow.lot_number} released in place ` +
+          `(same identity, no -S1; root lineage preserved): qty ${st.qty}, weight ${Number(st.weight).toFixed(4)} ct → ${st.status}, detached`,
+          req.user.id);
+      } else if (isGrowthRun && isComponentReturn && !isDetachTransform) {
         // Phase C: Seed Remove split the assembly — the Partial Growth Run is
         // no longer a usable inventory object. Its material continues as the
         // diamond + recovered-seed children created above.

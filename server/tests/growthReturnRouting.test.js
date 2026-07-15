@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const {
   resolveGrowthReturnRoute, buildReturnPlan, reversalBlockReason,
   normalizeGrowthUsableOutputs, allocateComponentValues,
-  resolveWeightBalanceMode,
+  resolveWeightBalanceMode, resolveComponentStrategy,
 } = require('../services/returnRouting');
 
 // ── normalizeGrowthUsableOutputs — ProcessMaster write guardrail ──────────────
@@ -311,7 +311,8 @@ const biscuitInput = { ...planBiscuit, category: 'growth_run', lot_code: null };
 // and a valued biscuit. Seed pool 90 (carrying cost), Growth pool 120,
 // assembly weight 91.2 ct, seed reference weight 25.65 ct.
 const attachedSeedOk = {
-  resolved: true, candidateCount: 2, rootCount: 1, rootLotId: 11,
+  resolved: true, candidateCount: 1, rootCount: 1, rootLotId: 11,
+  inventoryId: 55, // single attached Seed identity (in-place release target)
   refWeight: 25.65, refValue: 90,
 };
 const biscuitValued = { ...planBiscuit, category: 'growth_run', lot_code: null, total_value: 120 };
@@ -320,51 +321,70 @@ const seedRemoveLines = [
   { type: 'usable', qty: 8, weight: 60 },   { type: 'diamond_damaged', qty: 1, weight: 10 },
 ];
 
-test('phase C: multi-line COMPONENT return of a biscuit is ACCEPTED (dual groups, both = input)', () => {
+test('phase C (detach): clean Seed Remove → in-place DETACH_TRANSFORM, no child identities', () => {
+  const p = buildReturnPlan({ ...planBase,
+    processLot: biscuitValued, biscuit: null,
+    allowedOutputs: seedRemoveOutputs,
+    attachedSeed: attachedSeedOk, // single seed, inventoryId 55
+    lines: [
+      { type: 'reprocess', qty: 9, weight: 3 },  // Recovered Seed (released in place)
+      { type: 'usable',    qty: 9, weight: 70 }, // Growth Diamond (carrier transformed)
+    ] });
+  assert.equal(p.valid, true);
+  assert.equal(p.route, 'DETACH_TRANSFORM');
+  assert.equal(p.detach_transform, true);
+  assert.equal(p.component_mode, true);
+  assert.equal(p.is_final, true);
+  // No child identities are created (both existing rows reused).
+  assert.equal(p.will_create_new_lot, false);
+  assert.equal(p.component_allocation, null);
+  // Authoritative target IDs resolved by the planner (client never chooses).
+  assert.equal(p.growth_carrier_inventory_id, biscuitValued.id); // carrier = Growth Run row
+  assert.equal(p.attached_seed_inventory_id, 55);                // SAME attached Seed row
+  assert.equal(p.carrier_target.item_category, 'growth_diamond');
+  assert.equal(p.carrier_target.qty, 9);   // actual Growth qty, NEVER forced to 1
+  assert.equal(p.carrier_target.weight, 70);
+  assert.equal(p.carrier_target.status, 'IN STOCK');
+  assert.equal(p.seed_target.qty, 9);
+  assert.equal(p.seed_target.weight, 3);
+  assert.equal(p.seed_target.status, 'IN STOCK');
+  // Weight balance still authoritative (seed bounded, growth generated).
+  assert.equal(p.weight_balance.seed_output_weight, 3);
+  assert.equal(p.weight_balance.growth_generated_weight, 70);
+  // Value pools preserved per identity — no duplication, no allocation.
+  assert.deepEqual(p.value_pools, { growth: 120, seed: 90 });
+  assert.equal(p.growth_number, 'SSD087-JUL26-028');
+  assert.equal(p.run_no, 1);
+});
+
+test('phase C (detach): multi-disposition Seed Remove is REJECTED (would create extra identities)', () => {
   const p = buildReturnPlan({ ...planBase,
     processLot: biscuitValued, biscuit: null,
     allowedOutputs: seedRemoveOutputs,
     attachedSeed: attachedSeedOk,
-    lines: seedRemoveLines });
-  assert.equal(p.valid, true);
-  assert.equal(p.route, 'CHILD');
-  assert.equal(p.component_mode, true);
-  assert.equal(p.will_create_new_lot, true);
-  assert.equal(p.is_final, true);
-  assert.equal(p.projected_inventory_status, 'CONSUMED'); // the biscuit retires
-  assert.equal(p.seed_released, true);
-  // Weight: growth generated (uncapped) 70; seed out 3; loss is SEED-side only.
-  assert.equal(p.component_weight.growth_out, 70);
-  assert.equal(p.component_weight.seed_out, 3);
-  // Seed loss = seed reference 25.65 − seed out 3 = 22.65 (growth NOT in loss).
-  assert.equal(Math.round(p.component_weight.loss * 10000) / 10000, 22.65);
-  // Authoritative weight balance (SEED_REFERENCE_PLUS_GENERATED_GROWTH).
-  assert.equal(p.weight_balance.mode, 'SEED_REFERENCE_PLUS_GENERATED_GROWTH');
-  assert.equal(p.weight_balance.seed_reference_weight, 25.65);
-  assert.equal(p.weight_balance.seed_output_weight, 3);
-  assert.equal(Math.round(p.weight_balance.seed_loss_weight * 10000) / 10000, 22.65);
-  assert.equal(p.weight_balance.growth_generated_weight, 70);
-  assert.equal(p.weight_balance.combined_output_weight, 73);
-  assert.equal(p.weight_balance.combined_weight_is_informational, true);
-  // Authoritative quantity balance (COMPONENT_FAMILY): each family = 9.
-  assert.equal(p.quantity_balance.return_qty, 9);
-  assert.equal(p.quantity_balance.seed_family_qty, 9);
-  assert.equal(p.quantity_balance.growth_family_qty, 9);
-  assert.equal(p.quantity_balance.seed_balanced, true);
-  assert.equal(p.quantity_balance.growth_balanced, true);
-  // Two-pool values: Σseed = 90 (Seed pool), Σdiamond = 120 (Growth pool)
-  const seedSum = p.component_allocation.filter(a => a.family === 'seed')
-    .reduce((s, a) => s + a.value, 0);
-  const diaSum = p.component_allocation.filter(a => a.family === 'diamond')
-    .reduce((s, a) => s + a.value, 0);
-  assert.equal(Math.round(seedSum * 100) / 100, 90);
-  assert.equal(Math.round(diaSum * 100) / 100, 120);
-  assert.deepEqual(p.value_pools, { growth: 120, seed: 90 });
-  // Return Workspace UI: the input assembly's growth identity is exposed
-  // read-only on the plan (outputs are still new lots).
-  assert.equal(p.growth_number, 'SSD087-JUL26-028');
-  assert.equal(p.target_lot_code, 'SSD087-JUL26-028');
-  assert.equal(p.run_no, 1);
+    lines: seedRemoveLines }); // 2 seed + 2 diamond dispositions
+  assert.equal(p.valid, false);
+  assert.match(p.error, /exactly one Recovered-Seed line and one Growth-Diamond line/);
+});
+
+test('phase C (detach): missing single attached-Seed identity ABORTS the detach', () => {
+  const p = buildReturnPlan({ ...planBase,
+    processLot: biscuitValued, biscuit: null,
+    allowedOutputs: seedRemoveOutputs,
+    attachedSeed: { ...attachedSeedOk, inventoryId: null }, // ambiguous / not single
+    lines: [
+      { type: 'reprocess', qty: 9, weight: 3 },
+      { type: 'usable',    qty: 9, weight: 70 },
+    ] });
+  assert.equal(p.valid, false);
+  assert.match(p.error, /exactly one attached Seed inventory identity/);
+});
+
+test('strategy: seed_remove config → DETACH_TRANSFORM_IN_PLACE; plain component → child split', () => {
+  assert.equal(resolveComponentStrategy(seedRemoveOutputs), 'DETACH_TRANSFORM_IN_PLACE');
+  assert.equal(resolveComponentStrategy([
+    { type: 'reprocess', component: 'seed' }, { type: 'usable', component: 'diamond' },
+  ]), 'COMPONENT_CHILD_SPLIT'); // no seed / growth_diamond category overrides
 });
 
 test('phase C: missing attached Seed BLOCKS with the exact required message', () => {
@@ -434,6 +454,7 @@ test('phase C: combined output ABOVE the old assembly weight is VALID (generated
 // the first time at Seed Remove. Value pools: seed 200, growth (biscuit) 500.
 const attachedSeed24 = {
   resolved: true, candidateCount: 1, rootCount: 1, rootLotId: 21,
+  inventoryId: 100558, // the SAME attached Seed row released in place
   refWeight: 23.52, refValue: 200,
 };
 const biscuit24 = {
@@ -541,17 +562,18 @@ test('seed-remove #9: Seed loss is computed independently of Growth weight', () 
   assert.equal(Math.round(high.weight_balance.seed_loss_weight * 10000) / 10000, 0.52);
 });
 
-test('seed-remove #12: total-value conservation unchanged (seed pool + growth pool, no duplication)', () => {
+test('seed-remove #12: value conserved — each identity keeps its own family pool (no duplication)', () => {
   const p = buildReturnPlan({ ...base24, lines: [
     { type: 'reprocess', qty: 24, weight: 23.52 },
     { type: 'usable',    qty: 24, weight: 298.56 },
   ] });
   assert.equal(p.valid, true);
-  const seedSum = p.component_allocation.filter(a => a.family === 'seed').reduce((s, a) => s + a.value, 0);
-  const diaSum  = p.component_allocation.filter(a => a.family === 'diamond').reduce((s, a) => s + a.value, 0);
-  assert.equal(Math.round(seedSum * 100) / 100, 200); // seed carrying pool intact
-  assert.equal(Math.round(diaSum * 100) / 100, 500);  // growth carrying pool intact
+  assert.equal(p.route, 'DETACH_TRANSFORM');
+  // In-place: carrier keeps growth pool (500), released Seed keeps seed pool (200).
   assert.deepEqual(p.value_pools, { growth: 500, seed: 200 });
+  assert.equal(p.component_allocation, null); // no child rows → no per-line allocation
+  assert.equal(p.growth_carrier_inventory_id, base24.processLot.id);
+  assert.equal(p.attached_seed_inventory_id, 100558);
 });
 
 test('seed-remove #14: planner is pure/deterministic — client cannot alter the verdict', () => {
@@ -585,6 +607,21 @@ test('seed-remove #14b: posting recomputes the plan under lock and rejects a byp
 test('seed-remove #15: no genealogy / identity regression on Seed Remove split',
   { skip: 'requires PostgreSQL (unavailable in this environment)' }, () => {});
 
+// ── In-place detach POSTING contract — requires PostgreSQL (honest skips) ──────
+// The planner assertions above prove the authoritative targets/route; these
+// verify the locked transaction against a live schema and cannot run here.
+const DB_SKIP = { skip: 'requires PostgreSQL (unavailable in this environment)' };
+test('detach posting #1-2: Growth carrier inventory ID and lot identity unchanged', DB_SKIP, () => {});
+test('detach posting #3-4: carrier category → growth_diamond, status → IN STOCK', DB_SKIP, () => {});
+test('detach posting #5-6: carrier qty = returned Growth qty (24, not 1); weight = entered', DB_SKIP, () => {});
+test('detach posting #7-10: carrier length/width(depth)/height persist; unit stays PCS', DB_SKIP, () => {});
+test('detach posting #11-13: attached Seed inventory ID, lot name, root lot unchanged', DB_SKIP, () => {});
+test('detach posting #14-16: Seed status IN STOCK, state AVAILABLE, qty/weight/dims persist', DB_SKIP, () => {});
+test('detach posting #17-20: no new Growth/Seed rows; no -R1/-S1 lots generated', DB_SKIP, () => {});
+test('detach posting #23-24: value conserved on both rows; genealogy intact', DB_SKIP, () => {});
+test('detach posting #25-26: missing/ambiguous carrier or attached Seed aborts under lock', DB_SKIP, () => {});
+test('detach posting #27: rollback on failure restores both identities', DB_SKIP, () => {});
+
 test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', () => {
   const p = buildReturnPlan({ ...planBase,
     processLot: biscuitValued, biscuit: null,
@@ -598,19 +635,18 @@ test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', 
   assert.match(p.error, /exceeds the Seed reference weight/);
 });
 
-test('phase C: zero biscuit carrying value → zero-valued Growth outputs, NOT an error', () => {
+test('phase C (detach): zero carrier carrying value is VALID (growth pool 0, seed pool intact)', () => {
   const p = buildReturnPlan({ ...planBase,
     processLot: { ...biscuitValued, total_value: 0 }, biscuit: null,
     allowedOutputs: seedRemoveOutputs,
     attachedSeed: attachedSeedOk,
-    lines: seedRemoveLines });
+    lines: [
+      { type: 'reprocess', qty: 9, weight: 3 },
+      { type: 'usable',    qty: 9, weight: 70 },
+    ] });
   assert.equal(p.valid, true);
-  const diaSum = p.component_allocation.filter(a => a.family === 'diamond')
-    .reduce((s, a) => s + a.value, 0);
-  assert.equal(diaSum, 0);
-  const seedSum = p.component_allocation.filter(a => a.family === 'seed')
-    .reduce((s, a) => s + a.value, 0);
-  assert.equal(Math.round(seedSum * 100) / 100, 90); // Seed pool untouched
+  assert.equal(p.route, 'DETACH_TRANSFORM');
+  assert.deepEqual(p.value_pools, { growth: 0, seed: 90 }); // seed pool untouched
 });
 
 test('phase C allocation: pools close exactly, residue on the LAST eligible line', () => {
