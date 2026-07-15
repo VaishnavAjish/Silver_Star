@@ -15,7 +15,7 @@ import toast from 'react-hot-toast';
 // ── Status config ─────────────────────────────────────────────────────────────
 const MACHINE_STATUS_CFG = {
   running: { label: 'Running', color: '#2E7D32', bg: '#E8F5E9', border: '#81C784', glow: '0 0 0 2px #81C784' },
-  idle: { label: 'Idle', color: '#757575', bg: '#F5F5F5', border: '#E0E0E0', glow: 'none' },
+  idle: { label: 'AVAILABLE', color: '#757575', bg: '#F5F5F5', border: '#E0E0E0', glow: 'none' },
   hold: { label: 'Hold', color: '#E65100', bg: '#FFF3E0', border: '#FFCC80', glow: '0 0 0 2px #FFCC80' },
   maintenance: { label: 'Maintenance', color: '#E65100', bg: '#FFF8E1', border: '#FFD54F', glow: '0 0 0 2px #FFD54F' },
   breakdown: { label: 'Breakdown', color: '#C62828', bg: '#FFEBEE', border: '#EF9A9A', glow: '0 0 0 2px #EF9A9A' },
@@ -37,7 +37,7 @@ const KPI_DEFS = [
   { key: 'total', label: 'Total Machines', icon: Cpu, color: '#1565C0', bg: '#E3F2FD' },
   { key: 'running', label: 'Running', icon: Activity, color: '#2E7D32', bg: '#E8F5E9' },
   { key: 'awaiting_output', label: 'Awaiting Output', icon: Package, color: '#7B1FA2', bg: '#F3E5F5' },
-  { key: 'idle', label: 'Idle', icon: Timer, color: '#757575', bg: '#F5F5F5' },
+  { key: 'idle', label: 'AVAILABLE', icon: Timer, color: '#757575', bg: '#F5F5F5' },
   { key: 'hold', label: 'On Hold', icon: Pause, color: '#E65100', bg: '#FFF3E0' },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench, color: '#F57F17', bg: '#FFF8E1' },
   { key: 'breakdown', label: 'Breakdown', icon: AlertTriangle, color: '#C62828', bg: '#FFEBEE' },
