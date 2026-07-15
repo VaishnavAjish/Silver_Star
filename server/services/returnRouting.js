@@ -207,6 +207,17 @@ function buildReturnPlan({
   const isGrowthRun = processLot.category === 'growth_run';
   const isComponentMode = outputs.some(o => o.component);
 
+  // Growth Diamond → Rough Diamond in-place transformation (configuration-
+  // driven — see the full branch below). Detected here so an inherently
+  // contradictory configuration rejects BEFORE any quantity gate runs: a
+  // transform-in-place rule can never coexist with COMPONENT outputs.
+  const transformRule = outputs.find(o => o && o.transform_in_place === true);
+  if (transformRule && isComponentMode)
+    return invalid('Configuration invalid: transform_in_place cannot be combined with COMPONENT outputs.');
+  const transformLines = transformRule
+    ? lines.filter(l => l.type === transformRule.type)
+    : [];
+
   // Phase C: a COMPONENT return (Seed Remove) posts MULTIPLE lines against a
   // biscuit input — the single-disposition rule applies only to QUANTITY-mode
   // biscuit returns (laser ops / growth again).
@@ -381,6 +392,71 @@ function buildReturnPlan({
     projected_issue_status: isFinal ? 'RETURNED' : 'OPEN',
     component_mode: isComponentMode,
   };
+
+  // ── Growth Diamond → Rough Diamond: configuration-driven in-place
+  // transformation (Final Block doctrine). Activated ONLY by an
+  // allowed_outputs rule carrying transform_in_place:true — never by process
+  // code or name. The SAME inventory row keeps its id, lot number, Growth
+  // Number lineage and genealogy; only its item category, measured weight and
+  // dimensions change. First safe scope: single usable line, full remaining
+  // quantity, final return. An engaged-but-invalid transform must REJECT —
+  // it never silently falls through to the CHILD (new-lot) route.
+  if (transformLines.length > 0) {
+    if (transformRule.type !== 'usable')
+      return invalid('Configuration invalid: transform_in_place is only supported on the usable output.');
+    if (transformRule.item_category_override !== 'rough')
+      return invalid('Configuration invalid: an in-place transformation must target the rough category.');
+    if (lines.length !== 1)
+      return invalid('An in-place transformation must be a single usable line returning the full quantity — mixed or multiple lines are not supported.');
+    if (processLot.category !== 'growth_diamond')
+      return invalid(`In-place transformation requires a Growth Diamond input — this lot is '${processLot.category}'.`);
+    if (remainingAfter > EPS || Math.abs(returnTotal - currentRemaining) > EPS)
+      return invalid('An in-place transformation must return the FULL remaining quantity — partial transformation is not supported.');
+    const srcQty = processLot.unit === 'CT'
+      ? parseFloat(processLot.weight || 0)
+      : parseFloat(processLot.qty || 0);
+    if (srcQty > 0 && Math.abs(returnTotal - srcQty) > EPS)
+      return invalid(`Return quantity ${returnTotal.toFixed(4)} must equal the transformable source quantity ${srcQty.toFixed(4)}.`);
+
+    // Loss-only measured process: the operator-entered output weight is
+    // mandatory and authoritative — never derived, averaged or proportional.
+    const tLine = transformLines[0];
+    const hasWeight = !(tLine.weight === undefined || tLine.weight === null || tLine.weight === '');
+    const outputWeight = hasWeight ? parseFloat(tLine.weight) : NaN;
+    if (!hasWeight || !(outputWeight > 0))
+      return invalid('An in-place transformation requires the operator-measured output weight.');
+    const inputWeight = parseFloat(processLot.weight || 0);
+    if (inputWeight > 0 && outputWeight > inputWeight + EPS)
+      return invalid(`Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — a cutting process cannot create mass.`);
+    if (measurements && measurements.weight != null && measurements.weight !== '' &&
+        Math.abs(parseFloat(measurements.weight) - outputWeight) > EPS)
+      return invalid('Ambiguous output weight: the return-line weight and the measurement weight differ.');
+
+    return {
+      ...common,
+      route: 'TRANSFORM_IN_PLACE',
+      transform_in_place: true,
+      in_place: true,
+      growth_run_input: false,
+      target_lot_id: processLot.id,
+      target_lot_code: processLot.lot_code || processLot.lot_number,
+      target_lot_number: processLot.lot_number,
+      will_create_new_lot: false,
+      creates_new_lot: false,
+      category_transition: { before: processLot.category, after: transformRule.item_category_override },
+      input_weight: inputWeight,
+      output_weight: outputWeight,
+      process_loss_weight: Math.round((inputWeight - outputWeight) * 10000) / 10000,
+      // Carrying value is preserved unchanged — weight loss is not cost loss.
+      carrying_value_policy: 'PRESERVE',
+      final: true,
+      projected_inventory_status: transformRule.status || 'IN STOCK',
+      projected_qty: processLot.qty != null ? parseFloat(processLot.qty) : null,
+      projected_weight: outputWeight,
+      reversal_supported: false,
+      seed_retained: false,
+    };
+  }
 
   // Phase C: a COMPONENT return of the biscuit (Seed Remove) is NOT an
   // in-place return — it splits the assembly into diamond + recovered-seed

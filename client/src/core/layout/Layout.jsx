@@ -34,9 +34,13 @@ export const NAV = [
   },
   {
     label: 'Rough Diamonds', icon: Gem, module: 'rough', children: [
-      { label: 'Rough Growth', path: '/rough-growth', submodule: 'rough_growth' },
+      // Read-model preset over All Inventory (category=rough) — the single
+      // authoritative rough stock view. Rough Growth stays as the legacy
+      // Growth Output workflow until Process Master stabilisation completes.
+      { label: 'Rough Diamond Inventory', path: '/rough-diamonds/inventory', submodule: 'rough_growth' },
       { label: 'Growth Runs', path: '/growth-runs', submodule: 'rough_growth' },
       { label: 'Process Issues', path: '/inventory/process-issues', editorOnly: true },
+      { label: 'Rough Growth', path: '/rough-growth', submodule: 'rough_growth' },
     ]
   },
   {

@@ -448,6 +448,22 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // clearer reason than the generic status message below.
         const attachBlock = attachmentBlockReason(lot, 'issued to a process');
         if (attachBlock) throw new Error(attachBlock);
+
+        // Transform-in-place processes (Final Block doctrine) only accept
+        // their configured input category — enforced at issue time so a
+        // wrong-category lot can never enter the machine. Configuration-driven:
+        // no process code or name is ever checked.
+        const transformRule = Array.isArray(processRules.allowed_outputs)
+          ? processRules.allowed_outputs.find(o => o && o.transform_in_place === true)
+          : null;
+        if (transformRule) {
+          const requiredCat = transformRule.input_item_category || 'growth_diamond';
+          if (lot.category !== requiredCat)
+            throw new Error(
+              `Process '${processRules.process_name}' transforms ${requiredCat.replace(/_/g, ' ')} ` +
+              `lots in place — lot ${lot.lot_number} is '${lot.category}'.`
+            );
+        }
         // RULE 7: state-machine enforcement. ONLY IN STOCK (or LOW STOCK) lots may
         // be issued to a process. Anything IN PROCESS is already inside a machine
         // and must be blocked — no exceptions. A Growth Run still in the chamber
@@ -956,6 +972,25 @@ async function nextReturnLotCode(client, processLotId, parentCode, suffixChar) {
   return `${parentCode}-${suffixChar}${maxN + 1}`;
 }
 
+/**
+ * Canonical Rough item resolution — the SAME lookup/auto-create rule the
+ * legacy Growth Output uses (routes/roughGrowth.js), so both rough-creation
+ * paths always land on one item record. Called inside a transaction.
+ */
+async function ensureRoughItem(client) {
+  let r = await client.query(
+    "SELECT id, unit FROM items WHERE category = 'rough' AND status = 'active' LIMIT 1"
+  );
+  if (r.rows.length === 0) {
+    r = await client.query(`
+      INSERT INTO items (code, name, category, type, status, default_uom)
+      VALUES ('ROUGH-001', 'Rough Diamond', 'rough', 'raw_material', 'active', 'CT')
+      RETURNING id, unit
+    `);
+  }
+  return r.rows[0];
+}
+
 // Growth-identity routing, shared return plan + reversal eligibility — pure
 // helpers, unit-tested in tests/growthReturnRouting.test.js.
 // buildReturnPlan is used by BOTH the read-only preflight below and the
@@ -1078,7 +1113,8 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     const lineIdentities = [];
     const counters = {}; // suffix → last projected sequence number
     for (const line of lines) {
-      if (plan.route === 'BISCUIT') {
+      // Both in-place routes resolve to the EXISTING lot — no code generation.
+      if (plan.route === 'BISCUIT' || plan.route === 'TRANSFORM_IN_PLACE') {
         lineIdentities.push({ type: line.type, lot_code: plan.target_lot_code, will_create_new_lot: false });
         continue;
       }
@@ -1297,6 +1333,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // dedicated branch in the line loop below; routesToBiscuit is ONLY the
     // full usable Growth Return that references the existing biscuit.
     const routesToBiscuit = plan.route === 'BISCUIT' && !plan.growth_run_input;
+    // Growth Diamond → Rough Diamond in-place transformation (config-driven,
+    // planner-approved): the SAME row changes category/weight/dims — no child
+    // lot, no consumption, identity and genealogy untouched.
+    const isTransformReturn = plan.route === 'TRANSFORM_IN_PLACE';
 
     // Phase C: attached-Seed resolution and locking happen BEFORE the plan is
     // computed (see above) — the plan itself validates the attachment context,
@@ -1369,6 +1409,64 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           status: machSnap.status
         };
       }
+    } else if (isTransformReturn) {
+      // Immutable FINAL_BLOCK snapshot — complete before-image of the in-place
+      // category transformation. reversal_supported:false keeps the History
+      // Cancel/Reverse actions disabled (policy-driven eligibility): snapshot
+      // presence alone must never enable cancellation.
+      let parentSnap = null;
+      if (processLot.parent_lot_id) {
+        const { rows } = await client.query(
+          'SELECT id, lot_number, run_no FROM inventory WHERE id = $1',
+          [processLot.parent_lot_id]
+        );
+        parentSnap = rows[0] || null;
+      }
+      let mpSnap = null;
+      if (issue.machine_process_id) {
+        const { rows } = await client.query(
+          'SELECT status, total_paused_minutes, paused_at, completed_at FROM machine_processes WHERE id = $1 FOR UPDATE',
+          [issue.machine_process_id]
+        );
+        mpSnap = rows[0] || null;
+      }
+      preState = {
+        snapshot_type: 'FINAL_BLOCK',
+        version: 1,
+        reversal_supported: false,
+        route: 'TRANSFORM_IN_PLACE',
+        category_transition: plan.category_transition,
+        // Growth lineage context: the diamond's parent IS the Growth Run
+        // biscuit (its lot_number is the permanent Growth Number).
+        growth_number: parentSnap ? parentSnap.lot_number : null,
+        run_no: parentSnap && parentSnap.run_no != null ? parseInt(parentSnap.run_no) : null,
+        inventory_pre: {
+          id: processLot.id, lot_number: processLot.lot_number,
+          lot_code: processLot.lot_code, item_id: processLot.item_id,
+          qty: processLot.qty, weight: processLot.weight,
+          rate: processLot.rate, total_value: processLot.total_value,
+          status: processLot.status,
+          dim_length: processLot.dim_length, dim_depth: processLot.dim_depth,
+          dim_height: processLot.dim_height, dim_unit: processLot.dim_unit,
+          parent_lot_id: processLot.parent_lot_id, root_lot_id: processLot.root_lot_id,
+          manufacturing_state: processLot.manufacturing_state,
+        },
+        issue_pre: {
+          id: issue.id, status: issue.status,
+          remaining_in_process: issue.remaining_in_process,
+        },
+        machine_process_pre: mpSnap
+          ? { id: issue.machine_process_id, status: mpSnap.status,
+              total_paused_minutes: mpSnap.total_paused_minutes,
+              paused_at: mpSnap.paused_at, completed_at: mpSnap.completed_at }
+          : null,
+        weight_equation: {
+          input: plan.input_weight,
+          output: plan.output_weight,
+          loss: plan.process_loss_weight,
+        },
+        carrying_value_policy: 'PRESERVE',
+      };
     }
 
     const { rows: [ret] } = await client.query(
@@ -1434,6 +1532,59 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           weight: biscuit.weight != null ? parseFloat(biscuit.weight) : null,
           status: biscuit.status, in_place: true,
           growth_number: biscuit.lot_number, run_no: biscuit.run_no,
+        });
+        continue;
+      }
+
+      // Growth Diamond → Rough Diamond: in-place transformation of the SAME
+      // inventory row. item_id moves to the canonical Rough item; the
+      // operator-measured output weight and dimensions are stored; id,
+      // lot_number, qty, rate, total_value, parent_lot_id, root_lot_id and
+      // genealogy_path are all untouched. No -R1, no child lot, no consume.
+      // The planner has already enforced: single usable line, full remaining
+      // quantity, growth_diamond source, rough target, weight ≤ input.
+      if (isTransformReturn) {
+        const roughItem = await ensureRoughItem(client);
+        const outputWeight = parseFloat(line.weight);
+        await client.query(
+          `UPDATE inventory
+             SET item_id    = $1,
+                 weight     = $2,
+                 dim_length = COALESCE($3, dim_length),
+                 dim_depth  = COALESCE($4, dim_depth),
+                 dim_height = COALESCE($5, dim_height),
+                 dim_unit   = COALESCE($6, dim_unit),
+                 updated_at = NOW()
+           WHERE id = $7`,
+          [
+            roughItem.id,
+            outputWeight,
+            measurements && measurements.length != null && measurements.length !== '' ? parseFloat(measurements.length) : null,
+            measurements && measurements.width  != null && measurements.width  !== '' ? parseFloat(measurements.width)  : null,
+            measurements && measurements.height != null && measurements.height !== '' ? parseFloat(measurements.height) : null,
+            measurements && measurements.dim_unit ? measurements.dim_unit : null,
+            processLot.id,
+          ]
+        );
+        await client.query(
+          `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [ret.id, line.type, qty, processLot.id, processLot.lot_code || processLot.lot_number, line.remarks || null]
+        );
+        await logOp(client, processLot.id, 'final_block_transform', 'lot_process_return', ret.id,
+          0, plan.projected_inventory_status || 'IN STOCK',
+          `Final Block transform (${returnNum}): ${processLot.lot_number} reclassified ` +
+          `${plan.category_transition.before} → ${plan.category_transition.after} in place ` +
+          `(same identity, no new lot); weight ${plan.input_weight.toFixed(4)} → ` +
+          `${plan.output_weight.toFixed(4)} ct, process loss ${plan.process_loss_weight.toFixed(4)} ct; ` +
+          `carrying value preserved`,
+          req.user.id);
+        outcomes.push({
+          type: line.type, lot_id: processLot.id,
+          lot_code: processLot.lot_code || processLot.lot_number, qty,
+          weight: outputWeight, status: plan.projected_inventory_status || 'IN STOCK',
+          in_place: true, transformed: true,
+          category_transition: plan.category_transition,
         });
         continue;
       }
@@ -1703,6 +1854,19 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
             `Seed Remove (${returnNum}) — attached Seed retired; recovered material continues as the RECOVERED seed children of ${processLot.lot_number}`,
             req.user.id);
         }
+      } else if (isTransformReturn) {
+        // In-place transformation: the SAME row simply becomes available
+        // stock under its new category — never consumed, never zeroed.
+        const transformStatus = plan.projected_inventory_status || 'IN STOCK';
+        await client.query(
+          `UPDATE inventory SET status=$1, updated_at=NOW() WHERE id=$2`,
+          [transformStatus, processLot.id]
+        );
+        await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
+          0, transformStatus,
+          `Final Block transform final (${returnNum}) — ${processLot.lot_number} continues as ` +
+          `Rough Diamond in place (same inventory identity) → ${transformStatus}`,
+          req.user.id);
       } else if (!isGrowthRun) {
         await client.query(
           `UPDATE inventory SET qty=0, weight=0, total_value=0, status='CONSUMED', updated_at=NOW() WHERE id=$1`,
@@ -1741,7 +1905,12 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           );
           if (mpRows.length && ['running', 'hold'].includes(mpRows[0].status)) {
             const mp = mpRows[0];
-            const completionMode = mp.completion_mode || 'RETURN_BASED';
+            // An in-place transformation IS the terminal output of its process —
+            // there is no separate output posting afterwards, so the machine
+            // must complete now and never wait in awaiting_output.
+            const completionMode = isTransformReturn
+              ? 'RETURN_BASED'
+              : (mp.completion_mode || 'RETURN_BASED');
             const pausedMinutes = mp.status === 'hold' && mp.paused_at
               ? (Date.now() - new Date(mp.paused_at).getTime()) / 60000
               : 0;

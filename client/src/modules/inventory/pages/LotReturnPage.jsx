@@ -236,6 +236,13 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   // conserved quantity (outputs may weigh less = process loss, never more).
   const isComponentMode = returnTypes.some(t => t.component);
 
+  // In-place transformation config (Growth Diamond → Rough Diamond): keyed on
+  // the SERVER Process Master configuration (transform_in_place on an output
+  // rule) — never on process name/code or row count. The authoritative
+  // decision is the server plan; this flag only drives input affordances
+  // (mandatory measured weight) before the plan arrives.
+  const isTransformCfg = returnTypes.some(t => t.transform_in_place === true);
+
   const linesTotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
   const anyQty     = lines.some(l => (parseFloat(l.qty) || 0) > 0.0001);
 
@@ -780,7 +787,9 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                             choice, so no editable selector is offered. */}
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--g600)' }}>
                           {identity && identity.will_create_new_lot === false
-                            ? (issue.growth_item_name || 'Growth Run')
+                            ? (plan?.transform_in_place
+                                ? `${(plan.category_transition?.after || 'rough').replace(/_/g, ' ')} (in place)`
+                                : (issue.growth_item_name || 'Growth Run'))
                             : (cfg?.item_category_override
                                 ? cfg.item_category_override.replace(/_/g, ' ')
                                 : 'Inherit parent')}
@@ -811,10 +820,11 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                             value={line[field]}
                             onChange={e => updateLine(line._id, field, e.target.value)}
                             style={{ width: '100%', padding: '5px 6px',
-                              // Phase C: weight is mandatory per qty>0 line in
-                              // COMPONENT (Seed Remove) mode — highlight gaps.
+                              // Operator-measured weight is MANDATORY for an
+                              // in-place transformation line (loss-only
+                              // process) — highlight the gap until entered.
                               border: `1px solid ${
-                                field === 'weight' && isComponentMode && qtyVal > 0 &&
+                                field === 'weight' && isTransformCfg && qtyVal > 0 &&
                                 !(parseFloat(line.weight) > 0)
                                   ? '#EF9A9A' : 'var(--g300)'
                               }`, borderRadius: 6,
@@ -1074,6 +1084,34 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     ★ Detached output mode — Seed Remove only
                   </div>
                 )}
+                {/* In-place transformation summary — server-decided (Final
+                    Block doctrine): the SAME lot changes category; no new lot,
+                    identity and lineage unchanged, not reversible. */}
+                {plan.transform_in_place && (
+                  <>
+                    <div style={{ padding: '6px 8px', background: '#E8F5E9',
+                      border: '1px solid #A5D6A7', borderRadius: 6, fontSize: 10.5,
+                      fontWeight: 700, color: '#2E7D32', marginBottom: 8 }}>
+                      ◆ In-place transformation — same lot, new category
+                    </div>
+                    <BalanceRow label="Mode" value="In-place transform" bold />
+                    <BalanceRow label="Current Category"
+                      value={(plan.category_transition?.before || '').replace(/_/g, ' ') || '—'} />
+                    <BalanceRow label="New Category"
+                      value={(plan.category_transition?.after || '').replace(/_/g, ' ') || '—'} bold />
+                    <BalanceRow label="Growth Number" value="unchanged" />
+                    <BalanceRow label="Run" value="unchanged" />
+                    <BalanceRow label="Input Weight"
+                      value={plan.input_weight != null ? Number(plan.input_weight).toFixed(4) : '—'} unit="ct" />
+                    <BalanceRow label="Output Weight"
+                      value={plan.output_weight != null ? Number(plan.output_weight).toFixed(4) : '—'} unit="ct" bold />
+                    <BalanceRow label="Process Loss"
+                      value={plan.process_loss_weight != null ? Number(plan.process_loss_weight).toFixed(4) : '—'}
+                      unit="ct"
+                      color={Number(plan.process_loss_weight) < -0.0001 ? '#C62828' : 'var(--g600)'} />
+                    <BalanceRow label="Carrying Value" value="preserved" />
+                  </>
+                )}
                 <BalanceRow label="Route" value={plan.component_mode ? 'COMPONENT' : plan.route} bold />
                 {plan.target_lot_code && <BalanceRow label="Target Lot" value={plan.target_lot_code} bold />}
                 {plan.growth_number && <BalanceRow label="Growth Number" value={plan.growth_number} />}
@@ -1100,6 +1138,15 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     border: '1px solid #90CAF9', borderRadius: 6, fontSize: 10,
                     color: '#1565C0', marginTop: 8 }}>
                     Growth and Recovered Seed must each balance the input quantity.
+                  </div>
+                )}
+                {plan.transform_in_place && (
+                  <div style={{ padding: '6px 8px', background: '#E8F5E9',
+                    border: '1px solid #A5D6A7', borderRadius: 6, fontSize: 10,
+                    color: '#2E7D32', marginTop: 8 }}>
+                    Target identity: same existing lot — the diamond keeps its
+                    lot number, Growth Number and genealogy; only its category,
+                    measured weight and dimensions change.
                   </div>
                 )}
               </>

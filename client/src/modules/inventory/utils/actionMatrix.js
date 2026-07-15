@@ -39,11 +39,12 @@ export const CAPABILITY = {
 
 /** Inventory categories recognised by the matrix. */
 export const CATEGORY = {
-  SEED:       'seed',
-  GROWTH_RUN: 'growth_run',
-  ROUGH:      'rough',
-  GAS:        'gas',
-  CONSUMABLE: 'consumable',
+  SEED:           'seed',
+  GROWTH_RUN:     'growth_run',
+  GROWTH_DIAMOND: 'growth_diamond',
+  ROUGH:          'rough',
+  GAS:            'gas',
+  CONSUMABLE:     'consumable',
 };
 
 /** LOW STOCK behaves exactly like IN STOCK (quantity flag, not a workflow state). */
@@ -78,6 +79,16 @@ const MATRIX = {
     'IN PROCESS': [C.RETURN],
     'CONSUMED':   [],
     // DAMAGED / QC_HOLD / REPROCESS intentionally unlisted → read-only floor.
+  },
+  // Growth Diamond (Seed Remove output → Final Block input). IN STOCK grants
+  // match the generic fallback but are now explicit; IN PROCESS gains Return
+  // so the Final Block Return is reachable straight from Inventory. No
+  // process is hard-coded here — the server routes the return from its
+  // Process Master configuration.
+  [CATEGORY.GROWTH_DIAMOND]: {
+    'IN STOCK':   [C.TRANSFER, C.SPLIT, C.ISSUE_PROCESS],
+    'IN PROCESS': [C.RETURN],
+    'CONSUMED':   [],
   },
   [CATEGORY.GROWTH_RUN]: {
     'IN STOCK':   [C.TRANSFER, C.GROWTH_AGAIN, C.GROWTH_OUTPUT, C.ISSUE_PROCESS],
