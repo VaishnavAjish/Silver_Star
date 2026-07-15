@@ -1,25 +1,39 @@
 require('dotenv').config();
-const { Pool } = require('pg');
-const fs = require('fs');
+const { Client } = require('pg');
 
-async function check() {
-  try {
-    const pool = new Pool({
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      ssl: process.env.DB_SSL === 'true'
-    });
-    
-    const client = await pool.connect();
-    const res = await client.query('SELECT * FROM accounts LIMIT 5');
-    fs.writeFileSync('check_out.json', JSON.stringify({ success: true, rows: res.rows }));
-    client.release();
-    await pool.end();
-  } catch(e) {
-    fs.writeFileSync('check_out.json', JSON.stringify({ success: false, error: e.message }));
-  }
+async function run() {
+  const client = new Client();
+  await client.connect();
+
+  console.log("=== ENUM VALUES ===");
+  const res1 = await client.query(`
+    SELECT e.enumlabel
+    FROM pg_type t
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE t.typname = 'item_category'
+    ORDER BY e.enumsortorder;
+  `);
+  console.log(res1.rows.map(r => r.enumlabel));
+
+  console.log("\n=== ITEMS TABLE CATEGORY COLUMN ===");
+  const res2 = await client.query(`
+    SELECT data_type, udt_name
+    FROM information_schema.columns
+    WHERE table_name = 'items' AND column_name = 'category';
+  `);
+  console.log(res2.rows);
+
+  console.log("\n=== GROWTH DIAMOND ITEMS ===");
+  const res3 = await client.query(`
+    SELECT id, code, name, category, active
+    FROM items
+    WHERE lower(code) IN ('growth diamond', 'growth_diamond')
+       OR lower(name) = 'growth diamond'
+    ORDER BY id;
+  `);
+  console.log(res3.rows);
+
+  await client.end();
 }
-check();
+
+run().catch(console.error);

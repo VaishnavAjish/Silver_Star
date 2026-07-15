@@ -48,7 +48,7 @@ BEGIN
     SET code = 'GROWTH_DIAMOND',
         name = 'Growth Diamond',
         category = 'growth_diamond',
-        active = true,
+        status = 'active',
         updated_at = NOW()
     WHERE id = v_item_id;
 
