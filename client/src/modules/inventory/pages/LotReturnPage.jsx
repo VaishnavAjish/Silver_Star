@@ -105,8 +105,6 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   const [notes,      setNotes]      = useState('');
   const [saving,     setSaving]     = useState(false);
 
-  const [items,      setItems]      = useState([]);
-
   // Authoritative backend Return Plan (preflight). planSeqRef guards against
   // stale out-of-order responses; the plan is invalidated synchronously on
   // every line change so an outdated identity can never enable submission.
@@ -176,14 +174,10 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     if (!issueId) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([
-      api.get(`/api/lot-process-issues/${issueId}`),
-      api.get('/api/items')
-    ])
-      .then(([data, itemsData]) => {
+    api.get(`/api/lot-process-issues/${issueId}`)
+      .then(data => {
         if (cancelled) return;
         setIssue(data);
-        setItems(itemsData.data || itemsData || []);
       })
       .catch(() => { if (!cancelled) setIssue(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -491,7 +485,8 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             {/* Phase A: the operator returns the Growth Assembly, not the seed */}
             <InfoRow label="Process Item" value={issue.growth_item_name || issue.item_name} />
             <InfoRow label="Source Item"  value={issue.item_name} />
-            <InfoRow label="Source Lot"   value={issue.source_lot_code || issue.source_lot_number} mono />
+            {/* Source Lot stays available in genealogy/History/admin views —
+                hidden here to keep the operator card compact. */}
             {(issue.root_lot_code || issue.root_lot_number) && (
               <InfoRow label="Root Seed Lot" value={issue.root_lot_code || issue.root_lot_number} mono />
             )}
@@ -501,12 +496,17 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             )}
             {dimensionStr && <InfoRow label="Dimension" value={dimensionStr} mono />}
             <InfoRow label="Process Lot"  value={processLotCode} mono />
-            <InfoRow label="Process Type" value={issue.process_type} />
+            {/* Human-readable Process Master name from the existing relation —
+                the technical code (e.g. pr-01) lives only in the tooltip. */}
+            <div title={issue.process_type ? `Code: ${issue.process_type}` : undefined}>
+              <InfoRow label="Process Name"
+                value={issue.process_display_name || issue.process_type} />
+            </div>
           </Section>
 
-          <Section title="Balance Validation" icon={Info}>
+          <Section title="Quantity Balance" icon={Info}>
             <InfoRow label="Issued Qty"
-              value={`${currentRemaining.toFixed(4)} ${unit}`} mono />
+              value={`${issuedQty.toFixed(4)} ${unit}`} mono />
 
             {isComponentMode ? (
               /* COMPONENT mode: per-component totals — components are validated
@@ -578,18 +578,20 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                 <InfoRow label="Returned Qty"
                   value={`${linesTotal.toFixed(4)} ${unit}`} mono />
 
+                {/* The server decides partial vs final from this balance —
+                    the operator never forces finality manually. */}
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--g200)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: balanced ? '#2E7D32' : '#C62828' }}>
-                      Difference
+                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: balanced ? '#2E7D32' : 'var(--g600)' }}>
+                      Remaining Qty
                     </span>
-                    <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 800, color: balanced ? '#2E7D32' : '#C62828' }}>
-                      {difference.toFixed(4)} {unit}
+                    <span style={{ fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 800, color: balanced ? '#2E7D32' : 'var(--g800)' }}>
+                      {stillIn.toFixed(4)} {unit}
                     </span>
                   </div>
-                  {!balanced && linesTotal > 0 && (
+                  {overFill && (
                     <div style={{ fontSize: 10, color: '#C62828', fontWeight: 600, marginTop: 4 }}>
-                      Return quantities must exactly equal the Issued Quantity.
+                      You cannot return more than what was issued.
                     </div>
                   )}
                 </div>
@@ -597,14 +599,25 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             )}
           </Section>
 
-          {(issue.machine_name || issue.operator_full_name) && (
+          {issue.machine_name && (
             <Section title="Machine" icon={Cpu}>
-              {issue.machine_name && <InfoRow label="Machine" value={issue.machine_name} />}
-              {issue.machine_code && <InfoRow label="Code" value={issue.machine_code} mono />}
-              {issue.operator_full_name && <InfoRow label="Operator" value={issue.operator_full_name} />}
-              {issue.target_runtime_hours && (
-                <InfoRow label="Target Runtime" value={`${issue.target_runtime_hours}h`} />
-              )}
+              <InfoRow label="Machine" value={issue.machine_name} />
+              {/* Runtime from AUTHORITATIVE machine_process timestamps only —
+                  never Target Runtime, never fabricated. Machine Code and
+                  Target Runtime remain internal/planning metadata. */}
+              {(() => {
+                const start = issue.process_started_at;
+                if (!start) return <InfoRow label="Runtime" value="Runtime unavailable" />;
+                const done = issue.process_completed_at;
+                const ms = (done ? new Date(done) : new Date()) - new Date(start);
+                if (!(ms >= 0)) return <InfoRow label="Runtime" value="Runtime unavailable" />;
+                const h = Math.floor(ms / 3600000);
+                const m = Math.floor((ms % 3600000) / 60000);
+                return (
+                  <InfoRow label={done ? 'Actual Runtime' : 'Elapsed Runtime'}
+                    value={`${h}h ${m}m`} mono />
+                );
+              })()}
             </Section>
           )}
 
@@ -660,7 +673,12 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             </div>
           )}
 
-          {/* Return lines table */}
+          {/* Return lines table — single output family (all normal processes;
+              multiple dispositions like Usable/Damaged stay ONE family). The
+              detached dual-family layout below is Seed Remove COMPONENT mode
+              only, keyed on the SERVER process configuration — never on how
+              many rows a user adds. */}
+          {!isComponentMode && (
           <div style={{ background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
             marginBottom: 14, overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--g200)',
@@ -742,26 +760,19 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                         </SelectDropdown>
                       </td>
                       <td style={{ padding: '6px 8px' }}>
-                        {identity && identity.will_create_new_lot === false ? (
-                          // Server-owned line: the return references the EXISTING
-                          // Growth biscuit — the backend ignores item_id entirely,
-                          // so no manual category input is offered.
-                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--g600)' }}>
-                            {issue.growth_item_name || 'Growth Run'}
-                            <span style={{ color: 'var(--g400)', fontWeight: 400 }}> · server</span>
-                          </span>
-                        ) : (
-                          <SelectDropdown
-                            value={line.item_id || ''}
-                            onChange={e => updateLine(line._id, 'item_id', e.target.value)}
-                            style={{ width: '100%' }}
-                          >
-                            <option value="">— Inherit Parent —</option>
-                            {items.map(i => (
-                              <option key={i.id} value={i.id}>{i.name}</option>
-                            ))}
-                          </SelectDropdown>
-                        )}
+                        {/* Item Category is SERVER-controlled: the biscuit's
+                            category on the BISCUIT route, the configured
+                            Process Master output category on CHILD. No process
+                            configuration currently proves a genuine user
+                            choice, so no editable selector is offered. */}
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--g600)' }}>
+                          {identity && identity.will_create_new_lot === false
+                            ? (issue.growth_item_name || 'Growth Run')
+                            : (cfg?.item_category_override
+                                ? cfg.item_category_override.replace(/_/g, ' ')
+                                : 'Inherit parent')}
+                          <span style={{ color: 'var(--g400)', fontWeight: 400 }}> · server</span>
+                        </span>
                       </td>
                       <td style={{ padding: '6px 8px' }}>
                         <input
@@ -834,7 +845,141 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               </tbody>
             </table>
           </div>
+          )}
 
+          {/* ── Seed Remove ONLY: detached dual-family COMPONENT layout ──────
+              Server-configured (component tags in allowed_outputs). Each
+              family independently balances the input quantity — families are
+              never summed together. Identities are generated on submit. */}
+          {isComponentMode && [
+            { fam: 'diamond', marker: 'A', title: 'Growth Diamond Outputs',
+              color: '#1565C0', bg: '#E3F2FD',
+              sub: 'Growth family identity: generated on submit' },
+            { fam: 'seed', marker: 'B', title: 'Recovered Seed Outputs',
+              color: '#6A1B9A', bg: '#F3E5F5',
+              sub: 'Seed family identity: generated on submit' },
+          ].map(({ fam, marker, title, color, bg, sub }) => {
+            const famTypes = returnTypes.filter(t => t.component === fam);
+            const famLines = lines.filter(l => typeMap[l.type]?.component === fam);
+            const famQty = famLines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+            const famWeight = famLines.reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+            const addFamRow = () => {
+              const _id = lineIdRef.current++;
+              setLines(ls => [...ls, newLine(_id, famTypes[0]?.value)]);
+            };
+            // Non-posting helper: populates the family's remaining quantity
+            // only — never submits, never mutates the backend.
+            const fillFam = () => {
+              const gap = Math.max(0, currentRemaining - famQty);
+              if (gap < 0.0001 || !famTypes.length) return;
+              const _id = lineIdRef.current++;
+              setLines(ls => [...ls, { ...newLine(_id, famTypes[0].value), qty: gap.toFixed(4) }]);
+            };
+            return (
+              <div key={fam} style={{ background: '#fff', border: '1px solid var(--g200)',
+                borderRadius: 8, marginBottom: 14, overflow: 'hidden' }}>
+                <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--g200)',
+                  display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 5, background: bg,
+                    color, fontSize: 11, fontWeight: 800, display: 'inline-flex',
+                    alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {marker}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--g900)' }}>{title}</div>
+                    <div style={{ fontSize: 10, color: 'var(--g500)' }}>
+                      {sub} · This dual-output layout appears only for Seed Remove.
+                    </div>
+                  </div>
+                  <button className="btn btn-sm" onClick={fillFam}
+                    title="Populate this family's remaining quantity — never posts">
+                    Auto-fill balance
+                  </button>
+                  <button className="btn btn-sm btn-primary" onClick={addFamRow}>
+                    <Plus size={12} /> Add Row
+                  </button>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--g50)' }}>
+                      {['Type / Disposition', `Qty (${unit})`, 'Weight (ct)', 'Length (mm)',
+                        'Width (mm)', 'Height (mm)', 'Remarks', ''].map((h, i) => (
+                        <th key={h || `x${i}`} style={{ padding: '7px 8px', textAlign: 'left',
+                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                          color: 'var(--g500)', letterSpacing: '.4px',
+                          width: i === 0 ? 150 : i === 6 ? undefined : i === 7 ? 36 : 96 }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {famLines.map(line => {
+                      const qtyVal = parseFloat(line.qty) || 0;
+                      return (
+                        <tr key={line._id} style={{ borderTop: '1px solid var(--g100)' }}>
+                          <td style={{ padding: '6px 8px' }}>
+                            <SelectDropdown value={line.type}
+                              onChange={e => updateLine(line._id, 'type', e.target.value)}>
+                              {famTypes.map(t => (
+                                <option key={t.value} value={t.value}>{t.label} → {t.status}</option>
+                              ))}
+                            </SelectDropdown>
+                          </td>
+                          <td style={{ padding: '6px 8px' }}>
+                            <input type="number" step="0.0001" min="0" value={line.qty}
+                              onChange={e => updateLine(line._id, 'qty', e.target.value)}
+                              style={{ width: '100%', padding: '5px 8px',
+                                border: `2px solid ${qtyVal > currentRemaining + 0.0001 ? '#EF9A9A' : 'var(--g300)'}`,
+                                borderRadius: 6, fontSize: 13, fontFamily: 'var(--mono)',
+                                outline: 'none', boxSizing: 'border-box' }}
+                              placeholder="0.0000" />
+                          </td>
+                          {['weight', 'length', 'width', 'height'].map(field => (
+                            <td key={field} style={{ padding: '6px 4px' }}>
+                              <input type="number" step={field === 'weight' ? '0.0001' : '0.001'}
+                                min="0" value={line[field]}
+                                onChange={e => updateLine(line._id, field, e.target.value)}
+                                style={{ width: '100%', padding: '5px 6px',
+                                  // Weight is mandatory per qty>0 line — operator
+                                  // entered, never derived or auto-averaged.
+                                  border: `1px solid ${field === 'weight' && qtyVal > 0 &&
+                                    !(parseFloat(line.weight) > 0) ? '#EF9A9A' : 'var(--g300)'}`,
+                                  borderRadius: 6, fontSize: 12, fontFamily: 'var(--mono)',
+                                  outline: 'none', boxSizing: 'border-box', color: 'var(--g700)' }}
+                                placeholder={field === 'weight' ? 'ct' : 'mm'} />
+                            </td>
+                          ))}
+                          <td style={{ padding: '6px 8px' }}>
+                            <input value={line.remarks}
+                              onChange={e => updateLine(line._id, 'remarks', e.target.value)}
+                              placeholder="Optional remarks…"
+                              style={{ width: '100%', padding: '5px 8px',
+                                border: '1px solid var(--g300)', borderRadius: 6, fontSize: 12,
+                                outline: 'none', boxSizing: 'border-box' }} />
+                          </td>
+                          <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                            <button className="icon-btn" onClick={() => removeLine(line._id)}
+                              disabled={lines.length === 1}
+                              style={{ color: lines.length === 1 ? 'var(--g300)' : '#C62828' }}>
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ padding: '8px 14px', borderTop: '1px solid var(--g200)',
+                  display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 11,
+                  fontWeight: 700, color }}>
+                  <span>{fam === 'diamond' ? 'Growth' : 'Seed'} total</span>
+                  <span style={{ fontFamily: 'var(--mono)' }}>{famQty.toFixed(4)} {unit}</span>
+                  <span style={{ fontFamily: 'var(--mono)' }}>{famWeight.toFixed(4)} ct</span>
+                </div>
+              </div>
+            );
+          })}
 
           {/* Date + Notes */}
           <div style={{ background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
@@ -876,6 +1021,19 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             {currentRemaining < issuedQty - 0.0001 && (
               <BalanceRow label="Available now" value={currentRemaining} unit={unit} color="#E65100" bold />
             )}
+            {/* Seed Remove: each family independently balances the input. */}
+            {isComponentMode && requiredComponents.map(c => (
+              <BalanceRow key={c}
+                label={`${c === 'diamond' ? 'Growth' : c === 'seed' ? 'Seed' : c} Total`}
+                value={componentTotals[c] || 0} unit={unit}
+                color={Math.abs((componentTotals[c] || 0) - currentRemaining) <= 0.0001 ? '#2E7D32' : '#C62828'}
+                bold />
+            ))}
+            {isComponentMode && (
+              <BalanceRow label="Status"
+                value={balanced ? 'Balanced' : 'Unbalanced'}
+                color={balanced ? '#2E7D32' : '#C62828'} bold />
+            )}
           </div>
 
           {/* ── Backend Return Plan — the authoritative posting decision ── */}
@@ -896,7 +1054,14 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               <div style={{ fontSize: 11, color: '#C62828', fontWeight: 600 }}>{plan.error}</div>
             ) : (
               <>
-                <BalanceRow label="Route" value={plan.route} bold />
+                {plan.component_mode && (
+                  <div style={{ padding: '6px 8px', background: '#FFF8E1',
+                    border: '1px solid #FFE082', borderRadius: 6, fontSize: 10.5,
+                    fontWeight: 700, color: '#B26A00', marginBottom: 8 }}>
+                    ★ Detached output mode — Seed Remove only
+                  </div>
+                )}
+                <BalanceRow label="Route" value={plan.component_mode ? 'COMPONENT' : plan.route} bold />
                 {plan.target_lot_code && <BalanceRow label="Target Lot" value={plan.target_lot_code} bold />}
                 {plan.growth_number && <BalanceRow label="Growth Number" value={plan.growth_number} />}
                 {plan.run_no != null && <BalanceRow label="Run" value={`R${plan.run_no}`} />}
@@ -909,46 +1074,55 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                 {plan.projected_inventory_status && (
                   <BalanceRow label="Lot →" value={plan.projected_inventory_status} />
                 )}
+                {plan.component_mode && <BalanceRow label="Dual Family" value="YES" />}
+                {plan.seed_released && <BalanceRow label="Seed Released" value="YES" />}
+                {/* Seed Remove is non-reversible (snapshot has
+                    reversal_supported:false) — never show misleading status. */}
                 <BalanceRow label="Reversible" value={plan.reversal_supported ? 'YES' : 'NO'} />
-                {plan.seed_retained != null && (
+                {plan.seed_retained != null && !plan.component_mode && (
                   <BalanceRow label="Seed stays attached" value={plan.seed_retained ? 'YES' : 'NO'} />
+                )}
+                {plan.component_mode && (
+                  <div style={{ padding: '6px 8px', background: '#E3F2FD',
+                    border: '1px solid #90CAF9', borderRadius: 6, fontSize: 10,
+                    color: '#1565C0', marginTop: 8 }}>
+                    Growth and Recovered Seed must each balance the input quantity.
+                  </div>
                 )}
               </>
             )}
           </div>
 
-          <div style={{
-            padding: '12px 16px', borderTop: '1px solid var(--g200)',
-            background: '#fff', flexShrink: 0,
-          }}>
-            {!isComponentMode && !balanced && linesTotal > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
-                <AlertCircle size={12} /> The Return Difference must be 0 to save.
-              </div>
-            )}
-            {!isComponentMode && overFill && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
-                <AlertCircle size={12} /> You cannot return more than what was issued.
-              </div>
-            )}
-            {isComponentMode && compOver && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
-                <AlertCircle size={12} /> A component output exceeds the quantity in process — components are never summed.
-              </div>
-            )}
-            {isComponentMode && weightOver && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828', marginBottom: 8 }}>
-                <AlertCircle size={12} /> Output weight exceeds input weight — a split cannot create mass.
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" style={{ flex: 1, padding: '10px 16px', fontWeight: 700 }}
-                disabled={!balanced || saving || planLoading || !plan?.valid} onClick={handleSubmit}>
-                {saving ? 'Saving…' : planLoading ? 'Validating…' : <><CheckCircle2 size={16} /> Complete Return</>}
-              </button>
+          {/* Record Return (bottom action bar) is the ONLY posting action —
+              the server decides partial vs final from the quantity balance.
+              This block keeps the inline warnings only. */}
+          {(((!isComponentMode) && ((!balanced && linesTotal > 0) || overFill)) ||
+            (isComponentMode && (compOver || weightOver))) && (
+            <div style={{ padding: '10px 12px', background: '#FFEBEE',
+              border: '1px solid #EF9A9A', borderRadius: 8, marginBottom: 12 }}>
+              {!isComponentMode && !balanced && linesTotal > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828' }}>
+                  <AlertCircle size={12} /> Return quantities must balance before posting.
+                </div>
+              )}
+              {!isComponentMode && overFill && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828' }}>
+                  <AlertCircle size={12} /> You cannot return more than what was issued.
+                </div>
+              )}
+              {isComponentMode && compOver && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828' }}>
+                  <AlertCircle size={12} /> A component output exceeds the quantity in process — components are never summed.
+                </div>
+              )}
+              {isComponentMode && weightOver && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828' }}>
+                  <AlertCircle size={12} /> Output weight exceeds input weight — a split cannot create mass.
+                </div>
+              )}
             </div>
-          </div>
-          
+          )}
+
           <div style={{ padding: '10px 12px', background: '#fff', border: '1px solid var(--g200)',
             borderRadius: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 9.5, color: 'var(--g500)', fontWeight: 700,

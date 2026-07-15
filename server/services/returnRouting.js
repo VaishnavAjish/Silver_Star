@@ -441,10 +441,14 @@ function buildReturnPlan({
     route: 'CHILD',
     in_place: false,
     growth_run_input: false,
-    target_lot_id: null,
-    target_lot_code: null,
-    growth_number: biscuit ? biscuit.lot_number : null,
-    run_no: biscuit && biscuit.run_no != null ? parseInt(biscuit.run_no) : null,
+    // Seed Remove (biscuit input): the input assembly IS the growth identity —
+    // exposed read-only for the plan panel. Outputs are still new lots.
+    target_lot_id: isGrowthRun ? processLot.id : null,
+    target_lot_code: isGrowthRun ? (processLot.lot_code || processLot.lot_number) : null,
+    growth_number: biscuit ? biscuit.lot_number : (isGrowthRun ? processLot.lot_number : null),
+    run_no: biscuit && biscuit.run_no != null
+      ? parseInt(biscuit.run_no)
+      : (isGrowthRun && processLot.run_no != null ? parseInt(processLot.run_no) : null),
     will_create_new_lot: true,
     projected_inventory_status: isFinal ? 'CONSUMED' : processLot.status,
     projected_qty: isFinal ? 0 : (processLot.qty != null ? parseFloat(processLot.qty) : null),

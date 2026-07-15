@@ -344,6 +344,11 @@ test('phase C: multi-line COMPONENT return of a biscuit is ACCEPTED (dual groups
   assert.equal(Math.round(seedSum * 100) / 100, 90);
   assert.equal(Math.round(diaSum * 100) / 100, 120);
   assert.deepEqual(p.value_pools, { growth: 120, seed: 90 });
+  // Return Workspace UI: the input assembly's growth identity is exposed
+  // read-only on the plan (outputs are still new lots).
+  assert.equal(p.growth_number, 'SSD087-JUL26-028');
+  assert.equal(p.target_lot_code, 'SSD087-JUL26-028');
+  assert.equal(p.run_no, 1);
 });
 
 test('phase C: missing attached Seed BLOCKS with the exact required message', () => {

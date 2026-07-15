@@ -320,7 +320,13 @@ router.get('/:id', authenticate, async (req, res) => {
               gr.dim_height AS growth_dim_height, gr.dim_unit AS growth_dim_unit,
               gri.name AS growth_item_name,
               rt.lot_number AS root_lot_number, rt.lot_code AS root_lot_code,
-              COALESCE(pm1.allowed_outputs, pm2.allowed_outputs) AS allowed_outputs
+              COALESCE(pm1.allowed_outputs, pm2.allowed_outputs) AS allowed_outputs,
+              -- Return Workspace UI: human-readable Process Master name (the
+              -- technical code stays tooltip-only) + authoritative runtime
+              -- timestamps. Read-only display fields — no posting semantics.
+              COALESCE(pm1.process_name, pm2.process_name) AS process_display_name,
+              mp.started_at   AS process_started_at,
+              mp.completed_at AS process_completed_at
        FROM lot_process_issues pi
        JOIN inventory sl      ON sl.id   = pi.source_lot_id
        JOIN items i           ON i.id    = sl.item_id
