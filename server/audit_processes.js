@@ -261,14 +261,18 @@ async function run() {
       lpi.process_type,
       lpi.status,
       lpi.created_at,
-      lpi.process_lot_number,
+      lpi.process_lot_id,
+      inv.lot_code      AS process_lot_code,
       lpi.machine_process_id,
       lpi.issued_qty,
       lpi.remaining_in_process,
       mp.machine_id,
       m.machine_name,
-      m.machine_code
+      m.machine_code,
+      mp.process_number,
+      mp.status         AS mp_status
     FROM lot_process_issues lpi
+    LEFT JOIN inventory inv ON inv.id = lpi.process_lot_id
     LEFT JOIN machine_processes mp ON mp.id = lpi.machine_process_id
     LEFT JOIN machines m ON m.id = mp.machine_id
     WHERE lpi.status = 'OPEN'
