@@ -56,24 +56,21 @@ BEGIN
           ) AS latest_return_created_at,
           (
               SELECT count(DISTINCT l.id)
-              FROM lot_process_issues i
-              JOIN inventory l ON l.id = i.process_lot_id
+              FROM inventory l
               JOIN items it ON it.id = l.item_id
-              WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
+              WHERE l.machine_process_id = mp.id AND it.category = 'growth_run'
           ) AS growth_inventory_count,
           (
               SELECT MAX(l.id)
-              FROM lot_process_issues i
-              JOIN inventory l ON l.id = i.process_lot_id
+              FROM inventory l
               JOIN items it ON it.id = l.item_id
-              WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
+              WHERE l.machine_process_id = mp.id AND it.category = 'growth_run'
           ) AS growth_inventory_id,
           (
               SELECT MAX(l.status)
-              FROM lot_process_issues i
-              JOIN inventory l ON l.id = i.process_lot_id
+              FROM inventory l
               JOIN items it ON it.id = l.item_id
-              WHERE i.machine_process_id = mp.id AND it.category = 'growth_run'
+              WHERE l.machine_process_id = mp.id AND it.category = 'growth_run'
           ) AS growth_inventory_status
       FROM machines m
       JOIN machine_processes mp ON mp.machine_id = m.id
@@ -179,7 +176,7 @@ BEGIN
           RAISE EXCEPTION 'phase66: revalidation failed for machine process % (return created_at changed)', v_rec.machine_process_id;
       END IF;
 
-      IF (SELECT MAX(l.id) FROM lot_process_issues i JOIN inventory l ON l.id = i.process_lot_id JOIN items it ON it.id = l.item_id WHERE i.machine_process_id = v_rec.machine_process_id AND it.category = 'growth_run') <> v_rec.growth_inventory_id THEN
+      IF (SELECT MAX(l.id) FROM inventory l JOIN items it ON it.id = l.item_id WHERE l.machine_process_id = v_rec.machine_process_id AND it.category = 'growth_run') <> v_rec.growth_inventory_id THEN
           RAISE EXCEPTION 'phase66: revalidation failed for machine process % (growth inventory ID changed)', v_rec.machine_process_id;
       END IF;
 
