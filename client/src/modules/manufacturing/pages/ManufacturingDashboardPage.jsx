@@ -238,6 +238,7 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
             <StatCell label="ETA" value={fmtETA(machine.expected_completion_at)?.text || '—'} />
           </div>
         )}
+        <LastCompletedRunDisplay machine={machine} />
       </div>
 
       {/* Actions (Icon Only) */}
@@ -310,6 +311,31 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
     </div>
   );
 }); // end MachineCard memo
+
+function LastCompletedRunDisplay({ machine }) {
+  if (machine.machine_status !== 'idle') return null;
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #E0E0E0' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
+        Last Completed Run
+      </div>
+      {machine.last_completed_run ? (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#424242' }}>
+            {machine.last_completed_run.growth_number || '—'} <span style={{ color: '#BDBDBD' }}>·</span> R{machine.last_completed_run.run_number || '?'}
+          </div>
+          <div style={{ fontSize: 10, color: '#757575', marginTop: 2 }}>
+            Completed {new Date(machine.last_completed_run.completed_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: '#9E9E9E', fontStyle: 'italic' }}>
+          No previous run
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StatCell({ label, value }) {
   return (
@@ -478,6 +504,7 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
         <div style={{ fontSize: 10, color: '#9E9E9E', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {m.code}
         </div>
+        <LastCompletedRunDisplay machine={m} />
       </td>
 
       {/* Status */}

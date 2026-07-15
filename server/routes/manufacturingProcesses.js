@@ -178,7 +178,25 @@ router.get('/machines', authenticate, async (req, res) => {
           gr.status              AS biscuit_status,
           (SELECT i.dim_length FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_length,
           (SELECT i.dim_depth FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_width,
-          (SELECT i.dim_height FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_height
+          (SELECT i.dim_height FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = mp.id ORDER BY mpl.id ASC LIMIT 1) AS dim_height,
+          (
+            SELECT json_build_object(
+              'machine_process_id', cmp.id,
+              'process_type', cmp.process_type,
+              'growth_number', cgr.lot_number,
+              'run_number', COALESCE(cgr.run_no, (SELECT i.run_no FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = cmp.id ORDER BY mpl.id ASC LIMIT 1)),
+              'completed_at', cmp.completed_at
+            )
+            FROM machine_processes cmp
+            LEFT JOIN inventory cgr
+                   ON cgr.machine_process_id = cmp.id
+                  AND cgr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+            WHERE cmp.machine_id = m.id
+              AND cmp.status = 'completed'
+              AND cmp.process_type ILIKE 'growth'
+            ORDER BY cmp.completed_at DESC NULLS LAST, cmp.id DESC
+            LIMIT 1
+          ) AS last_completed_run
         FROM machines m
         LEFT JOIN departments d ON d.id = m.department_id
         LEFT JOIN locations   l ON l.id = m.location_id
