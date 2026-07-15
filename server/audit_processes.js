@@ -117,7 +117,7 @@ async function run() {
   console.log('\n========== PHASE 2 — PROCESS MASTER MATRIX ==========');
   const pm = (await client.query(`
     SELECT id, process_code, process_name, active, category,
-           process_group, machine_type, input_item_category,
+           process_group, eligible_machine_type, input_item_category,
            output_type, allowed_outputs,
            requires_inventory, requires_machine, requires_operator,
            requires_runtime, requires_expected_yield, allows_consumables,
@@ -303,7 +303,7 @@ async function run() {
   for (const [legacy, canonical] of pairs) {
     const pair = (await client.query(`
       SELECT id, process_code, process_name, active, category,
-             process_group, machine_type, input_item_category,
+             process_group, eligible_machine_type, input_item_category,
              output_type, allowed_outputs,
              requires_inventory, requires_machine, requires_operator,
              requires_runtime, requires_expected_yield, allows_consumables,
@@ -319,7 +319,7 @@ async function run() {
   // Extras
   const extras = (await client.query(`
     SELECT id, process_code, process_name, active, category,
-           process_group, machine_type, input_item_category,
+           process_group, eligible_machine_type, input_item_category,
            output_type, allowed_outputs,
            requires_inventory, requires_machine, requires_operator,
            requires_runtime, requires_expected_yield, allows_consumables,
@@ -339,7 +339,7 @@ async function run() {
   console.log(`final_block code already exists: ${fbExists.length > 0}`);
 
   const fbBlockCut = (await client.query(`
-    SELECT id, process_code, process_name, process_group, machine_type, output_type, allowed_outputs
+    SELECT id, process_code, process_name, process_group, eligible_machine_type, output_type, allowed_outputs
     FROM process_master
     WHERE process_code IN ('pr-06', 'block_cut', 'growth_cut', 'final_block')
     ORDER BY process_code
@@ -351,7 +351,7 @@ async function run() {
   console.log('\n========== PHASE 7 — SEED REMOVE ==========');
   const srPair = (await client.query(`
     SELECT id, process_code, process_name, active, allowed_outputs,
-           completion_mode, process_group, machine_type, input_item_category
+           completion_mode, process_group, eligible_machine_type, input_item_category
     FROM process_master
     WHERE process_code IN ('pr-05', 'seed_remove')
     ORDER BY process_code
