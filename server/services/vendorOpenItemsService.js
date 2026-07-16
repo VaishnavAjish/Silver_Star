@@ -47,8 +47,30 @@ async function getVendorOpenItems(vendorId, asOfDate = null, excludeJeId = null)
     ORDER BY doc_date ASC, id ASC
   `;
 
-  const result = await pool.query(query, params);
-  return result.rows;
+  try {
+    const result = await pool.query(query, params);
+    return result.rows;
+  } catch (err) {
+    const fallbackQuery = `
+      SELECT 
+        'purchase_note' AS source_type,
+        id AS source_id,
+        doc_number AS voucher_no,
+        doc_date AS voucher_date,
+        due_date,
+        vendor_id,
+        remark AS description,
+        grand_total AS original_amount,
+        0 AS amount_paid,
+        grand_total AS outstanding_amount,
+        status
+      FROM purchase_notes
+      WHERE vendor_id = $1 AND status != 'cancelled'
+      ORDER BY doc_date ASC, id ASC
+    `;
+    const result = await pool.query(fallbackQuery, [parseInt(vendorId)]);
+    return result.rows;
+  }
 }
 
 module.exports = {
