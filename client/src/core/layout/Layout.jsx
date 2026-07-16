@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTabs, TabProvider, TabBar } from '../tabs';
 import {
   Leaf, LayoutDashboard, Package, FileText, Settings as Cog, Database, BarChart3, LogOut,
-  ChevronRight, Gem, Building2, Search, User, Warehouse, Receipt, Send, RotateCcw, Clock,
+  ChevronRight, ChevronLeft, Gem, Building2, Search, User, Warehouse, Receipt, Send, RotateCcw, Clock,
   ShoppingCart, CreditCard, HandCoins, BookOpen, TrendingUp, Calculator, Users, Landmark,
   TrendingDown, GitBranch, GitMerge, Layers, ShieldCheck, Cpu, ClipboardList, ArrowLeft, Share2
 } from 'lucide-react';
@@ -16,105 +16,15 @@ import { resolveRouteMatch } from '../../router';
 import { NotificationCenter } from '../../shared/components/NotificationCenter';
 import Modal from '../../shared/components/Modal';
 import packageJson from '../../../../package.json';
-export const NAV = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/', module: 'dashboard', submodule: 'dashboard' },
-  { label: 'Clipboard', icon: ClipboardList, path: '/clipboard', module: 'clipboard', submodule: 'clipboard' },
-  {
-    label: 'Inventory', icon: Warehouse, module: 'inventory', children: [
-      { label: 'All Inventory', path: '/inventory', submodule: 'all_inventory' },
-      { label: 'Opening Entry', path: '/inventory/opening', editorOnly: true },
-      { label: 'Closing Entry', path: '/inventory/closing', editorOnly: true },
-      { label: 'Mix Lots', path: '/inventory/mix', editorOnly: true },
-      { label: 'Stock Transfer', path: '/inventory/stock-transfer', editorOnly: true },
-      { label: 'Lot Movements', path: '/lot-movements', submodule: 'lot_movements' },
-      { label: 'Process Issues', path: '/inventory/process-issues', submodule: 'process_issues' },
-      { label: 'Start Process', path: '/inventory/process-issues/new', editorOnly: true },
-      { label: 'Process Return', path: '/inventory/process-returns', submodule: 'process_issues' },
-    ]
-  },
-  {
-    label: 'Rough Diamonds', icon: Gem, module: 'rough', children: [
-      // Read-model preset over All Inventory (category=rough) — the single
-      // authoritative rough stock view. Rough Growth stays as the legacy
-      // Growth Output workflow until Process Master stabilisation completes.
-      { label: 'Rough Diamond Inventory', path: '/rough-diamonds/inventory', submodule: 'rough_growth' },
-      { label: 'Growth Runs', path: '/growth-runs', submodule: 'rough_growth' },
-      { label: 'Process Issues', path: '/inventory/process-issues', editorOnly: true },
-      { label: 'Rough Growth', path: '/rough-growth', submodule: 'rough_growth' },
-    ]
-  },
-  {
-    label: 'Manufacturing', icon: Cpu, module: 'manufacturing', children: [
-      { label: 'Control Tower', path: '/manufacturing/control-tower', submodule: 'control_tower' },
-    ]
-  },
-  {
-    label: 'Purchase', icon: ShoppingCart, module: 'purchase', children: [
-      { label: 'Vendors', path: '/vendors', submodule: 'vendors' },
-      { label: 'Vendor Bills', path: '/bills', submodule: 'purchase_notes' },
-      { label: 'Purchase Notes', path: '/purchase-notes', submodule: 'purchase_notes' },
-      { label: 'New Purchase Note', path: '/purchase-notes/new', editorOnly: true },
-      { label: 'Expenses', path: '/expenses', submodule: 'expenses' },
-    ]
-  },
-  {
-    label: 'Sales', icon: FileText, module: 'sales', children: [
-      { label: 'Invoices', path: '/invoices', submodule: 'invoice' },
-      { label: 'New Invoice', path: '/invoices/new', editorOnly: true },
-      { label: 'Customers', path: '/customers', submodule: 'customers' },
-    ]
-  },
-  {
-    label: 'Accounting', icon: Building2, module: 'accounting', children: [
-      { label: 'Chart of Accounts', path: '/accounts', submodule: 'chart_of_accounts' },
-      { label: 'Journal Entries', path: '/journal-entries', submodule: 'journal_entries' },
-      { label: 'Payments', path: '/payments', submodule: 'payments' },
-      { label: 'Receipts', path: '/receipts', submodule: 'receipts' },
-      { label: 'Bank Deposits', path: '/bank-deposits', submodule: 'bank_deposits' },
-      { label: 'Transfers', path: '/transfers', submodule: 'transfers' },
-      { label: 'Bank Reconciliation', path: '/reports/bank-reconciliation', submodule: 'bank_reconciliation' },
-    ]
-  },
-  {
-    label: 'Fixed Assets', icon: Landmark, module: 'assets', children: [
-      { label: 'Asset List', path: '/assets', submodule: 'asset_list' },
-      { label: 'Manual Entry', path: '/assets/new', editorOnly: true },
-      { label: 'Depreciation Runs', path: '/depreciation-runs', submodule: 'depreciation_runs' },
-      { label: 'New Depreciation Run', path: '/depreciation-runs/new', editorOnly: true },
-      { label: 'Fixed Asset Register', path: '/reports/fixed-asset-register', submodule: 'fixed_asset_register' },
-      { label: 'Depreciation Schedule', path: '/reports/depreciation-schedule', submodule: 'depreciation_schedule' },
-    ]
-  },
-  {
-    label: 'Reports', icon: BarChart3, module: 'reports', children: [
-      { label: 'Fund Utilization', path: '/reports/fund-utilization' },
-      { label: 'Ledger', path: '/ledger', submodule: 'ledger' },
-      { label: 'Trial Balance', path: '/trial-balance', submodule: 'trial_balance' },
-      { label: 'Profit & Loss', path: '/pnl', submodule: 'profit_loss' },
-      { label: 'Balance Sheet', path: '/balance-sheet', submodule: 'balance_sheet' },
-      { label: 'Costing Report', path: '/costing', submodule: 'costing_report' },
-      { label: 'Accounts Receivable', path: '/reports/accounts-receivable', submodule: 'accounts_receivable' },
-      { label: 'Accounts Payable', path: '/reports/accounts-payable', submodule: 'accounts_payable' },
-      { label: 'Cost Center P&L', path: '/reports/cost-center', submodule: 'cost_center_pl' },
-      { label: 'Cost Centre Reports', path: '/cost-center-reports' },
-    ]
-  },
-  {
-    label: 'Management', icon: Database, module: 'management', children: [
-      { label: 'Process Master', path: '/manufacturing/process-master', submodule: 'process_master' },
-      { label: 'Items Master', path: '/items', submodule: 'items_master' },
-      { label: 'Machines', path: '/machines', submodule: 'machines' },
-      { label: 'Departments', path: '/departments', submodule: 'departments' },
-      { label: 'Locations', path: '/locations', submodule: 'locations' },
-      { label: 'UOM', path: '/uom', submodule: 'uom' },
-      { label: 'Expense Categories', path: '/expense-categories', submodule: 'expense_categories' },
-      { label: 'Asset Categories', path: '/fixed-asset-categories', submodule: 'asset_categories' },
-      { label: 'Cost Centres', path: '/cost-centers' },
-      { label: 'Cost Centre Corrections', path: '/cost-center-corrections' },
-    ]
-  },
-  { label: 'Admin Panel', icon: ShieldCheck, path: '/admin/users', adminOnly: true, module: 'admin', submodule: 'users' },
-];
+import { NAVIGATION } from '../navigation/registry';
+import { filterNavigation, flattenLeaves } from '../navigation/selectors';
+import HeaderShortcuts from '@features/shortcuts/HeaderShortcuts';
+
+// The central registry is the single source of truth. These re-exports keep
+// historical importers (e.g. the command palette) working while they migrate to
+// importing from core/navigation directly.
+export const NAV = NAVIGATION;
+export function flattenNav(items) { return flattenLeaves(items); }
 
 const ROOT_PATHS = new Set([
   '/', '/inventory', '/invoices', '/purchase-notes', '/expenses',
@@ -133,92 +43,108 @@ const ROOT_PATHS = new Set([
   '/admin/users', '/clipboard',
 ]);
 
-export function flattenNav(items) {
-  const result = [];
-  for (const item of items) {
-    if (item.children) {
-      for (const child of item.children) {
-        if (child.path) result.push({ ...child, icon: item.icon });
-      }
-    } else if (item.path) {
-      result.push(item);
-    }
-  }
-  return result;
-}
-
-function SidebarItem({ item, onNavigate }) {
-  const [open, setOpen] = useState(null);
+// Sidebar item. Permission filtering happens UPSTREAM via filterNavigation, so
+// this component only renders. Groups are accessible <button>s with
+// aria-expanded; compact mode is icon-only with tooltips (a group header in
+// compact mode opens its first child).
+function SidebarItem({ item, onNavigate, compact, collapsedSet, onToggleCollapse }) {
   const location = useLocation();
-  const { hasPermission } = useAuth();
 
-  useEffect(() => { setOpen(null); }, [location.pathname]);
-
+  // Direct link (no children)
   if (!item.children) {
     const isActive = location.pathname === item.path;
     return (
       <div className="nav-item">
-        <div
+        <button
+          type="button"
           className={`nav-hdr${isActive ? ' active' : ''}`}
+          title={compact ? item.label : undefined}
+          aria-label={item.label}
           onClick={(e) => onNavigate(item, null, e)}
           onAuxClick={(e) => { if (e.button === 1) onNavigate(item, null, e); }}
         >
           <item.icon className="icon" size={16} />
-          {item.label}
-        </div>
+          {!compact && item.label}
+        </button>
       </div>
     );
   }
 
-  // Hide editor-only children when user lacks create/edit permission on the module
-  const canMutate = !item.module ||
-    hasPermission(item.module, 'create') ||
-    hasPermission(item.module, 'edit');
-  const visibleChildren = item.children.filter(c => {
-    if (c.editorOnly) return canMutate;
-    if (c.submodule) return hasPermission(item.module, 'sidebar', c.submodule);
-    return !item.module || hasPermission(item.module, 'view');
-  });
-  const isActive = visibleChildren.some(c =>
+  const children = item.children;
+  const isActive = children.some(c =>
     c.path && (location.pathname === c.path || location.pathname.startsWith(c.path + '/'))
   );
-  const isOpen = open ?? isActive;
+  // Default expanded; user may collapse. An active section always shows open.
+  const expanded = compact ? false : (!collapsedSet.has(item.id) || isActive);
+
+  const onHeader = (e) => {
+    if (compact) {
+      // Compact: jump to the first child for fast access.
+      const first = children[0];
+      if (first) onNavigate(first, item, e);
+    } else {
+      onToggleCollapse(item.id);
+    }
+  };
 
   return (
     <div className="nav-item">
-      <div
-        className={`nav-hdr ${isOpen ? 'expanded' : ''}`}
-        onClick={() => setOpen(prev => (prev ?? isActive) ? false : true)}
+      <button
+        type="button"
+        className={`nav-hdr ${expanded ? 'expanded' : ''}${isActive ? ' parent-active' : ''}`}
+        aria-expanded={compact ? undefined : expanded}
+        title={compact ? item.label : undefined}
+        aria-label={item.label}
+        onClick={onHeader}
       >
         <item.icon className="icon" size={16} />
-        {item.label}
-        <ChevronRight className="arrow" size={10} />
-      </div>
-      <div className={`nav-sub ${isOpen ? 'open' : ''}`}>
-        {visibleChildren.map(child => (
-          child.disabled ? (
-            <span key={child.path} style={{ display: 'block', padding: '6px 14px 6px 42px', color: 'var(--g400)', fontSize: 12, cursor: 'default' }}>
-              {child.label}
-            </span>
-          ) : (
-            <div
+        {!compact && item.label}
+        {!compact && <ChevronRight className="arrow" size={10} />}
+      </button>
+      {!compact && (
+        <div className={`nav-sub ${expanded ? 'open' : ''}`}>
+          {children.map(child => (
+            <button
+              type="button"
               key={child.path}
               className={location.pathname === child.path || location.pathname.startsWith(child.path + '/') ? 'active' : ''}
               onClick={(e) => onNavigate(child, item, e)}
               onAuxClick={(e) => { if (e.button === 1) onNavigate(child, item, e); }}
-              style={{ cursor: 'pointer', display: 'block', padding: '6px 14px 6px 42px', fontSize: 12 }}
+              style={{ cursor: 'pointer', display: 'block', width: '100%', textAlign: 'left', padding: '6px 14px 6px 42px', fontSize: 12, background: 'none', border: 'none', font: 'inherit', color: 'inherit' }}
             >
               {child.label}
-            </div>
-          )
-        ))}
-      </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function LayoutInner() {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, hasRole } = useAuth();
+
+  // Sidebar UI state (device-local): compact icon-only mode + remembered
+  // collapsed sections. Stored in localStorage for instant first paint.
+  const [compact, setCompact] = useState(() => localStorage.getItem('nav.compact') === '1');
+  const [collapsedSet, setCollapsedSet] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('nav.collapsed') || '[]')); }
+    catch { return new Set(); }
+  });
+  const toggleCompact = () => setCompact(v => { const n = !v; localStorage.setItem('nav.compact', n ? '1' : '0'); return n; });
+  const toggleCollapse = (id) => setCollapsedSet(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    localStorage.setItem('nav.collapsed', JSON.stringify([...next]));
+    return next;
+  });
+
+  // One shared, permission-filtered navigation tree for the sidebar. Empty
+  // groups are dropped by the selector.
+  const visibleNav = useMemo(
+    () => filterNavigation(NAVIGATION, { hasPermission, hasRole }),
+    [user, hasPermission, hasRole]
+  );
   const { openTab, closeTab, switchTab, closeOtherTabs, closeAllTabs, closeTabsToRight, reorderTabs, patchTabs, tabs, activeTabId } = useTabs();
   const navigate = useNavigate();
   const location = useLocation();
@@ -416,17 +342,16 @@ function LayoutInner() {
           </div>
         </div>
         <div className="sidebar-nav">
-          {NAV
-            .filter(item => {
-              if (!item.adminOnly) return true;
-              const r = String(user?.role || '').toLowerCase();
-              return r === 'admin' || r === 'super_admin';
-            })
-            .filter(item => {
-              if (item.submodule) return hasPermission(item.module, 'sidebar', item.submodule);
-              return !item.module || hasPermission(item.module, 'view');
-            })
-            .map((item, i) => <SidebarItem key={i} item={item} onNavigate={handleNavigate} />)}
+          {visibleNav.map((item) => (
+            <SidebarItem
+              key={item.id}
+              item={item}
+              onNavigate={handleNavigate}
+              compact={compact}
+              collapsedSet={collapsedSet}
+              onToggleCollapse={toggleCollapse}
+            />
+          ))}
           <div className="nav-item" style={{ marginTop: 8, borderTop: '1px solid var(--sidebar-border)', paddingTop: 4 }}>
             <div className="nav-hdr" onClick={() => setShowLogoutConfirm(true)}>
               <LogOut className="icon" size={16} />
@@ -434,8 +359,23 @@ function LayoutInner() {
             </div>
           </div>
         </div>
-        <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--brand)', textAlign: 'center', borderTop: '1px solid var(--sidebar-border)', fontFamily: 'var(--mono)', fontWeight: 800 }}>
-          v{packageJson.version}
+        <div style={{ borderTop: '1px solid var(--sidebar-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
+          <button
+            type="button"
+            onClick={toggleCompact}
+            title={compact ? 'Expand sidebar' : 'Compact sidebar'}
+            aria-label={compact ? 'Expand sidebar' : 'Compact sidebar'}
+            aria-pressed={compact}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand)', fontSize: 11, fontWeight: 700 }}
+          >
+            {compact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            {!compact && 'Compact'}
+          </button>
+          {!compact && (
+            <span style={{ fontSize: 11, color: 'var(--brand)', fontFamily: 'var(--mono)', fontWeight: 800 }}>
+              v{packageJson.version}
+            </span>
+          )}
         </div>
       </nav>
 
@@ -470,6 +410,7 @@ function LayoutInner() {
           {pageName}
         </div>
         <GlobalCreateMenu />
+        <HeaderShortcuts />
         <div className="topbar-right">
           {/* Real-Time Notification Bell */}
           <NotificationCenter />
