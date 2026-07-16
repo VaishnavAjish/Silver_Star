@@ -9,119 +9,110 @@ const reportingCurrencyService = require('../services/reportingCurrencyService')
 
 const router = express.Router();
 
-// GET /api/reports/pnl?from=2025-04-01&to=2025-04-30
+const { buildWorkbookBuffer } = require('../services/xlsxReportBuilder');
+
+const {
+  getLedgerReport,
+  getTrialBalanceHierarchyReport,
+  getProfitAndLossReport,
+  getBalanceSheetReport
+} = require('../services/accountingReportService');
+const { REPORT_EXPORTS, buildExportModel } = require('../services/accountingExportRegistry');
+const { buildCsvBuffer } = require('../services/csvReportBuilder');
+const { authorize } = require('../middleware/auth');
+
+const { hasPermission } = require('../utils/permissions');
+const { ROLE_DEFAULTS } = require('../middleware/permissions');
+
+async function isAuthorizedForReport(req, def) {
+  if (!req.user) return false;
+  if (req.user.role === 'super_admin') return true;
+
+  const moduleName = def.permission.module;
+  const submodule = def.permission.submodule;
+  const action = 'view';
+
+  // 1. RBAC
+  if (await hasPermission(req.user.id, moduleName, action, submodule)) return true;
+  if (await hasPermission(req.user.id, moduleName, action, '')) return true;
+
+  // 2. Legacy user_permissions
+  const { rows } = await pool.query(
+    'SELECT allowed FROM user_permissions WHERE user_id=$1 AND module=$2 AND permission_key=$3',
+    [req.user.id, moduleName, action]
+  );
+  if (rows.length > 0 && rows[0].allowed) return true;
+
+  // 3. Legacy defaults
+  return ROLE_DEFAULTS[req.user.role]?.[moduleName]?.includes(action) ?? false;
+}
+
+// POST /api/reports/export
+// Server-authoritative export endpoint
+router.post('/export', authenticate, async (req, res) => {
+  try {
+    const { reportId, format, filters, ...unknownKeys } = req.body;
+
+    // Strict validation: reject any top-level unknown keys to prevent client fabrication
+    if (Object.keys(unknownKeys).length > 0) {
+      return res.status(400).json({ error: 'Unknown keys in request payload' });
+    }
+
+    if (!reportId || !REPORT_EXPORTS[reportId]) {
+      return res.status(400).json({ error: 'Invalid reportId' });
+    }
+
+    const def = REPORT_EXPORTS[reportId];
+    if (!def.formats.includes(format)) {
+      return res.status(400).json({ error: 'Unsupported format' });
+    }
+
+    const authorized = await isAuthorizedForReport(req, def);
+    if (!authorized) {
+      return res.status(403).json({ error: 'Unauthorized to view this report' });
+    }
+
+    let validFilters;
+    try {
+      validFilters = def.validateFilters(filters);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const canonicalData = await def.loadCanonicalReport(validFilters);
+    const exportModel = buildExportModel(def, canonicalData, validFilters);
+
+    const safeName = String(exportModel.fileName || exportModel.title).replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'report';
+
+    if (format === 'xlsx') {
+      const buffer = await buildWorkbookBuffer(exportModel);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.xlsx"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } else if (format === 'csv') {
+      const buffer = buildCsvBuffer(exportModel);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    }
+
+    return res.status(400).json({ error: 'Unsupported format' });
+  } catch (err) {
+    logger.error('reports.export failed', { message: err.message });
+    return res.status(500).json({ error: 'Export failed' });
+  }
+});
+
+// GET /api/reports/pnl
 router.get('/pnl', authenticate, async (req, res) => {
   try {
     let { from_date, to_date } = req.query;
     if (!from_date) from_date = '1970-01-01';
     if (!to_date) to_date = new Date().toISOString().split('T')[0];
 
-    // Fetch GL balances via Trial Balance hierarchy and inventory valuations concurrently
-    const [roots, closingInventory] = await Promise.all([
-      buildTrialBalanceHierarchy(from_date, to_date),
-      getInventoryValuation(to_date)
-    ]);
-
-    // Flatten the Trial Balance tree to get all leaf accounts with activity
-    const allLeaves = [];
-    const flatten = (nodes, rootGroup) => {
-      for (const node of nodes) {
-        if (!node.is_group && (node.net_balance !== 0 || node.total_debit !== 0 || node.total_credit !== 0)) {
-          allLeaves.push({ ...node, rootGroup });
-        }
-        if (node.children && node.children.length > 0) {
-          flatten(node.children, rootGroup || node.name);
-        }
-      }
-    };
-    flatten(roots, null);
-
-    // inventory_opening table may not exist on older deployments - fall back to 0
-    let openingStock = 0;
-    try {
-      const openingR = await pool.query(
-        `SELECT COALESCE(SUM(value), 0) AS value FROM inventory_opening WHERE as_of_date < $1`,
-        [from_date]
-      );
-      openingStock = round2(openingR.rows[0].value);
-    } catch { /* table missing - treat opening stock as 0 */ }
-
-    // Revenue accounts (Credit balances are positive for revenue)
-    const revenue = allLeaves
-      .filter(a => a.type === 'revenue')
-      .map(a => ({ ...a, amount: -a.net_balance }));
-
-    const expenses = allLeaves.filter(a => a.type === 'expense');
-
-    // Identify COGS accounts via structural fields, never by user-defined string names
-    const isCogs = (a) => {
-      return a.account_role === 'COGS' || a.sub_type === 'cogs' || a.sub_type === 'direct_expense';
-    };
-
-    const cogsAccounts = expenses.filter(isCogs);
-    const opexAccounts = expenses.filter(a => !isCogs(a));
-
-    const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
-
-    // Actual COGS is strictly the sum of the COGS GL accounts (Debit is positive for expenses)
-    const actualCogs = round2(cogsAccounts.reduce((sum, a) => sum + a.net_balance, 0));
-    const closingStock = round2(closingInventory.value);
-    
-    // Mathematically derive the Purchases figure to perfectly balance the Periodic formula
-    // Formula: actualCogs = openingStock + purchases - closingStock
-    // Therefore: purchases = actualCogs - openingStock + closingStock
-    const purchases = round2(actualCogs - openingStock + closingStock);
-
-    const formulaCogs = actualCogs;
-
-    const cogs = [
-      { code: 'OPEN', name: 'Opening Stock', amount: openingStock },
-      { code: 'PURCHASES', name: 'Purchases', amount: purchases },
-      { code: 'CLOSE', name: 'Less: Closing Stock', amount: -closingStock },
-    ];
-
-    const opex = opexAccounts.map(a => ({ ...a, amount: a.net_balance }));
-    const totalCogs = formulaCogs;
-    const totalOpex = round2(opex.reduce((s, r) => s + r.amount, 0));
-    const grossProfit = totalRevenue - totalCogs;
-    const netProfit = grossProfit - totalOpex;
-    const netMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 10000) / 100 : 0;
-
-    logger.info(`[P&L Report] period=${from_date}..${to_date} revenue=${totalRevenue} cogs=${totalCogs} opex=${totalOpex} gross=${grossProfit} net=${netProfit}`);
-
-    // Calculate Purchase Breakdown directly from purchase_notes
-    let purchaseBreakdown = [];
-    try {
-      const breakdownR = await pool.query(
-        `SELECT COALESCE(item_type, 'General') AS category, COALESCE(SUM(total_amount), 0) as amount
-         FROM purchase_notes
-         WHERE doc_date >= $1 AND doc_date <= $2 AND status != 'cancelled'
-           AND LOWER(item_type) IN ('seed', 'gas')
-         GROUP BY COALESCE(item_type, 'General')`,
-        [from_date, to_date]
-      );
-      purchaseBreakdown = breakdownR.rows;
-    } catch (err) {
-      logger.error('Failed to get purchase breakdown:', err);
-    }
-
-    const payload = {
-      period: { from: from_date, to: to_date },
-      revenue, totalRevenue,
-      cogs, totalCogs,
-      inventory: {
-        openingStock,
-        purchases,
-        purchaseBreakdown,
-        closingStock,
-        closingMode: closingInventory.mode,
-        closingAsOfDate: closingInventory.as_of_date,
-      },
-      grossProfit,
-      opex, totalOpex,
-      netProfit, netMargin,
-    };
-    const formatted = await reportingCurrencyService.formatReport(payload, 'pnl', req.query);
+    const formatted = await getProfitAndLossReport(from_date, to_date, req.query);
     res.json(formatted);
   } catch (err) { 
     require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); 
@@ -129,7 +120,7 @@ router.get('/pnl', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/reports/inventory-valuation?as_of_date=YYYY-MM-DD
+// GET /api/reports/inventory-valuation
 router.get('/inventory-valuation', authenticate, async (req, res) => {
   try {
     const { as_of_date = new Date().toISOString().split('T')[0] } = req.query;
@@ -141,57 +132,8 @@ router.get('/inventory-valuation', authenticate, async (req, res) => {
 router.get('/ledger/:accountId', authenticate, async (req, res) => {
   try {
     const { from_date = '2025-01-01', to_date = new Date().toISOString().split('T')[0] } = req.query;
-
-    const accR = await pool.query('SELECT * FROM accounts WHERE id = $1', [req.params.accountId]);
-    if (accR.rows.length === 0) return res.status(404).json({ error: 'Account not found' });
-    const account = accR.rows[0];
-
-    // Opening balance: sum of all posted JEs before from_date
-    const openR = await pool.query(
-      `SELECT COALESCE(SUM(jl.debit), 0) as total_dr, COALESCE(SUM(jl.credit), 0) as total_cr
-       FROM je_lines jl JOIN journal_entries je ON je.id = jl.je_id
-       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date < $2`,
-      [req.params.accountId, from_date]
-    );
-    let openingBalance = 0;
-    if (['asset', 'expense'].includes(account.type)) {
-      openingBalance = parseFloat(openR.rows[0].total_dr) - parseFloat(openR.rows[0].total_cr);
-    } else {
-      openingBalance = parseFloat(openR.rows[0].total_cr) - parseFloat(openR.rows[0].total_dr);
-    }
-
-    // Period entries
-    const entriesR = await pool.query(
-      `SELECT je.id as je_id, je.je_number, je.date, je.description, je.source_type, je.source_id, jl.debit, jl.credit, jl.narration,
-              CASE
-                WHEN je.source_type = 'purchase' THEN (SELECT doc_number::text FROM purchase_notes WHERE id::text = je.source_id::text)
-                WHEN je.source_type = 'sales' THEN (SELECT doc_number::text FROM invoices WHERE id::text = je.source_id::text)
-                WHEN je.source_type = 'payment' THEN (SELECT doc_number::text FROM payments WHERE id::text = je.source_id::text)
-                WHEN je.source_type = 'receipt' THEN (SELECT doc_number::text FROM receipts WHERE id::text = je.source_id::text)
-                ELSE je.source_id::text
-              END as doc_id
-       FROM je_lines jl JOIN journal_entries je ON je.id = jl.je_id
-       WHERE jl.account_id = $1 AND je.status = 'posted' AND je.date BETWEEN $2 AND $3
-       ORDER BY je.date, je.id`,
-      [req.params.accountId, from_date, to_date]
-    );
-
-    let runningBalance = openingBalance;
-    const entries = entriesR.rows.map(e => {
-      const dr = parseFloat(e.debit) || 0;
-      const cr = parseFloat(e.credit) || 0;
-      if (['asset', 'expense'].includes(account.type)) {
-        runningBalance += dr - cr;
-      } else {
-        runningBalance += cr - dr;
-      }
-      return { ...e, debit: dr, credit: cr, balance: Math.round(runningBalance * 100) / 100 };
-    });
-
-    const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
-    const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
-
-    res.json({ account, openingBalance, entries, closingBalance: runningBalance, totalDebit, totalCredit });
+    const formatted = await getLedgerReport(req.params.accountId, from_date, to_date, req.query);
+    res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -202,37 +144,10 @@ router.get('/trial-balance', authenticate, async (req, res) => {
     const fromDate = req.query.fromDate || req.query.from_date || '1900-01-01';
     const toDate = req.query.toDate || req.query.to_date || today;
 
-    const result = await pool.query(
-      `WITH ledger AS (
-         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
-         FROM je_lines jl
-         JOIN journal_entries je ON je.id = jl.je_id
-         WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2
-         GROUP BY jl.account_id
-       ),
-       balances AS (
-         SELECT a.code, a.name, a.type, a.is_group,
-                CASE WHEN a.type IN ('asset','expense')
-                     THEN COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0)
-                     ELSE COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0)
-                END AS balance
-         FROM accounts a
-         LEFT JOIN ledger l ON l.account_id = a.id
-         WHERE a.is_group = false AND a.status = 'active'
-       )
-       SELECT code, name, type, is_group, balance,
-              CASE WHEN balance > 0 AND type IN ('asset','expense') THEN balance
-                   WHEN balance < 0 AND type IN ('liability','equity','revenue') THEN ABS(balance) ELSE 0 END as debit_balance,
-              CASE WHEN balance > 0 AND type IN ('liability','equity','revenue') THEN balance
-                   WHEN balance < 0 AND type IN ('asset','expense') THEN ABS(balance) ELSE 0 END as credit_balance
-       FROM balances
-       ORDER BY code`,
-      [fromDate, toDate]
-    );
-    const totalDr = result.rows.reduce((s, r) => s + parseFloat(r.debit_balance || 0), 0);
-    const totalCr = result.rows.reduce((s, r) => s + parseFloat(r.credit_balance || 0), 0);
-    const payload = { accounts: result.rows, totalDebit: totalDr, totalCredit: totalCr, balanced: Math.abs(totalDr - totalCr) < 0.01 };
-    const formatted = await reportingCurrencyService.formatReport(payload, 'trial_balance', req.query);
+    // Wait, the client might actually call trial-balance and we didn't export it? We exported getTrialBalanceReport!
+    // But getTrialBalanceReport is not imported. We need to import it. Let's fix that.
+    const { getTrialBalanceReport } = require('../services/accountingReportService');
+    const formatted = await getTrialBalanceReport(fromDate, toDate, req.query);
     res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
@@ -299,173 +214,25 @@ router.get('/trial-balance-detailed', authenticate, async (req, res) => {
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
-// ── Balance sheet hierarchy helper ────────────────────────────────────────────
-// Imported from glQueryService — do not duplicate here.
-// buildAccountHierarchy() and buildTrialBalanceHierarchy() are now shared
-// services consumed by both this file and fundMovementService.
-
-// ── Trial balance hierarchy helper ───────────────────────────────────────────
-// Imported from glQueryService — do not duplicate here.
-
-// GET /api/reports/trial-balance-hierarchy?from_date=&to_date=
+// GET /api/reports/trial-balance-hierarchy
 router.get('/trial-balance-hierarchy', authenticate, async (req, res) => {
   try {
     const today    = new Date().toISOString().split('T')[0];
     const fromDate = req.query.from_date || '2025-04-01';
     const toDate   = req.query.to_date   || today;
 
-    const roots = await buildTrialBalanceHierarchy(fromDate, toDate);
-
-    // Grand totals: raw sum of all posted JE lines (debits always equal credits)
-    const totR = await pool.query(
-      `SELECT COALESCE(SUM(jl.debit),  0) AS grand_debit,
-              COALESCE(SUM(jl.credit), 0) AS grand_credit
-       FROM je_lines jl
-       JOIN journal_entries je ON je.id = jl.je_id
-       WHERE je.status = 'posted' AND je.date BETWEEN $1 AND $2`,
-      [fromDate, toDate]
-    );
-    const grandDebit  = Math.round(parseFloat(totR.rows[0].grand_debit)  * 100) / 100;
-    const grandCredit = Math.round(parseFloat(totR.rows[0].grand_credit) * 100) / 100;
-
-    const payload = {
-      period: { from: fromDate, to: toDate },
-      roots,
-      grandDebit,
-      grandCredit,
-      balanced: Math.abs(grandDebit - grandCredit) < 0.01,
-    };
-    const formatted = await reportingCurrencyService.formatReport(payload, 'trial_balance_hierarchy', req.query);
+    const formatted = await getTrialBalanceHierarchyReport(fromDate, toDate, req.query);
     res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/reports/balance-sheet?asOfDate=YYYY-MM-DD
+// GET /api/reports/balance-sheet
 router.get('/balance-sheet', authenticate, async (req, res) => {
   try {
     let asOfDate = req.query.asOfDate;
     if (!asOfDate) asOfDate = new Date().toISOString().split('T')[0];
 
-    const assetR = await pool.query(
-      `WITH ledger AS (
-         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
-         FROM je_lines jl
-         JOIN journal_entries je ON je.id = jl.je_id
-         WHERE je.status = 'posted' AND je.date <= $1
-         GROUP BY jl.account_id
-       )
-       SELECT a.code, a.name,
-              COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0) as balance
-       FROM accounts a
-       LEFT JOIN ledger l ON l.account_id = a.id
-       WHERE a.type = 'asset' AND a.is_group = false AND a.status = 'active'
-       AND COALESCE(l.total_debit, 0) - COALESCE(l.total_credit, 0) <> 0
-       ORDER BY a.code`,
-      [asOfDate]
-    );
-
-    const liabR = await pool.query(
-      `WITH ledger AS (
-         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
-         FROM je_lines jl
-         JOIN journal_entries je ON je.id = jl.je_id
-         WHERE je.status = 'posted' AND je.date <= $1
-         GROUP BY jl.account_id
-       )
-       SELECT a.code, a.name,
-              COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) as balance
-       FROM accounts a
-       LEFT JOIN ledger l ON l.account_id = a.id
-       WHERE a.type = 'liability' AND a.is_group = false AND a.status = 'active'
-       AND COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) <> 0
-       ORDER BY a.code`,
-      [asOfDate]
-    );
-
-    const equityR = await pool.query(
-      `WITH ledger AS (
-         SELECT jl.account_id, SUM(jl.debit) AS total_debit, SUM(jl.credit) AS total_credit
-         FROM je_lines jl
-         JOIN journal_entries je ON je.id = jl.je_id
-         WHERE je.status = 'posted' AND je.date <= $1
-         GROUP BY jl.account_id
-       )
-       SELECT a.code, a.name,
-              COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) as balance
-       FROM accounts a
-       LEFT JOIN ledger l ON l.account_id = a.id
-       WHERE a.type = 'equity' AND a.is_group = false AND a.status = 'active'
-       AND COALESCE(l.total_credit, 0) - COALESCE(l.total_debit, 0) <> 0
-       ORDER BY a.code`,
-      [asOfDate]
-    );
-
-    // Net income = SUM(credit - debit) across all revenue and expense lines.
-    // Revenue net = credit - debit (positive = earned). Expense net = debit - credit (positive = spent).
-    // Combined: credit_rev - debit_rev + credit_exp - debit_exp = (credit - debit) for both types.
-    const reR = await pool.query(
-      `SELECT COALESCE(SUM(jl.credit - jl.debit), 0) as retained_earnings
-       FROM je_lines jl
-       JOIN journal_entries je ON je.id = jl.je_id
-       JOIN accounts a ON a.id = jl.account_id
-       WHERE je.status = 'posted' AND je.date <= $1 AND a.type IN ('revenue', 'expense')`,
-      [asOfDate]
-    );
-
-    const assets = assetR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
-    const liabilities = liabR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
-    const equity = equityR.rows.map(r => ({ code: r.code, name: r.name, balance: parseFloat(r.balance) }));
-    const retainedEarnings = parseFloat(reR.rows[0].retained_earnings);
-
-    const totalAssets = assets.reduce((s, r) => s + r.balance, 0);
-    const totalLiabilities = liabilities.reduce((s, r) => s + r.balance, 0);
-    const totalEquity = equity.reduce((s, r) => s + r.balance, 0);
-    const isBalanced = Math.abs(totalAssets - (totalLiabilities + totalEquity + retainedEarnings)) < 0.01;
-    const groupRows = (rows, defs) => {
-      const used = new Set();
-      const groups = defs.map(def => {
-        const matched = rows.filter((r, idx) => {
-          const ok = !used.has(idx) && def.tests.some(t => t.test(`${r.code} ${r.name}`));
-          if (ok) used.add(idx);
-          return ok;
-        });
-        return { title: def.title, rows: matched };
-      });
-      const others = rows.filter((_, idx) => !used.has(idx));
-      if (others.length) groups.push({ title: 'Others', rows: others });
-      return groups;
-    };
-    const vertical = {
-      liabilities: groupRows(liabilities, [
-        { title: 'Loans', tests: [/loan|borrow/i] },
-        { title: 'Creditors', tests: [/payable|creditor|vendor/i] },
-        { title: 'Taxes Payable', tests: [/tax|gst|tds/i] },
-      ]),
-      capital: groupRows(equity, [{ title: 'Capital', tests: [/capital|equity/i] }]),
-      equity: [{ title: 'Current Year Profit', rows: [{ code: '', name: 'Current Year Profit', balance: retainedEarnings }] }],
-      assets: groupRows(assets, [
-        { title: 'Cash', tests: [/cash/i] },
-        { title: 'Bank', tests: [/bank/i] },
-        { title: 'Debtors', tests: [/receivable|debtor|customer/i] },
-        { title: 'Inventory', tests: [/inventory|stock|wip|seed|rough|gas|consumable/i] },
-        { title: 'Fixed Assets', tests: [/fixed|plant|machine|equipment|accum/i] },
-      ]),
-    };
-
-    // Build hierarchy in parallel — additive field, doesn't affect existing frontend
-    const [hAssets, hLiabs, hEquity] = await Promise.all([
-      buildAccountHierarchy('asset',     asOfDate),
-      buildAccountHierarchy('liability', asOfDate),
-      buildAccountHierarchy('equity',    asOfDate),
-    ]);
-
-    const payload = {
-      asOfDate, assets, liabilities, equity,
-      totalAssets, totalLiabilities, totalEquity, retainedEarnings,
-      isBalanced, vertical,
-      hierarchy: { assets: hAssets, liabilities: hLiabs, equity: hEquity },
-    };
-    const formatted = await reportingCurrencyService.formatReport(payload, 'balance_sheet', req.query);
+    const formatted = await getBalanceSheetReport(asOfDate, req.query);
     res.json(formatted);
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[reports.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });

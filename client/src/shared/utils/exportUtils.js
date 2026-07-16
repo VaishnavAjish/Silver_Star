@@ -6,7 +6,11 @@
 export function exportToCSV(filename, headers, rows) {
   const BOM = '﻿';
   const escape = v => {
-    const s = v == null ? '' : String(v);
+    let s = v == null ? '' : String(v);
+    // Formula-injection guard: neutralise cells that a spreadsheet would treat
+    // as a formula, without mangling genuine numbers (e.g. -500 stays a number).
+    if (typeof v === 'number') return s;
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return s.includes(',') || s.includes('"') || s.includes('\n')
       ? `"${s.replace(/"/g, '""')}"`
       : s;
