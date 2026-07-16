@@ -1579,10 +1579,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
                  dim_depth  = COALESCE($4, dim_depth),
                  dim_height = COALESCE($5, dim_height),
                  dim_unit   = COALESCE($6, dim_unit),
-                 rate       = $7,
-                 total_value= $8,
                  updated_at = NOW()
-           WHERE id = $9`,
+           WHERE id = $7`,
           [
             roughItem.id,
             outputWeight,
@@ -1590,8 +1588,6 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
             measurements && measurements.width  != null && measurements.width  !== '' ? parseFloat(measurements.width)  : null,
             measurements && measurements.height != null && measurements.height !== '' ? parseFloat(measurements.height) : null,
             measurements && measurements.dim_unit ? measurements.dim_unit : null,
-            roughRate,
-            roughValue,
             processLot.id,
           ]
         );
