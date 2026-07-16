@@ -280,9 +280,9 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
               {machine.machine_status === 'idle' && (
                 <ActionMenuItem icon={Play} label="Start" desc="Begin a new process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('start', machine); }} />
               )}
-              {machine.machine_status === 'awaiting_output' && machine.process_id && (
-                <ActionMenuItem icon={Package} label="Returns" desc="Process returns from this machine." color="#7B1FA2" onClick={() => { setShowMenu(false); onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`); }} />
-              )}
+              {machine.returnable_issue_count > 0 && machine.process_id && (
+                  <ActionMenuItem icon={Package} label="Returns" desc="Process returns from this machine." color="#7B1FA2" onClick={() => { setShowMenu(false); onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`); }} />
+                )}
               {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
                 <>
                   <ActionMenuItem icon={Pause} label="Put On Hold" desc="Pause the current process temporarily." color="#E65100" onClick={() => { setShowMenu(false); onAction('hold', machine); }} />
@@ -631,7 +631,7 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
           {m.machine_status === 'idle' && (
             <GActionBtn icon={Play} label="Start" color="#2E7D32" onClick={() => onAction('start', m)} />
           )}
-          {m.machine_status === 'awaiting_output' && m.process_id && (
+          {m.returnable_issue_count > 0 && m.process_id && (
             <GActionBtn icon={Package} label="Returns" color="#7B1FA2"
               onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${m.process_id}`)} />
           )}
@@ -1626,3 +1626,4 @@ export default function ManufacturingDashboard() {
     </div>
   );
 }
+

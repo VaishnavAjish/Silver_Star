@@ -162,6 +162,9 @@ router.get('/machines', authenticate, async (req, res) => {
           (SELECT COALESCE(SUM(mpl.issued_qty), 0)
            FROM   machine_process_lots mpl
            WHERE  mpl.process_id = mp.id) AS seeds_issued,
+          (SELECT COUNT(*) FILTER (WHERE lpi.status = 'OPEN' AND COALESCE(lpi.remaining_in_process, 0) > 0)::int
+           FROM lot_process_issues lpi
+           WHERE lpi.machine_process_id = mp.id) AS returnable_issue_count,
           (SELECT COALESCE(SUM(mpm.qty), 0)
            FROM   machine_process_materials mpm
            WHERE  mpm.process_id = mp.id) AS materials_issued,
@@ -184,7 +187,7 @@ router.get('/machines', authenticate, async (req, res) => {
               'machine_process_id', cmp.id,
               'process_type', cmp.process_type,
               'growth_number', cgr.lot_number,
-              'run_number', COALESCE(cgr.run_no, (SELECT i.run_no FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = cmp.id ORDER BY mpl.id ASC LIMIT 1)),
+              'run_number', COALESCE(cgr.run_no, (SELECT i.run_no FROM inventory i JOIN machine_process_lots mpl ON mpl.inventory_lot_id = i.id WHERE mpl.process_id = cmp.id AND i.run_no IS NOT NULL ORDER BY mpl.id ASC LIMIT 1)),
               'completed_at', cmp.completed_at
             )
             FROM machine_processes cmp
@@ -193,7 +196,7 @@ router.get('/machines', authenticate, async (req, res) => {
                   AND cgr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
             WHERE cmp.machine_id = m.id
               AND cmp.status = 'completed'
-              AND cmp.process_type ILIKE 'growth'
+              AND cmp.completed_at IS NOT NULL
             ORDER BY cmp.completed_at DESC NULLS LAST, cmp.id DESC
             LIMIT 1
           ) AS last_completed_run
@@ -916,16 +919,37 @@ router.patch('/machines/:id/status', authenticate, async (req, res) => {
     if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Machine not found' }); }
 
     const oldStatus = rows[0].status;
+    let finalStatus = normalised;
 
-    if (['maintenance','breakdown','idle','cleaning'].includes(normalised)) {
-      await client.query(`
-        UPDATE machine_processes SET status='cancelled', completed_at=NOW()
-        WHERE machine_id=$1 AND status IN ('running','hold')
+    // RULE: Clearing an exception state (going to idle) restores the correct operational state
+    // if an active process remains, instead of blindly forcing idle and cancelling the process.
+    if (normalised === 'idle') {
+      const { rows: activeProcs } = await client.query(`
+        SELECT mp.id, mp.status, pm.completion_mode,
+               (SELECT COUNT(*) FROM lot_process_issues WHERE machine_process_id = mp.id AND status = 'OPEN' AND COALESCE(remaining_in_process, 0) > 0) AS open_issues
+        FROM machine_processes mp
+        LEFT JOIN process_master pm ON pm.process_code = mp.process_type
+        WHERE mp.machine_id = $1 AND mp.status IN ('running', 'hold')
+        ORDER BY mp.id DESC LIMIT 1
       `, [req.params.id]);
+
+      if (activeProcs.length > 0) {
+        const proc = activeProcs[0];
+        if (proc.open_issues > 0) {
+          finalStatus = proc.status === 'running' ? 'running' : 'hold';
+        } else if (proc.completion_mode === 'OUTPUT_BASED') {
+          finalStatus = 'awaiting_output';
+        } else if (proc.completion_mode === 'RETURN_BASED') {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Conflict: The active process has been fully returned but remains active. This is an inconsistent state that cannot be cleared by a manual idle action.' });
+        } else {
+          finalStatus = proc.status === 'running' ? 'running' : 'hold';
+        }
+      }
     }
 
-    await client.query(`UPDATE machines SET status=$1::machine_status WHERE id=$2`, [normalised, req.params.id]);
-    await logMachineStatus(client, req.params.id, oldStatus, normalised, req.user.id, remarks || null);
+    await client.query(`UPDATE machines SET status=$1::machine_status WHERE id=$2`, [finalStatus, req.params.id]);
+    await logMachineStatus(client, req.params.id, oldStatus, finalStatus, req.user.id, remarks || null);
 
     await client.query('COMMIT');
     dispatchEvent('manufacturing.machine.status_changed', { id: parseInt(req.params.id), old_status: oldStatus, new_status: normalised, module: 'manufacturing' });
