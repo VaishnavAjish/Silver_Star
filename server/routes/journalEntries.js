@@ -317,7 +317,7 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
       referenceNo:  l.referenceNo  || null,
     }));
     const reversal = await insertJournal(client, {
-      date,
+      date: je.date,
       description: `Correction reversal of ${je.je_number}. Reason: ${reason}`,
       sourceType: 'edit_reversal',
       sourceId: je.id,
