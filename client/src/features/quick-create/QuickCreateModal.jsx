@@ -177,9 +177,9 @@ export default function QuickCreateModal({ type, onClose, onCreated }) {
               <div style={s.fg}>
                 <label style={s.lbl}>Account Type *</label>
                 <SelectDropdown
-                  style={{ ...inpStyle('type'), cursor: 'pointer' }}
                   value={form.type}
                   onChange={e => set('type', e.target.value)}
+                  buttonStyle={errors.type ? { borderColor: '#e53935', background: '#ffebee' } : {}}
                 >
                   {ACCOUNT_TYPES.map(t => (
                     <option key={t.value} value={t.value}>{t.label}</option>
