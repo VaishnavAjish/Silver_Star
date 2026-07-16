@@ -191,9 +191,14 @@ a {
   color: var(--g700);
   font-weight: 500;
   font-size: 12.5px;
-  border-left: 3px solid transparent;
   transition: all .12s;
   text-decoration: none;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
 }
 
 .nav-hdr:hover {
@@ -236,19 +241,19 @@ a {
   max-height: 500px;
 }
 
-.nav-sub div {
+.nav-sub button {
   display: block;
   color: var(--g600);
   font-size: 12px;
   transition: all .1s;
 }
 
-.nav-sub div:hover {
+.nav-sub button:hover {
   background: rgba(13, 124, 95, .06);
   color: var(--g900);
 }
 
-.nav-sub div.active {
+.nav-sub button.active {
   color: var(--brand-dark);
   font-weight: 700;
   background: rgba(13, 124, 95, .11);
