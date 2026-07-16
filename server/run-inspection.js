@@ -1,9 +1,8 @@
 const fs = require('fs');
-const { Pool } = require('pg');
 require('dotenv').config();
+const pool = require('./db/pool').primaryPool;
 
 async function run() {
-  const pool = new Pool();
   const sql = fs.readFileSync(__dirname + '/sql/ssd086-inspection.sql', 'utf8');
   try {
     const client = await pool.connect();
