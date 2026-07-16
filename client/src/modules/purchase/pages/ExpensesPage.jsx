@@ -12,6 +12,7 @@ import {
   FormSectionCard, SummaryCardsRow, SideSummaryPanel,
   JournalPreviewPanel, NotesAttachmentsPanel,
 } from '../../../core/layout';
+import QuickCreateModal from '../../../features/quick-create/QuickCreateModal';
 import { useTabs } from '../../../core/tabs';
 import DatePicker from '../../../shared/components/DatePicker';
 import { Plus, Receipt, X, FileText, Save, ExternalLink } from 'lucide-react';
@@ -344,6 +345,18 @@ export function ExpenseForm() {
   const [loadingBills, setLoadingBills] = useState(false);
 
   const [saving, setSaving] = useState(false);
+  const [quickCreate, setQuickCreate] = useState(null);
+
+  const handleQuickCreated = (newItem) => {
+    if (quickCreate.type === 'account') {
+      setAccounts(prev => [...prev, newItem]);
+      setCategories(prev => [...prev, newItem]);
+      if (quickCreate.lineIndex !== undefined) {
+        updateLine(quickCreate.lineIndex, 'category_id', String(newItem.id));
+      }
+    }
+    setQuickCreate(null);
+  };
 
   // Header form
   const [form, setForm] = useState({
@@ -711,9 +724,16 @@ export function ExpenseForm() {
                 <td>
                   <SelectDropdown
                     value={line.category_id}
-                    onChange={e => updateLine(line._id, 'category_id', e.target.value)}
+                    onChange={e => {
+                      if (e.target.value === '__create_new__') {
+                        setQuickCreate({ type: 'account', lineIndex: line._id });
+                      } else {
+                        updateLine(line._id, 'category_id', e.target.value);
+                      }
+                    }}
                   >
                     <option value="">— Select —</option>
+                    <option value="__create_new__" style={{ color: 'var(--brand)', fontWeight: 600 }}>+ Add Category</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </SelectDropdown>
                 </td>
@@ -863,6 +883,13 @@ export function ExpenseForm() {
         value={form.memo}
         onChange={e => setForm(p => ({ ...p, memo: e.target.value }))}
       />
+      {quickCreate && (
+        <QuickCreateModal
+          type={quickCreate.type}
+          onClose={() => setQuickCreate(null)}
+          onCreated={handleQuickCreated}
+        />
+      )}
     </TransactionPageLayout>
   );
 }
