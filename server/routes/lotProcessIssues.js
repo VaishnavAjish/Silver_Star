@@ -1574,22 +1574,24 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         await client.query(
           `UPDATE inventory
              SET item_id    = $1,
-                 unit       = $2,
-                 weight     = $3,
-                 dim_length = COALESCE($4, dim_length),
-                 dim_depth  = COALESCE($5, dim_depth),
-                 dim_height = COALESCE($6, dim_height),
-                 dim_unit   = COALESCE($7, dim_unit),
+                 weight     = $2,
+                 dim_length = COALESCE($3, dim_length),
+                 dim_depth  = COALESCE($4, dim_depth),
+                 dim_height = COALESCE($5, dim_height),
+                 dim_unit   = COALESCE($6, dim_unit),
+                 rate       = $7,
+                 total_value= $8,
                  updated_at = NOW()
-           WHERE id = $8`,
+           WHERE id = $9`,
           [
             roughItem.id,
-            roughItem.unit,
             outputWeight,
             measurements && measurements.length != null && measurements.length !== '' ? parseFloat(measurements.length) : null,
             measurements && measurements.width  != null && measurements.width  !== '' ? parseFloat(measurements.width)  : null,
             measurements && measurements.height != null && measurements.height !== '' ? parseFloat(measurements.height) : null,
             measurements && measurements.dim_unit ? measurements.dim_unit : null,
+            roughRate,
+            roughValue,
             processLot.id,
           ]
         );
@@ -1877,15 +1879,15 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         const carrierRate  = ct.qty > 0 ? Math.round((carrierValue / ct.qty) * 10000) / 10000 : parseFloat(processLot.rate || 0);
         await client.query(
           `UPDATE inventory
-             SET item_id = $1, unit = $2, status = $3, qty = $4, weight = $5,
-                 dim_length = COALESCE($6, dim_length),
-                 dim_depth  = COALESCE($7, dim_depth),
-                 dim_height = COALESCE($8, dim_height),
-                 dim_unit   = COALESCE($9, dim_unit),
-                 rate = $10, total_value = $11,
+             SET item_id = $1, status = $2, qty = $3, weight = $4,
+                 dim_length = COALESCE($5, dim_length),
+                 dim_depth  = COALESCE($6, dim_depth),
+                 dim_height = COALESCE($7, dim_height),
+                 dim_unit   = COALESCE($8, dim_unit),
+                 rate = $9, total_value = $10,
                  manufacturing_state = 'AVAILABLE', updated_at = NOW()
-           WHERE id = $12`,
-          [gdItem[0].id, gdItem[0].unit, ct.status, ct.qty, ct.weight,
+           WHERE id = $11`,
+          [gdItem[0].id, ct.status, ct.qty, ct.weight,
            ct.dim_length, ct.dim_depth, ct.dim_height, ct.dim_unit,
            carrierRate, carrierValue, processLot.id]
         );
