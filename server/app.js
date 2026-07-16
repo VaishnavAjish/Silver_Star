@@ -145,6 +145,11 @@ const authRoutes = require('./routes/auth');
 // Auth routes FIRST (no auth required for login/register)
 app.use('/api/auth', authRoutes);
 
+// Self-service current-user endpoints (nav preferences). Each handler enforces
+// authenticate + operates only on req.user.id.
+const meRoutes = require('./routes/me');
+app.use('/api/me', meRoutes);
+
 // ── RLS Context Middleware (applies to authenticated routes needing row-level security) ────────────────
 // Apply to all other /api routes (skip auth routes which handle their own auth)
 app.use('/api', (req, res, next) => {
