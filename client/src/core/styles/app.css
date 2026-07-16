@@ -88,6 +88,26 @@ a {
   grid-template-columns: 210px 1fr;
   grid-template-rows: 48px 44px 1fr 28px;
   height: 100vh;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.app-layout.compact {
+  grid-template-columns: 56px 1fr;
+}
+
+.app-layout.compact .sidebar-logo {
+  justify-content: center;
+  padding: 14px 0;
+}
+
+.app-layout.compact .nav-hdr,
+.app-layout.compact .sidebar-nav button {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.app-layout.compact .nav-item {
+  margin: 0;
 }
 
 .sidebar {

@@ -332,14 +332,16 @@ function LayoutInner() {
   const showBack = !ROOT_PATHS.has(location.pathname);
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${compact ? 'compact' : ''}`}>
       <nav className="sidebar">
         <div className="sidebar-logo">
           <div className="logo-icon"><Leaf size={16} /></div>
-          <div>
-            <div className="logo-text">SILVERSTAR</div>
-            <div className="logo-sub">GROW UTILITY</div>
-          </div>
+          {!compact && (
+            <div>
+              <div className="logo-text">SILVERSTAR</div>
+              <div className="logo-sub">GROW UTILITY</div>
+            </div>
+          )}
         </div>
         <div className="sidebar-nav">
           {visibleNav.map((item) => (
@@ -353,20 +355,20 @@ function LayoutInner() {
             />
           ))}
           <div className="nav-item" style={{ marginTop: 8, borderTop: '1px solid var(--sidebar-border)', paddingTop: 4 }}>
-            <div className="nav-hdr" onClick={() => setShowLogoutConfirm(true)}>
+            <div className="nav-hdr" onClick={() => setShowLogoutConfirm(true)} title={compact ? 'Logout' : undefined}>
               <LogOut className="icon" size={16} />
-              Logout
+              {!compact && 'Logout'}
             </div>
           </div>
         </div>
-        <div style={{ borderTop: '1px solid var(--sidebar-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
+        <div style={{ borderTop: '1px solid var(--sidebar-border)', display: 'flex', alignItems: 'center', justifyContent: compact ? 'center' : 'space-between', padding: compact ? '12px 0' : '8px 12px' }}>
           <button
             type="button"
             onClick={toggleCompact}
             title={compact ? 'Expand sidebar' : 'Compact sidebar'}
             aria-label={compact ? 'Expand sidebar' : 'Compact sidebar'}
             aria-pressed={compact}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand)', fontSize: 11, fontWeight: 700 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand)', fontSize: 11, fontWeight: 700, padding: compact ? 8 : 0 }}
           >
             {compact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             {!compact && 'Compact'}
