@@ -1,5 +1,5 @@
 const fs = require('fs');
-require('dotenv').config();
+require('dotenv').config({ path: __dirname + '/.env' });
 const pool = require('./db/pool').primaryPool;
 
 async function run() {
