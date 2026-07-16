@@ -57,13 +57,13 @@ async function getVendorOpenItems(vendorId, asOfDate = null, excludeJeId = null)
         id AS source_id,
         doc_number AS voucher_no,
         doc_date AS voucher_date,
-        due_date,
+        doc_date AS due_date, -- Use doc_date if due_date is missing
         vendor_id,
         remark AS description,
         grand_total AS original_amount,
         0 AS amount_paid,
         grand_total AS outstanding_amount,
-        status
+        'posted' AS status
       FROM purchase_notes
       WHERE vendor_id = $1 AND status != 'cancelled'
       ORDER BY doc_date ASC, id ASC
