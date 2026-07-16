@@ -3,7 +3,8 @@ require('dotenv').config({ path: __dirname + '/.env' });
 const pool = require('./db/pool').primaryPool;
 
 async function run() {
-  const sql = fs.readFileSync(__dirname + '/sql/ssd086-inspection.sql', 'utf8');
+  const file = process.argv[2] || 'server/sql/ssd086-inspection.sql';
+  const sql = fs.readFileSync(file.startsWith('/') ? file : __dirname + '/../' + file, 'utf8');
   try {
     const client = await pool.connect();
     // Use multi-result query (postgres can return an array of results for multiple statements)
