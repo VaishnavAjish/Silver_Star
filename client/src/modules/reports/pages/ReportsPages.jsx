@@ -6,6 +6,8 @@ import Modal from '../../../shared/components/Modal';
 import { BookOpen, TrendingUp, Calculator, Search, BarChart3, ChevronRight, ChevronDown, Folder, FileText, X, Printer } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 import ReportToolbar from '../../../shared/components/ReportToolbar';
+import ReportExportMenu from '../../../core/export/ExportMenu';
+import PrintableReportHeader from '../../../core/export/PrintableReportHeader';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid, Legend } from 'recharts';
 
 const fmt = v => `₹${Math.round(Number(v)||0).toLocaleString('en-IN')}`;
@@ -58,10 +60,22 @@ export function LedgerPage() {
         <div className="fg"><label>To</label><DatePicker value={toDate} onChange={v => setToDate(v)} /></div>
         <button className="btn" style={{ background: 'var(--g100)', color: 'var(--g700)' }} onClick={() => { setFromDate(''); setToDate(''); setLedgerData(null); }}><X size={14} /> Clear</button>
         <button className="btn btn-primary" onClick={loadLedger} disabled={!selectedAcct}><Search size={14} /> Generate</button>
-        <button className="btn" onClick={() => setTimeout(() => window.print(), 100)}><Printer size={14} /> Print</button>
+        <ReportExportMenu
+          reportId="ledger"
+          data={ledgerData}
+          filters={{ account: accounts.find(a => String(a.id) === String(selectedAcct))?.name || '', fromDate, toDate }}
+        />
       </div>
 
       <div className="page-section page-content">
+        <PrintableReportHeader
+          title="Ledger"
+          filters={[
+            { label: 'Account', value: accounts.find(a => String(a.id) === String(selectedAcct))?.name || '' },
+            { label: 'From', value: fromDate },
+            { label: 'To', value: toDate },
+          ]}
+        />
         <div className="form-row" style={{ marginBottom: 16, background: 'var(--g50)', padding: 14, borderRadius: 10, border: '1px solid var(--g200)' }}>
           <div className="fg w"><label>Account *</label>
             <SelectDropdown value={selectedAcct} onChange={e => setSelectedAcct(e.target.value)} style={{ minWidth: 300 }}>
@@ -205,7 +219,6 @@ export function PnLPage() {
         currency={currency} onCurrencyChange={setCurrency}
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
-        onPrint={() => setTimeout(() => window.print(), 100)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="toolbar-section">
@@ -226,10 +239,13 @@ export function PnLPage() {
           <button className="btn btn-primary" onClick={load} style={{ height: 32, padding: '0 16px' }}>
             <Search size={14} /> Generate
           </button>
+          <ReportExportMenu reportId="pnl" data={data} filters={{ fromDate, toDate }} />
         </div>
       </ReportToolbar>
 
       <div className="page-section page-content">
+
+      <PrintableReportHeader title="Profit & Loss" filters={[{ label: 'From', value: fromDate }, { label: 'To', value: toDate }]} />
 
       {loading && <div className="empty-state"><div className="spinner" /></div>}
 
@@ -575,7 +591,6 @@ export function TrialBalancePage() {
         currency={currency} onCurrencyChange={setCurrency}
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
-        onPrint={() => setTimeout(() => window.print(), 100)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="toolbar-section">
@@ -598,10 +613,12 @@ export function TrialBalancePage() {
           <button className="btn btn-primary" onClick={() => load()} style={{ height: 32, padding: '0 16px' }}>
             <Search size={14} /> Generate
           </button>
+          <ReportExportMenu reportId="trial-balance" data={data} filters={{ fromDate, toDate }} />
         </div>
       </ReportToolbar>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
+        <PrintableReportHeader title="Trial Balance" filters={[{ label: 'From', value: fromDate }, { label: 'To', value: toDate }]} />
         {loading && <div className="empty-state"><div className="spinner" /></div>}
 
         {data && !loading && (
@@ -769,7 +786,6 @@ export function BalanceSheetPage() {
         currency={currency} onCurrencyChange={setCurrency}
         format={format} onFormatChange={setFormat}
         decimals={decimals} onDecimalsChange={setDecimals}
-        onPrint={() => setTimeout(() => window.print(), 100)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="toolbar-section">
@@ -781,16 +797,13 @@ export function BalanceSheetPage() {
           <button className="btn btn-primary" onClick={() => load(asOfDate)} style={{ height: 32, padding: '0 16px' }}>
             <Search size={14} /> Generate
           </button>
+          <ReportExportMenu reportId="balance-sheet" data={data} filters={{ asOfDate }} />
         </div>
       </ReportToolbar>
 
       <div className="page-section page-content" style={{ display: 'flex', flexDirection: 'column' }}>
 
-      <div className="print-only" style={{ display: 'none', textAlign: 'center', marginBottom: 16 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>SILVERSTAR DIAM PVT. LTD.</div>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>Balance Sheet</div>
-        <div style={{ fontSize: 12 }}>As of {data?.asOfDate}</div>
-      </div>
+      <PrintableReportHeader title="Balance Sheet" filters={[{ label: 'As of', value: data?.asOfDate || asOfDate }]} />
 
       {loading && <div className="empty-state"><div className="spinner" /></div>}
 
