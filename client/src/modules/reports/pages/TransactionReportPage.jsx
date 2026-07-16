@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { ArrowLeft, FileText } from 'lucide-react';
 import Paginator from '../../../shared/components/Paginator';
+import ExportMenu from '../../../shared/components/ExportMenu';
 
 const fmt2 = v => `₹${Math.abs(Number(v) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtSign = v => {
@@ -63,32 +64,82 @@ export default function TransactionReportPage() {
     ? `All time → ${toDate}`
     : `${fromDate} → ${toDate}`;
 
+  const fetchExportData = async () => {
+    const p = new URLSearchParams({
+      account_id: accountId,
+      from_date: fromDate,
+      to_date: toDate,
+      page: 1,
+      pageSize: 100000
+    });
+    const res = await api.get(`/api/reports/transactions?${p.toString()}`);
+    
+    const rows = [];
+    rows.push([
+      '', '', '', 'Opening Balance', '', '', '', res.openingBalance
+    ]);
+    
+    for (const t of res.transactions) {
+      const desc = t.description || '—';
+      const parts = desc.split(' - ');
+      const first = parts[0];
+      const second = parts.length > 1 ? parts.slice(1).join(' - ') : '—';
+      
+      rows.push([
+        new Date(t.date).toLocaleDateString('en-IN'),
+        t.je_number || '—',
+        t.source_type || '—',
+        first,
+        second,
+        t.debit > 0 ? t.debit : '',
+        t.credit > 0 ? t.credit : '',
+        t.balance
+      ]);
+    }
+    
+    rows.push([
+      '', '', '', 'Period Totals', '', res.totalDebit, res.totalCredit, res.closingBalance
+    ]);
+    
+    return rows;
+  };
+
   return (
     <div style={{ padding: 20 }} className="animate-in">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 20 }}>
-        <button
-          className="btn"
-          onClick={() => navigate(-1)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
-        >
-          <ArrowLeft size={14} /> Back
-        </button>
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-            <FileText size={18} style={{ color: 'var(--brand)' }} />
-            Transaction Report
-            {(accountName || data?.account?.name) && (
-              <span style={{ color: 'var(--brand-dark)' }}>
-                — {accountName || data.account.name}
-              </span>
-            )}
-          </h2>
-          <div style={{ fontSize: 11, color: 'var(--g500)', marginTop: 3 }}>
-            {data?.account?.code && <span style={{ marginRight: 10 }}>Code: {data.account.code}</span>}
-            <span>{periodLabel}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <button
+            className="btn"
+            onClick={() => navigate(-1)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+              <FileText size={18} style={{ color: 'var(--brand)' }} />
+              Transaction Report
+              {(accountName || data?.account?.name) && (
+                <span style={{ color: 'var(--brand-dark)' }}>
+                  — {accountName || data.account.name}
+                </span>
+              )}
+            </h2>
+            <div style={{ fontSize: 11, color: 'var(--g500)', marginTop: 3 }}>
+              {data?.account?.code && <span style={{ marginRight: 10 }}>Code: {data.account.code}</span>}
+              <span>{periodLabel}</span>
+            </div>
           </div>
         </div>
+        
+        {data && (
+          <ExportMenu 
+            title={`Transaction Report - ${accountName || data?.account?.name || 'Account'}`}
+            headers={['Date', 'JE No', 'Type', 'Description', 'Posting Ledger', 'Debit', 'Credit', 'Balance']}
+            fetchRows={fetchExportData}
+          />
+        )}
       </div>
 
       {!accountId && !data && !loading && (
