@@ -11,7 +11,6 @@ import {
   parseShortcutPref, serializeShortcutPref,
 } from '../../core/navigation/selectors';
 
-const CACHE_KEY = 'nav.shortcuts.cache';
 
 /**
  * User-pinned header shortcuts. Registry-driven, permission-filtered on EVERY
@@ -34,11 +33,12 @@ export default function HeaderShortcuts() {
 
   // Load: localStorage cache first (instant), then the authoritative /me pref.
   useEffect(() => {
+    if (!user?.id) return;
     try {
-      const cached = localStorage.getItem(CACHE_KEY);
+      const cached = localStorage.getItem(`nav.shortcuts.cache:${user.id}`);
       if (cached) setState(parseShortcutPref(cached, defaultPreset));
     } catch { /* ignore */ }
-  }, [defaultPreset]);
+  }, [user?.id, defaultPreset]);
 
   useEffect(() => {
     if (!user) return;
@@ -70,12 +70,14 @@ export default function HeaderShortcuts() {
   const persist = useCallback((ids, preset) => {
     const clean = sanitizeShortcutIds(ids, getEntryById);
     const value = serializeShortcutPref(clean, preset);
-    try { localStorage.setItem(CACHE_KEY, value); } catch { /* ignore */ }
     setState({ preset: preset || null, ids: clean });
     // Fire-and-forget; UI already reflects the change. Failure keeps the cache.
     api.put('/api/me/preferences', { preferences: [{ pref_key: 'nav.shortcuts', pref_value: value }] })
       .catch(() => { /* offline / unavailable — cache holds until next save */ });
-  }, [api]);
+    if (user?.id) {
+      try { localStorage.setItem(`nav.shortcuts.cache:${user.id}`, value); } catch { /* ignore */ }
+    }
+  }, [api, user?.id]);
 
   const currentIds = () => resolved.map(e => e.id);
   const addShortcut = (id) => persist([...currentIds(), id], null);
