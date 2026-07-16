@@ -1,48 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Plus, X, FileText, TrendingUp, Receipt, Users,
-  CreditCard, ShoppingCart, TrendingDown, Building2,
-  BookOpen, Landmark, BarChart3, RotateCcw,
-} from 'lucide-react';
-
-const MENU_CONFIG = [
-  {
-    title: 'Customers',
-    items: [
-      { label: 'Invoice',          path: '/invoices/new',        icon: FileText,    hot: true },
-      { label: 'Receive Payment',  path: '/receipts/new',        icon: TrendingUp },
-      { label: 'Receipts',         path: '/receipts',            icon: Receipt },
-      { label: 'Customer',         path: '/customers',           icon: Users },
-    ],
-  },
-  {
-    title: 'Vendors',
-    items: [
-      { label: 'Expense',          path: '/expenses',            icon: CreditCard },
-      { label: 'Purchase Note',    path: '/purchase-notes/new',  icon: ShoppingCart, hot: true },
-      { label: 'Demo Purchase Note', path: '/purchase-notes/new?demo=true', icon: ShoppingCart },
-      { label: 'Vendor Bill',      path: '/bills/new',           icon: FileText, hot: true },
-      { label: 'Pay Bills',        path: '/payments/new',        icon: TrendingDown },
-      { label: 'Vendor',           path: '/vendors',             icon: Building2 },
-    ],
-  },
-  {
-    title: 'Accounting',
-    items: [
-      { label: 'Journal Entry',     path: '/journal-entries/new', icon: BookOpen,  hot: true },
-      { label: 'Bank Deposit',      path: '/bank-deposits/new',   icon: Landmark },
-      { label: 'Chart of Accounts', path: '/accounts',            icon: BarChart3 },
-    ],
-  },
-  {
-    title: 'Other',
-    items: [
-      { label: 'Payments',          path: '/payments',            icon: RotateCcw },
-    ],
-  },
-];
+import { Plus, X } from 'lucide-react';
+import { useAuth } from '../../core/context/AuthContext';
+import { CREATE_ACTIONS } from '../../core/navigation/registry';
+import { filterCreateActions } from '../../core/navigation/selectors';
 
 const panelVariants = {
   hidden:  { opacity: 0, y: -10, scale: 0.97 },
@@ -58,6 +20,18 @@ const itemVariants = {
 export default function GlobalCreateMenu() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const { hasPermission, hasRole } = useAuth();
+
+  // Registry-driven, permission-filtered Create actions grouped by their group.
+  const grouped = useMemo(() => {
+    const visible = filterCreateActions(CREATE_ACTIONS, { hasPermission, hasRole });
+    const byGroup = new Map();
+    for (const a of visible) {
+      if (!byGroup.has(a.group)) byGroup.set(a.group, []);
+      byGroup.get(a.group).push(a);
+    }
+    return [...byGroup.entries()].map(([title, items]) => ({ title, items }));
+  }, [hasPermission, hasRole]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,7 +76,12 @@ export default function GlobalCreateMenu() {
               </div>
 
               <div className="gcm-grid">
-                {MENU_CONFIG.map((cat) => (
+                {grouped.length === 0 && (
+                  <div className="gcm-col" style={{ color: 'var(--g500)', fontSize: 12, padding: 8 }}>
+                    No create actions available.
+                  </div>
+                )}
+                {grouped.map((cat) => (
                   <div key={cat.title} className="gcm-col">
                     <div className="gcm-col-hdr">{cat.title}</div>
                     {cat.items.map((item) => {

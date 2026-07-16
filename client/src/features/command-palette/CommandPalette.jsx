@@ -6,7 +6,8 @@ import { Search, Loader2, X } from 'lucide-react';
 import { useAuth } from '../../core/context/AuthContext';
 import { useClipboard } from '../../core/context/ClipboardContext';
 import { groupBy } from '../../shared/utils/groupBy';
-import { NAV, flattenNav } from '../../core/layout/Layout';
+import { NAVIGATION } from '../../core/navigation/registry';
+import { filterPages } from '../../core/navigation/selectors';
 
 const TYPE_LABELS = {
   page:        'Page',
@@ -30,7 +31,7 @@ function groupResults(results) {
 export let openPaletteWith = () => {};
 
 export default function CommandPalette() {
-  const { token, user } = useAuth();
+  const { token, user, hasPermission, hasRole } = useAuth();
   const { add } = useClipboard();
   const navigate = useNavigate();
 
@@ -63,7 +64,8 @@ export default function CommandPalette() {
     clearTimeout(debounceRef.current);
     
     const qLower = (q || '').toLowerCase();
-    const pages = flattenNav(NAV)
+    // Registry + shared permission selector — never surfaces inaccessible pages.
+    const pages = filterPages(NAVIGATION, { hasPermission, hasRole })
       .filter(p => p.path && p.label.toLowerCase().includes(qLower))
       .map(p => ({
         id: p.path,
