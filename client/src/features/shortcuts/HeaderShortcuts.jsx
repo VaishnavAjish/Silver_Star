@@ -129,9 +129,10 @@ export default function HeaderShortcuts() {
         </div>
       )}
 
-      <button type="button" className="hs-chip" title="Customize shortcuts"
-        aria-label="Customize shortcuts" onClick={() => setShowCustomize(true)}>
-        <Settings size={14} />
+      <button type="button" className="icon-btn" title="Customize shortcuts"
+        aria-label="Customize shortcuts" onClick={() => setShowCustomize(true)}
+        style={{ color: 'var(--g500)', marginLeft: 4 }}>
+        <Settings size={16} />
       </button>
 
       {showCustomize && (
