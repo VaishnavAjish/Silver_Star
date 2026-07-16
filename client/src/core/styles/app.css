@@ -273,6 +273,34 @@ a {
   color: var(--brand);
 }
 
+.hs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid var(--g200);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--g700);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s ease;
+  font-family: inherit;
+}
+
+.hs-chip:hover {
+  background: var(--g50);
+  color: var(--g900);
+  border-color: #E0E0E0;
+}
+
 .topbar-right {
   margin-left: auto;
   display: flex;
