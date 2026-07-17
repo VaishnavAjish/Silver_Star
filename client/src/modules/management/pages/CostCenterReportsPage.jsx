@@ -423,6 +423,13 @@ function CostCentreReportCategoryTable({ rows, from, to }) {
                           </Fragment>
                         );
                       })}
+                      <tr>
+                        <td colSpan={2} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
+                        <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
+                      </tr>
+                    </Fragment>
+                  );
+                })}
                 <tr>
                   <td colSpan={2} style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right' }}>Cost Centre Total</td>
                   <td style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--green)' }}>
