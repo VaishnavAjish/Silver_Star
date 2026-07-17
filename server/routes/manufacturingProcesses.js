@@ -825,6 +825,25 @@ router.patch('/processes/:id/complete', authenticate, async (req, res) => {
         );
       }
 
+      // Close out open process issues for this growth run (seeds)
+      await client.query(
+        `UPDATE lot_process_issues
+         SET remaining_in_process = 0, status = 'RETURNED', updated_at = NOW()
+         WHERE machine_process_id = $1 AND status != 'RETURNED'`,
+        [proc.id]
+      );
+
+      // Retroactive cleanup: close any stuck process issues from previously completed processes
+      await client.query(
+        `UPDATE lot_process_issues lpi
+         SET remaining_in_process = 0, status = 'RETURNED', updated_at = NOW()
+         FROM machine_processes mp
+         WHERE lpi.machine_process_id = mp.id
+           AND mp.status = 'completed'
+           AND lpi.status != 'RETURNED'`
+      );
+
+
       const growthMm = updated.actual_growth_mm;
 
       // RULE 5: append a persistent cycle-history row (never overwrite prior
