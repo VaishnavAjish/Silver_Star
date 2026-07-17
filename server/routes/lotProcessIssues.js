@@ -3,6 +3,12 @@ const pool    = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { isSeedItem, nextSiblingCode, nextLotOpId, nextMfgProcessNumber } = require('../services/seedLotCodeService');
 const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowthCycle } = require('../services/growthRunService');
+// Growth-Again identity: pure carrier classification (growth_run + growth_diamond),
+// unit-tested in tests/growthAgainIdentity.test.js.
+const {
+  isGrowthCarrierCategory, appliesSeedAttachment, classifyGrowthIssueLots,
+  RUN_INCREMENT_SQL,
+} = require('../services/growthCarrier');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
@@ -424,9 +430,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // re-issues an existing biscuit back into a growth chamber.)
       const isGrowthGroup =
         String(processRules.process_group || (normalizedPType === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
-      // Set true when an existing biscuit is re-issued to a growth process, so we
-      // reuse the same Growth Run row instead of minting a new one at Step 6.
+      // Set true when an existing Growth carrier (growth_run biscuit OR
+      // growth_diamond block) is re-issued to a growth process, so Step 6
+      // reuses the SAME inventory row instead of minting a new Growth Run.
       let isGrowthAgain = false;
+      let growthAgainCarrierId = null;
 
       // Enforce inventory rules
       if (processRules.requires_inventory && !lotsArr.length)
@@ -500,6 +508,22 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         lockedLots.push({ lot, qty });
       }
 
+      // Growth-Again identity gates (pure, tested): evaluated AFTER every lot
+      // is locked so a concurrent duplicate Issue serializes on the row lock
+      // and then fails the IN STOCK gate here. Rejects rough inputs, multiple
+      // carriers, carrier+seed mixes, and partial growth_diamond re-issues.
+      const growthClassification = classifyGrowthIssueLots({
+        isGrowthGroup,
+        lots: lockedLots.map(({ lot, qty }) => ({
+          category: lot.category,
+          status: lot.status,
+          lotNumber: lot.lot_number,
+          requestedQty: qty,
+          availableQty: effQty(lot),
+        })),
+      });
+      if (!growthClassification.valid) throw new Error(growthClassification.error);
+
       // 3. Create machine_processes record
       const processNum = await nextMfgProcessNumber(client);
       const effectiveRuntime = target_runtime_hours
@@ -543,6 +567,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // reference the biscuit directly and skip child-lot minting entirely,
         // so no phantom GR-xxxx-IP lots are ever created.
         const isGrowthRun = lot.category === 'growth_run';
+        // Growth-Again identity: growth_run AND growth_diamond are both
+        // identity-preserving carriers when entering a GROWTH process — the
+        // SAME row re-grows; no clone, no seed attachment, no new Growth Run.
+        const isGrowthCarrier = isGrowthCarrierCategory(lot.category);
 
         // RULE 1: Issuing a lot to a process is NOT a physical split. The lot
         // already exists (the legitimate split happened upstream, e.g. 1019 →
@@ -553,7 +581,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // two physical groups then hold different states — but that is a split,
         // not an "issue clone".
         const isFullIssue  = qty >= pqty - 0.0001;
-        const issueInPlace = isGrowthRun || isFullIssue;
+        // A Growth carrier entering a GROWTH chamber always re-issues in place
+        // (classifyGrowthIssueLots has already rejected partial growth_diamond
+        // requests); a growth_run biscuit issues in place for ALL process types
+        // (Phase 34 FIX 2, laser ops included).
+        const issueInPlace = isGrowthRun || (isGrowthCarrier && isGrowthGroup) || isFullIssue;
 
         let childLot, childCode, childWeight;
 
@@ -633,10 +665,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // Phase A (Seed Lifecycle): a Seed process lot entering a GROWTH
         // chamber is physically embedded in the Partial Growth Run — mark it
         // ATTACHED_TO_GROWTH (covers both the in-place full issue and the
-        // partial-split child). The biscuit itself (Growth Again) is NOT a
-        // seed attachment. The source-lot remainder stays NULL (AVAILABLE).
+        // partial-split child). A Growth carrier (growth_run OR growth_diamond,
+        // Growth Again) is NEVER a seed attachment — it IS the growth identity.
+        // The source-lot remainder stays NULL (AVAILABLE).
         // Requires phase62 — deploy coupling documented in the migration.
-        if (isGrowthGroup && !isGrowthRun) {
+        if (appliesSeedAttachment(lot.category, isGrowthGroup)) {
           await client.query(
             `UPDATE inventory SET manufacturing_state = 'ATTACHED_TO_GROWTH', updated_at = NOW()
              WHERE id = $1`,
@@ -662,7 +695,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           // IN STOCK → IN PROCESS and repoint machine_process_id to THIS process
           // (so completion/return resolves the same row). qty/weight/genealogy
           // are untouched. No clone, no suffix.
-          if (isGrowthRun && isGrowthGroup) isGrowthAgain = true;   // re-growing an existing biscuit
+          if (isGrowthCarrier && isGrowthGroup) {   // re-growing an existing carrier (Growth Again)
+            isGrowthAgain = true;
+            growthAgainCarrierId = lot.id;
+          }
           await client.query(
             `UPDATE inventory SET status='IN PROCESS', machine_process_id=$1, updated_at=NOW() WHERE id=$2`,
             [machProc.id, lot.id]
@@ -711,10 +747,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // Operation log
         await logOp(client, lot.id, 'issue', 'lot_process_issue', issue.id,
           issueInPlace ? 0 : -qty, newSrcStat,
-          isGrowthRun
-            ? (isGrowthGroup
-                ? `Growth Run ${lot.lot_number} re-issued to growth process ${processNum} (Growth Again → IN PROCESS)`
-                : `Biscuit ${lot.lot_number} issued to ${normalizedPType} process ${processNum} → IN PROCESS (non-consuming)`)
+          (isGrowthCarrier && isGrowthGroup)
+            ? `Growth carrier ${lot.lot_number} re-issued to growth process ${processNum} (Growth Again → IN PROCESS, same identity)`
+            : isGrowthRun
+            ? `Biscuit ${lot.lot_number} issued to ${normalizedPType} process ${processNum} → IN PROCESS (non-consuming)`
             : (issueInPlace
                 ? `${lot.lot_number} issued in place to ${normalizedPType} process ${processNum} → IN PROCESS (same lot, no clone)`
                 : `Issued ${qty.toFixed(4)} ${lot.unit} to machine process ${processNum} (partial split)`),
@@ -746,28 +782,39 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       //    createGrowthRun is gated to process_group='GROWTH' (returns null for
       //    LASER / other groups) and is idempotent, so the later seed-return
       //    transition simply finds the existing biscuit instead of creating one.
-      //    GROWTH AGAIN: when an existing biscuit (category='growth_run') is
-      //    re-issued into a GROWTH process, it must be reused in place — no new
-      //    Growth Run, clone, or child lot. createGrowthRun is idempotent and
-      //    returns the SAME biscuit row (already flipped to IN PROCESS during the
-      //    issue loop), so we only emit a 'growth_again' history entry.
+      //    GROWTH AGAIN: when an existing carrier (growth_run OR growth_diamond)
+      //    is re-issued into a GROWTH process, it is reused in place — no new
+      //    Growth Run, clone, or child lot. createGrowthRun is NOT called: its
+      //    idempotency guard only matches growth_run item rows, which is exactly
+      //    how a growth_diamond carrier once got a duplicate biscuit minted
+      //    (SSD013-APR26-011 → SSD001-JUL26-055). The Run increments atomically
+      //    on the SAME row (single UPDATE under the FOR UPDATE lock taken at
+      //    validation); id, lot, Growth Number, root, qty, weight, value and
+      //    genealogy stay untouched.
       let growthRun = null;
-      try {
-        growthRun = await createGrowthRun(client, machProc.id, { createdBy: req.user.id });
-        if (growthRun) {
-          if (isGrowthAgain) {
-            await client.query('UPDATE inventory SET run_no = run_no + 1 WHERE id = $1', [growthRun.id]);
-            await logOp(client, growthRun.id, 'growth_again', 'machine_process', machProc.id,
-              0, 'IN PROCESS',
-              `Growth Run ${growthRun.lot_number} re-issued into Growth Process ${processNum} (IN STOCK -> IN PROCESS)`, req.user.id);
-          } else {
+      if (isGrowthAgain) {
+        const { rows: [carrier] } = await client.query(
+          `UPDATE inventory SET run_no = ${RUN_INCREMENT_SQL}, updated_at = NOW()
+           WHERE id = $1
+           RETURNING *`,
+          [growthAgainCarrierId]
+        );
+        growthRun = carrier;
+        await logOp(client, carrier.id, 'growth_again', 'machine_process', machProc.id,
+          0, 'IN PROCESS',
+          `Growth carrier ${carrier.lot_number} re-issued into Growth Process ${processNum} ` +
+          `(Growth Again → Run R${carrier.run_no}, same identity — no new Growth Run row)`, req.user.id);
+      } else {
+        try {
+          growthRun = await createGrowthRun(client, machProc.id, { createdBy: req.user.id });
+          if (growthRun) {
             await logOp(client, growthRun.id, 'growth_run_created', 'machine_process', machProc.id,
               1, growthRun.status,
               `Growth Run ${growthRun.lot_number} created at process start ${processNum}`, req.user.id);
           }
+        } catch (gErr) {
+          throw new Error(`Failed to create Growth Run for process ${processNum}: ${gErr.message}`);
         }
-      } catch (gErr) {
-        throw new Error(`Failed to create Growth Run for process ${processNum}: ${gErr.message}`);
       }
 
       await client.query('COMMIT');
@@ -1258,12 +1305,21 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // biscuit stays in place. (The issue side was already guarded by FIX 2; this
     // is the symmetric guard on the return side.)
     const isGrowthRun = processLot.category === 'growth_run';
+    const isGrowthGroupIssue =
+      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+    // Growth-Again identity: a growth_diamond block returned from a GROWTH
+    // process is the SAME identity-preserving carrier as a growth_run biscuit —
+    // it returns in place (no child lot, never consumed). Outside GROWTH
+    // (laser ops, Final Block transform) growth_diamond keeps its legacy
+    // routes. Mirrors buildReturnPlan's carrier rule.
+    const isGrowthCarrier =
+      isGrowthRun || (processLot.category === 'growth_diamond' && isGrowthGroupIssue);
 
     // Phase C: COMPONENT mode (Seed Remove) legitimately posts multiple lines
     // against a biscuit input — the single-disposition rule is QUANTITY-only.
     const isComponentReturn = allowedOutputs.some(o => o.component);
-    if (isGrowthRun && !isComponentReturn && lines.length > 1) {
-      throw new Error('Growth Run returns must use a single disposition.');
+    if (isGrowthCarrier && !isComponentReturn && lines.length > 1) {
+      throw new Error('Growth carrier returns must use a single disposition.');
     }
 
     // ── Growth biscuit resolution ─────────────────────────────────────────────
@@ -1272,8 +1328,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // so the usable output can reference it instead of minting a child lot.
     // Skipped when the process lot itself is the biscuit (laser ops in-place
     // path above) and for non-growth processes (incl. seed_remove/COMPONENT).
-    const isGrowthGroupIssue =
-      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+    // Still runs for a growth_diamond carrier input: 0 candidates is the
+    // healthy state; >0 exposes a legacy duplicate identity, which the plan
+    // REJECTs until reconciled.
     let biscuit = null;
     let biscuitCandidateCount = 0;
     if (isGrowthGroupIssue && !isGrowthRun && issue.machine_process_id) {
@@ -1558,11 +1615,12 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         continue;
       }
 
-      // Growth Run: no clone, no child lot. Record the return against the biscuit
+      // Growth carrier (growth_run biscuit, or growth_diamond on a GROWTH
+      // issue): no clone, no child lot. Record the return against the carrier
       // itself so history/genealogy stay intact on the single record, then move on.
       // Phase C: NOT for COMPONENT returns (Seed Remove) — those split the
       // assembly into diamond + recovered-seed CHILD lots below.
-      if (isGrowthRun && !isComponentReturn) {
+      if (isGrowthCarrier && !isComponentReturn) {
         await client.query(
           `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
            VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -1570,7 +1628,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         );
         await logOp(client, processLot.id, `return_${line.type}`, 'lot_process_return', ret.id,
           0, processLot.status,
-          `${line.type} return of Growth Run ${processLot.lot_number} (in place — no clone, ${returnNum})`,
+          `${line.type} return of Growth carrier ${processLot.lot_number} (in place — no clone, ${returnNum})`,
           req.user.id);
         outcomes.push({ type: line.type, lot_id: processLot.id, lot_code: processLot.lot_code || processLot.lot_number, qty, status: processLot.status, in_place: true });
         continue;
@@ -1816,8 +1874,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     }
 
     // Phase C: never measure the biscuit on a COMPONENT return — it was just
-    // consumed by the Seed Remove split.
-    const measureTarget = (isGrowthRun && !isComponentReturn)
+    // consumed by the Seed Remove split. A growth_diamond carrier (Growth
+    // Again) is measured the same way as a biscuit: same row, cycle recorded.
+    const measureTarget = (isGrowthCarrier && !isComponentReturn)
       ? processLot
       : (routesToBiscuit ? biscuit : null);
     if (measureTarget && measurements && (
@@ -1993,7 +2052,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           `Final Block transform final (${returnNum}) — ${processLot.lot_number} continues as ` +
           `Rough Diamond in place (same inventory identity) → ${transformStatus}`,
           req.user.id);
-      } else if (!isGrowthRun) {
+      } else if (!isGrowthCarrier) {
         await client.query(
           `UPDATE inventory SET qty=0, weight=0, total_value=0, status='CONSUMED', updated_at=NOW() WHERE id=$1`,
           [processLot.id]
@@ -2001,6 +2060,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
           -currentRemaining, 'CONSUMED', `Process return final (${returnNum})`, req.user.id);
       } else {
+        // Growth carrier in-place final: the SAME row transitions status only —
+        // qty/weight/value/genealogy untouched, never consumed, never zeroed.
         const finalStatusRule = allowedOutputs.find(o => o.type === lines[0].type);
         const finalStatus = finalStatusRule ? finalStatusRule.status : 'IN STOCK';
 
@@ -2011,7 +2072,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
 
         await logOp(client, processLot.id, 'return_complete', 'lot_process_return', ret.id,
           0, finalStatus,
-          `Growth Run ${processLot.lot_number} returned from process in place (${returnNum}) — transitioned to ${finalStatus}`,
+          `Growth carrier ${processLot.lot_number} returned from process in place (${returnNum}) — transitioned to ${finalStatus}`,
           req.user.id);
       }
 

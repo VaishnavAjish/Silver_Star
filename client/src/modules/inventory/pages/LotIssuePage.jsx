@@ -205,7 +205,8 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   let eligType = (selectedProcess?.eligible_machine_type || '').trim().toLowerCase();
 
   if (isGrowth) {
-    allowedCategories = ['seed', 'growth_run'];
+    // Growth-Again carriers: growth_run AND growth_diamond re-issue in place.
+    allowedCategories = ['seed', 'growth_run', 'growth_diamond'];
     eligType = 'cvd_reactor';
   } else if (isLaser) {
     allowedCategories = ['seed', 'growth_run'];
@@ -213,6 +214,13 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   } else if (processGroup === 'GROWTH_OUTPUT') {
     allowedCategories = ['growth_run'];
   }
+
+  // Rough Diamond is a terminal Growth OUTPUT, never a Growth input. Browsing
+  // stays permissive for other groups (category allow-list is disabled below);
+  // only this hard exclusion is enforced client-side — the backend enforces it
+  // authoritatively in classifyGrowthIssueLots.
+  const isRoughBlockedForGrowth = (l) =>
+    isGrowth && String(l?.category || '').toLowerCase() === 'rough';
 
   // Machines filtered by the eligible machine type.
   const filteredMachines = useMemo(() => {
@@ -400,6 +408,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
 
         if (!isLotIssuable(found)) { skipped++; continue; }
 
+        // Rough Diamond never enters a Growth process (backend also rejects).
+        if (isRoughBlockedForGrowth(found)) { skipped++; continue; }
+
         toAdd.push({ lot: found, issuedQty: '' });
         currentIds.add(lotId);
         added++;
@@ -417,7 +428,8 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
 
   // ── Filtered lot browser ──────────────────────────────────────────────────
   const filteredLots = useMemo(() => {
-    let base = lots.filter(l => !selectedLotIds.has(l.id));
+    // Rough is hard-excluded from GROWTH; other categories stay browsable.
+    let base = lots.filter(l => !selectedLotIds.has(l.id) && !isRoughBlockedForGrowth(l));
     // Phase 34: restrict to the process group's eligible input category
     // (temporarily disabled to allow issuing any lot to any process)
     // if (allowedCategories.length > 0) {
@@ -430,7 +442,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
       l.lot_code?.toLowerCase().includes(s)   ||
       l.item_name?.toLowerCase().includes(s)
     );
-  }, [lots, activeSearch, selectedLotIds, allowedCategories.join(',')]); // eslint-disable-line
+  }, [lots, activeSearch, selectedLotIds, allowedCategories.join(','), isGrowth]); // eslint-disable-line
 
   // ── Lot selection handlers ────────────────────────────────────────────────
   const addLot = useCallback((lot) => {
@@ -460,6 +472,16 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!valid) return;
+    // Rough Diamond never enters Growth — mirror of the backend rejection so
+    // the operator gets immediate feedback instead of a failed request.
+    const roughForGrowth = filledLots.find(sl => isRoughBlockedForGrowth(sl.lot));
+    if (roughForGrowth) {
+      toast.error(
+        `Rough Diamond lot ${roughForGrowth.lot.lot_number} cannot be issued to a Growth process — ` +
+        'rough output is a terminal product of Growth, not a Growth input.'
+      );
+      return;
+    }
     setSaving(true);
     try {
       const body = {

@@ -246,6 +246,15 @@ function buildReturnPlan({
     : issuedQty;
 
   const isGrowthRun = processLot.category === 'growth_run';
+  const isGrowthGroupIssue =
+    String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+  // Growth-Again identity: a growth_diamond block on a GROWTH-group issue is
+  // the same identity-preserving carrier as a growth_run biscuit — it returns
+  // in place (no child lot, never consumed, never routed to a separate
+  // biscuit). Outside GROWTH (laser ops, Final Block transform_in_place)
+  // growth_diamond keeps its legacy routes untouched.
+  const isGrowthCarrier =
+    isGrowthRun || (processLot.category === 'growth_diamond' && isGrowthGroupIssue);
   const isComponentMode = outputs.some(o => o.component);
   const weightBalanceMode = resolveWeightBalanceMode(outputs);
 
@@ -263,8 +272,8 @@ function buildReturnPlan({
   // Phase C: a COMPONENT return (Seed Remove) posts MULTIPLE lines against a
   // biscuit input — the single-disposition rule applies only to QUANTITY-mode
   // biscuit returns (laser ops / growth again).
-  if (isGrowthRun && !isComponentMode && lines.length > 1)
-    return invalid('Growth Run returns must use a single disposition.');
+  if (isGrowthCarrier && !isComponentMode && lines.length > 1)
+    return invalid('Growth carrier returns must use a single disposition.');
 
   let returnTotal, remainingAfter;
   let componentPlan = null;    // Phase C: Seed Remove weight/value breakdown
@@ -482,9 +491,6 @@ function buildReturnPlan({
     }
   }
 
-  const isGrowthGroupIssue =
-    String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
-
   // Growth-identity conflict: more than one biscuit candidate on the machine
   // process is a data-integrity emergency. NEVER silently pick a row (no
   // ORDER BY … LIMIT 1) — every return on the conflicted process is blocked
@@ -492,17 +498,28 @@ function buildReturnPlan({
   const candidates = biscuitCandidateCount != null
     ? parseInt(biscuitCandidateCount)
     : (biscuit ? 1 : 0);
-  if (!isGrowthRun && isGrowthGroupIssue && !isComponentMode && candidates > 1) {
+  // A growth_diamond carrier input must have NO separate biscuit on its
+  // process — any candidate is a duplicate identity minted by the legacy
+  // Growth-Again defect (e.g. SSD013-APR26-011 vs SSD001-JUL26-055). The
+  // return must never silently update either row; reconcile first.
+  if (isGrowthCarrier && !isGrowthRun && candidates > 0) {
+    return invalid(
+      'A separate Growth Run identity exists for this process alongside the ' +
+      'Growth carrier. This duplicate identity must be reconciled before the ' +
+      'return can continue.'
+    );
+  }
+  if (!isGrowthCarrier && isGrowthGroupIssue && !isComponentMode && candidates > 1) {
     return invalid(
       'Multiple Growth biscuits were found for this process. Return cannot ' +
       'continue until the Growth identity conflict is resolved.'
     );
   }
 
-  // Biscuit-input returns (the process lot IS the biscuit — growth again /
-  // laser ops) use the dedicated in-place branch; the growth-identity route
-  // must not re-evaluate (or reject) them.
-  const growthRoute = isGrowthRun
+  // Carrier-input returns (the process lot IS the growth identity — growth
+  // again / laser ops) use the dedicated in-place branch; the growth-identity
+  // route must not re-evaluate (or reject) them.
+  const growthRoute = isGrowthCarrier
     ? { route: 'CHILD' }
     : resolveGrowthReturnRoute({
         isGrowthGroupIssue, isComponentMode, biscuit,
@@ -589,9 +606,10 @@ function buildReturnPlan({
   // Phase C: a COMPONENT return of the biscuit (Seed Remove) is NOT an
   // in-place return — it splits the assembly into diamond + recovered-seed
   // child lots and consumes the biscuit, releasing the attached Seed.
-  if (isGrowthRun && !isComponentMode) {
-    // In-place return of the biscuit itself: it returns to the permanent
-    // Growth identity, no lot is created, run_no untouched.
+  if (isGrowthCarrier && !isComponentMode) {
+    // In-place return of the carrier itself (growth_run biscuit, or
+    // growth_diamond on a GROWTH issue): it returns to the permanent Growth
+    // identity, no lot is created, run_no untouched.
     const finalStatusRule = outputs.find(o => o.type === lines[0].type);
     const finalStatus = finalStatusRule ? finalStatusRule.status : 'IN STOCK';
     return {

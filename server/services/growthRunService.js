@@ -280,16 +280,19 @@ async function applyMeasurements(client, inventoryId, m) {
   if (!fields.length) return null;
   params.push(inventoryId);
 
+  // Growth-Again identity: measurements apply to BOTH carrier categories —
+  // a growth_run biscuit and a growth_diamond block re-grown in place are the
+  // same physical object across runs, measured on the same row.
   const { rows } = await client.query(
     `UPDATE inventory
         SET ${fields.join(', ')}, updated_at = NOW()
       WHERE id = $${i}
-        AND item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+        AND item_id IN (SELECT id FROM items WHERE category IN ('growth_run', 'growth_diamond'))
       RETURNING *`,
     params
   );
   if (!rows.length) {
-    throw new Error(`Growth Run inventory ${inventoryId} not found (or not a growth_run row)`);
+    throw new Error(`Growth carrier inventory ${inventoryId} not found (or not a growth_run/growth_diamond row)`);
   }
   return rows[0];
 }
