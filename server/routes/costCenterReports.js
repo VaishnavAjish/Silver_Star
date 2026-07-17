@@ -151,4 +151,48 @@ router.get('/report', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/cost-center-reports/transactions?date_from&date_to&cost_center_code&account_code
+// Supports drill-down from Cost Centre Report (Category mode)
+router.get('/transactions', authenticate, async (req, res) => {
+  try {
+    const { cost_center_code, account_code } = req.query;
+    if (!cost_center_code || !account_code) {
+      return res.status(400).json({ error: 'cost_center_code and account_code are required' });
+    }
+
+    // Base filters from parent report
+    const sqlFilters = `
+          AND a.type IN ('asset', 'expense')
+          AND COALESCE(a.sub_type, '') NOT IN ('bank', 'cash', 'receivable', 'payable', 'loan')
+          AND a.name NOT ILIKE '%advance%'
+          AND a.name NOT ILIKE '%capital%'
+          AND a.name NOT ILIKE '%equity%'
+          AND a.name NOT ILIKE '%retained earnings%'
+    `;
+
+    const d = dateFilter(req.query, 1);
+    const vals = [...d.vals];
+    
+    vals.push(cost_center_code, account_code);
+    const codeFilter = ` AND cc.code = $${vals.length - 1} AND a.code = $${vals.length} `;
+
+    const query = `
+      SELECT je.id, je.date, je.je_number, je.source_type,
+             jl.narration AS remarks,
+             COALESCE(SUM(jl.debit - jl.credit), 0)::numeric AS net_amount
+        FROM je_lines jl
+        JOIN journal_entries je ON je.id = jl.je_id AND je.status = 'posted'
+        JOIN cost_centers    cc ON cc.id = jl.cost_center_id
+        JOIN accounts        a  ON a.id  = jl.account_id
+       WHERE cc.status = 'active'
+         ${codeFilter} ${sqlFilters} ${d.sql}
+       GROUP BY je.id, je.date, je.je_number, je.source_type, jl.narration
+       ORDER BY je.date, je.je_number
+    `;
+
+    const r = await pool.query(query, vals);
+    res.json({ data: r.rows, total: r.rows.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

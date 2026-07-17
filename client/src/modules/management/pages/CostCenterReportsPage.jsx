@@ -113,7 +113,7 @@ export default function CostCenterReportsPage() {
           view === 'trial-balance' ? <TrialBalanceTable rows={rows} /> :
           view === 'report' && mode === 'summary'  ? <CostCentreReportSummaryTable rows={rows} /> :
           view === 'report' && mode === 'detailed' ? <CostCentreReportDetailedTable rows={rows} navigate={navigate} /> :
-          view === 'report' && mode === 'category' ? <CostCentreReportCategoryTable rows={rows} /> : null
+          view === 'report' && mode === 'category' ? <CostCentreReportCategoryTable rows={rows} from={from} to={to} /> : null
         )}
       </div>
     </div>
@@ -286,7 +286,37 @@ function CostCentreReportDetailedTable({ rows, navigate }) {
   );
 }
 
-function CostCentreReportCategoryTable({ rows }) {
+function CostCentreReportCategoryTable({ rows, from, to }) {
+  const api = useApi();
+  const navigate = useNavigate();
+  const [expandedRow, setExpandedRow] = useState(null); // stores "ccCode|accCode"
+  const [transactions, setTransactions] = useState([]);
+  const [loadingRow, setLoadingRow] = useState(false);
+
+  const handleRowClick = async (ccCode, accCode) => {
+    const key = `${ccCode}|${accCode}`;
+    if (expandedRow === key) {
+      setExpandedRow(null);
+      return;
+    }
+    setExpandedRow(key);
+    setLoadingRow(true);
+    setTransactions([]);
+    try {
+      const p = new URLSearchParams();
+      if (from) p.set('date_from', from);
+      if (to)   p.set('date_to', to);
+      p.set('cost_center_code', ccCode);
+      p.set('account_code', accCode);
+      const res = await api.get(`/api/cost-center-reports/transactions?${p.toString()}`);
+      setTransactions(res.data || []);
+    } catch(err) {
+      toast.error('Failed to load transactions');
+    } finally {
+      setLoadingRow(false);
+    }
+  };
+
   if (!rows.length) return <Empty />;
 
   // Group by Cost Centre first, then by Category
@@ -329,7 +359,7 @@ function CostCentreReportCategoryTable({ rows }) {
                   const accountGroups = {};
                   items.forEach(r => {
                     const accKey = `${r.account_code} ${r.account_name}`;
-                    if (!accountGroups[accKey]) accountGroups[accKey] = { group_name: r.group_name || '-', net: 0 };
+                    if (!accountGroups[accKey]) accountGroups[accKey] = { group_name: r.group_name || '-', net: 0, account_code: r.account_code };
                     accountGroups[accKey].net += Number(r.net || 0);
                   });
 
@@ -340,20 +370,59 @@ function CostCentreReportCategoryTable({ rows }) {
                           {category}
                         </td>
                       </tr>
-                      {Object.entries(accountGroups).map(([accName, accData], i) => (
-                        <tr key={i}>
-                          <td style={td}>{accName}</td>
-                          <td style={td}>{accData.group_name}</td>
-                          <td style={tdNum}>{money(accData.net)}</td>
-                        </tr>
-                      ))}
-                      <tr>
-                        <td colSpan={2} style={{ ...td, fontWeight: 600, textAlign: 'right', color: 'var(--g600)' }}>{category} Total</td>
-                        <td style={{ ...tdNum, fontWeight: 700 }}>{money(items.reduce((s, i) => s + Number(i.net || 0), 0))}</td>
-                      </tr>
-                    </Fragment>
-                  );
-                })}
+                      {Object.entries(accountGroups).map(([accName, accData], i) => {
+                        const isExpanded = expandedRow === `${data.items[0].cost_center_code}|${accData.account_code}`;
+                        return (
+                          <Fragment key={i}>
+                            <tr onClick={() => handleRowClick(data.items[0].cost_center_code, accData.account_code)} style={{ cursor: 'pointer', background: isExpanded ? 'var(--g50)' : 'transparent' }}>
+                              <td style={td}>{accName}</td>
+                              <td style={td}>{accData.group_name}</td>
+                              <td style={tdNum}>
+                                {money(accData.net)}
+                                <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--brand)' }}>{isExpanded ? '▲' : '▼'}</span>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={3} style={{ padding: 0, borderBottom: '1px solid var(--g200)' }}>
+                                  <div style={{ padding: '12px 24px', background: 'var(--g50)', borderLeft: '3px solid var(--brand)' }}>
+                                    {loadingRow ? <div style={{ fontSize: 13, color: 'var(--g600)' }}>Loading transactions...</div> : transactions.length === 0 ? <div style={{ fontSize: 13, color: 'var(--g600)' }}>No transactions found.</div> : (
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                        <thead>
+                                          <tr>
+                                            <th style={{ ...th, background: 'var(--g100)' }}>Date</th>
+                                            <th style={{ ...th, background: 'var(--g100)' }}>Voucher No</th>
+                                            <th style={{ ...th, background: 'var(--g100)' }}>Narration</th>
+                                            <th style={{ ...th, textAlign: 'right', background: 'var(--g100)' }}>Amount (Net)</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {transactions.map((t, idx) => (
+                                            <tr key={idx}>
+                                              <td style={td}>{new Date(t.date).toLocaleDateString('en-GB')}</td>
+                                              <td style={td}>
+                                                <span className="cell-link" onClick={() => navigate(`/journal-entries/${t.id}`)} style={{ cursor: 'pointer', color: 'var(--brand)' }}>
+                                                  {t.je_number}
+                                                </span>
+                                              </td>
+                                              <td style={td}>{t.remarks || '-'}</td>
+                                              <td style={tdNum}>{money(t.net_amount)}</td>
+                                            </tr>
+                                          ))}
+                                          <tr>
+                                            <td colSpan={3} style={{ ...td, fontWeight: 700, textAlign: 'right' }}>Total</td>
+                                            <td style={{ ...tdNum, fontWeight: 700 }}>{money(transactions.reduce((sum, t) => sum + Number(t.net_amount || 0), 0))}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                 <tr>
                   <td colSpan={2} style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right' }}>Cost Centre Total</td>
                   <td style={{ padding: '12px 10px', fontWeight: 800, fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--green)' }}>
