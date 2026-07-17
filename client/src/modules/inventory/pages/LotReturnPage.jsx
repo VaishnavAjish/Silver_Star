@@ -484,6 +484,23 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
       </div>
     );
   }
+  // Stale-completion guard: the linked machine_process already completed (e.g.
+  // via the retired Control Tower Complete Process path) while this issue stayed
+  // OPEN. A second Return would create duplicate output — block the workspace and
+  // direct the record to administrator reconciliation. The server enforces the
+  // same rule on validate/post; this is the operator-facing surface.
+  if (['completed', 'cancelled'].includes(issue.machine_process_status)) {
+    return (
+      <div className="animate-in empty-state" style={{ height: '100%' }}>
+        <AlertCircle size={32} style={{ color: '#C62828' }} />
+        <p style={{ maxWidth: 460, textAlign: 'center' }}>
+          This process has already been completed and cannot be returned again.
+          The connected Process Issue <strong>{issue.issue_number}</strong> requires reconciliation.
+        </p>
+        <button className="btn btn-sm" onClick={exitToList}>← Back</button>
+      </div>
+    );
+  }
 
   const unit = issue.unit || '';
 
@@ -709,37 +726,73 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         {/* ── CENTER PANEL: Return rows + submit ───────────────────────────── */}
         <div style={{ flex: 1, overflow: 'auto', padding: 16, minWidth: 0 }}>
 
-          {/* Current Inventory Measurements — read-only snapshot before this return */}
-          {(issue.process_lot_weight != null || issue.process_lot_dim_length != null ||
-            issue.process_lot_dim_depth != null || issue.process_lot_dim_height != null) && (
-            <div style={{ background: '#F8F9FF', border: '1px solid #C5CAE9', borderRadius: 8,
-              marginBottom: 14, padding: '10px 14px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: '.5px', color: '#3949AB', marginBottom: 8 }}>
-                Current Inventory Measurements
+          {/* In-process measurements — AUTHORITATIVE snapshot, never a false zero.
+              The live process_lot inventory row is zeroed once the seed is
+              consumed into the biscuit, so its qty/weight are NOT trustworthy
+              here. Preferred order: immutable issue/issue-lot snapshot → biscuit/
+              process-lot dimensions. A value that cannot be established shows
+              "Not recorded" — it is never rendered as 0. */}
+          {(() => {
+            const unitLabel = issue.unit || '';
+            // Authoritative in-process quantity: current remaining, else the
+            // immutable issued snapshot, else the issue's own issued_qty.
+            const qtyAuth =
+              issue.remaining_in_process != null ? Number(issue.remaining_in_process)
+              : issue.issued_qty_snapshot != null ? Number(issue.issued_qty_snapshot)
+              : issue.issued_qty != null ? Number(issue.issued_qty)
+              : null;
+            // Authoritative weight: immutable issued-weight snapshot first; the
+            // live process_lot weight only when it is still a real (>0) value.
+            const plW = issue.process_lot_weight != null ? Number(issue.process_lot_weight) : null;
+            const weightAuth =
+              (issue.issued_weight_snapshot != null && Number(issue.issued_weight_snapshot) > 0)
+                ? Number(issue.issued_weight_snapshot)
+              : (plW != null && plW > 0) ? plW
+              : null;
+            // Dimensions: biscuit dims first (they carry the physical growth
+            // output), then the process lot's own dimensions.
+            const dimU = issue.growth_dim_unit || issue.process_lot_dim_unit || 'mm';
+            const pick = (a, b) => (a != null ? Number(a) : (b != null ? Number(b) : null));
+            const lenAuth = pick(issue.growth_dim_length, issue.process_lot_dim_length);
+            const widAuth = pick(issue.growth_dim_depth,  issue.process_lot_dim_depth);
+            const hgtAuth = pick(issue.growth_dim_height, issue.process_lot_dim_height);
+            const NOT_RECORDED = 'Not recorded';
+            const fields = [
+              { label: 'Qty',    value: qtyAuth    != null ? `${qtyAuth.toFixed(4)} ${unitLabel}`.trim() : NOT_RECORDED },
+              { label: 'Weight', value: weightAuth != null ? `${weightAuth.toFixed(4)} ct`             : NOT_RECORDED },
+              { label: 'Length', value: lenAuth    != null ? `${lenAuth.toFixed(3)} ${dimU}`            : NOT_RECORDED },
+              { label: 'Width',  value: widAuth    != null ? `${widAuth.toFixed(3)} ${dimU}`            : NOT_RECORDED },
+              { label: 'Height', value: hgtAuth    != null ? `${hgtAuth.toFixed(3)} ${dimU}`            : NOT_RECORDED },
+            ];
+            return (
+              <div style={{ background: '#F8F9FF', border: '1px solid #C5CAE9', borderRadius: 8,
+                marginBottom: 14, padding: '10px 14px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                  letterSpacing: '.5px', color: '#3949AB', marginBottom: 8 }}>
+                  In-Process Measurements
+                </div>
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                  {fields.map(({ label, value }) => {
+                    const missing = value === NOT_RECORDED;
+                    return (
+                      <div key={label}>
+                        <div style={{ fontSize: 9.5, color: '#5C6BC0', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>
+                          {label}
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700,
+                          color: missing ? '#9E9E9E' : '#1A237E',
+                          fontStyle: missing ? 'italic' : 'normal',
+                          fontFamily: missing ? undefined : 'var(--mono)' }}>
+                          {value}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                {[
-                  { label: 'Qty',    value: issue.process_lot_qty    != null ? `${Number(issue.process_lot_qty).toFixed(4)} ${issue.unit || ''}`.trim() : null },
-                  { label: 'Weight', value: issue.process_lot_weight != null ? `${Number(issue.process_lot_weight).toFixed(4)} ct` : null },
-                  { label: 'Length', value: issue.process_lot_dim_length != null ? `${Number(issue.process_lot_dim_length).toFixed(3)} ${issue.process_lot_dim_unit || 'mm'}` : null },
-                  { label: 'Width',  value: issue.process_lot_dim_depth  != null ? `${Number(issue.process_lot_dim_depth).toFixed(3)}  ${issue.process_lot_dim_unit || 'mm'}` : null },
-                  { label: 'Height', value: issue.process_lot_dim_height != null ? `${Number(issue.process_lot_dim_height).toFixed(3)} ${issue.process_lot_dim_unit || 'mm'}` : null },
-                ].filter(f => f.value != null).map(({ label, value }) => (
-                  <div key={label}>
-                    <div style={{ fontSize: 9.5, color: '#5C6BC0', fontWeight: 700,
-                      textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>
-                      {label}
-                    </div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1A237E',
-                      fontFamily: 'var(--mono)' }}>
-                      {value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Return lines table — single output family (all normal processes;
               multiple dispositions like Usable/Damaged stay ONE family). The

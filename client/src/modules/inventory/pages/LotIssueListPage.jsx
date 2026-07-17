@@ -274,7 +274,14 @@ export default function LotIssueListPage() {
                 <tbody>
                   {data.map(r => {
                     const ds  = r.display_status || r.status;
-                    const dsb = dsBadge(ds);
+                    // Stale legacy-completion inconsistency: the linked machine_process
+                    // is already completed while the issue stayed OPEN. Not a normal
+                    // returnable entry — surface it distinctly as a reconciliation
+                    // candidate (never silently hidden).
+                    const isReconCandidate = r.is_reconciliation_candidate === true;
+                    const dsb = isReconCandidate
+                      ? { bg: '#FFF3E0', color: '#E65100', border: '#FFCC80', label: 'Needs Reconciliation' }
+                      : dsBadge(ds);
                     const pct = parseFloat(r.completion_pct) || 0;
                     return (
                       <tr key={r.id} onDoubleClick={() => openDetail(r)} style={{ cursor: 'pointer' }}>
@@ -284,12 +291,16 @@ export default function LotIssueListPage() {
                           </span>
                         </td>
                         <td>
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '2px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
-                            background: dsb.bg, color: dsb.color, border: `1px solid ${dsb.border}`,
-                            whiteSpace: 'nowrap',
-                          }}>
+                          <span
+                            title={isReconCandidate
+                              ? 'The linked process is already completed. This issue requires administrator reconciliation and cannot be returned.'
+                              : undefined}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '2px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                              background: dsb.bg, color: dsb.color, border: `1px solid ${dsb.border}`,
+                              whiteSpace: 'nowrap',
+                            }}>
                             {dsb.label}
                           </span>
                         </td>

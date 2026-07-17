@@ -5,6 +5,7 @@ const { isSeedItem, nextSiblingCode, nextLotOpId, nextMfgProcessNumber } = requi
 const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowthCycle } = require('../services/growthRunService');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
 
 const router = express.Router();
 
@@ -204,7 +205,16 @@ router.get('/', authenticate, async (req, res) => {
                      AND pi.remaining_in_process IS NOT NULL
                      AND pi.remaining_in_process < pi.issued_qty - 0.0001           THEN 'PARTIAL'
                 ELSE pi.status
-              END AS display_status
+              END AS display_status,
+              -- Linked machine_process lifecycle. A genuinely returnable issue must
+              -- belong to an ACTIVE process. When the process is already completed
+              -- but the issue is still OPEN with remaining qty, it is a stale
+              -- reconciliation candidate — NOT a normal queue entry (but never
+              -- silently hidden: the flag lets the queue expose it as a candidate).
+              mproc.status AS machine_process_status,
+              (pi.status = 'OPEN'
+               AND COALESCE(pi.remaining_in_process, pi.issued_qty) > 0.0001
+               AND mproc.status IN ('completed', 'cancelled')) AS is_reconciliation_candidate
        FROM lot_process_issues pi
        JOIN inventory sl       ON sl.id   = pi.source_lot_id
        JOIN items i            ON i.id    = sl.item_id
@@ -213,6 +223,7 @@ router.get('/', authenticate, async (req, res) => {
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op      ON op.id   = pi.operator_id
        LEFT JOIN process_master pm ON pm.process_code = pi.process_type
+       LEFT JOIN machine_processes mproc ON mproc.id = pi.machine_process_id
        LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
                               AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
        LEFT JOIN items gri     ON gri.id = gr.item_id
@@ -326,7 +337,14 @@ router.get('/:id', authenticate, async (req, res) => {
               -- timestamps. Read-only display fields — no posting semantics.
               COALESCE(pm1.process_name, pm2.process_name) AS process_display_name,
               mp.started_at   AS process_started_at,
-              mp.completed_at AS process_completed_at
+              mp.completed_at AS process_completed_at,
+              mp.status       AS machine_process_status,
+              -- Immutable in-process snapshot captured at issue time. Authoritative
+              -- for the Return workspace measurement panel: the live process_lot
+              -- inventory row is zeroed once the seed is consumed, so pl.qty/weight
+              -- must NOT be shown as a physical zero.
+              mpl.issued_qty     AS issued_qty_snapshot,
+              mpl.issued_weight  AS issued_weight_snapshot
        FROM lot_process_issues pi
        JOIN inventory sl      ON sl.id   = pi.source_lot_id
        JOIN items i           ON i.id    = sl.item_id
@@ -335,6 +353,8 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op     ON op.id   = pi.operator_id
        LEFT JOIN machine_processes mp ON pi.machine_process_id = mp.id
+       LEFT JOIN machine_process_lots mpl ON mpl.process_id = pi.machine_process_id
+                                         AND mpl.inventory_lot_id = pi.source_lot_id
        LEFT JOIN process_master pm1 ON mp.process_type = pm1.process_code
        LEFT JOIN process_master pm2 ON pi.process_type = pm2.process_code
        LEFT JOIN inventory gr ON gr.machine_process_id = pi.machine_process_id
@@ -1014,7 +1034,8 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
   try {
     const { rows: issueRows } = await pool.query(
       `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs,
-              COALESCE(p1.process_group, p2.process_group) AS process_group
+              COALESCE(p1.process_group, p2.process_group) AS process_group,
+              mp.status AS machine_process_status, mp.completed_at AS machine_process_completed_at
        FROM lot_process_issues i
        LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
        LEFT JOIN process_master p1 ON mp.process_type = p1.process_code
@@ -1025,6 +1046,16 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     if (!issueRows.length)
       return res.json({ valid: false, route: 'REJECT', error: 'Issue not found' });
     const issue = issueRows[0];
+    // Stale-completion guard: the linked machine_process has already completed
+    // (e.g. via the retired Control Tower Complete Process path) yet this issue
+    // is still OPEN. Returning again would create duplicate physical output.
+    // Surface it as a non-returnable reconciliation state, not a valid plan.
+    if (isMachineProcessTerminal(issue.machine_process_status)) {
+      return res.json({
+        valid: false, route: 'REJECT', reconciliation_required: true,
+        error: STALE_COMPLETION_MESSAGE,
+      });
+    }
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
     const targetLotId = issue.process_lot_id || issue.source_lot_id;
@@ -1171,7 +1202,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // 1. Lock the issue
     const { rows: issueRows } = await client.query(
       `SELECT i.*, COALESCE(p1.allowed_outputs, p2.allowed_outputs) AS allowed_outputs,
-              COALESCE(p1.process_group, p2.process_group) AS process_group
+              COALESCE(p1.process_group, p2.process_group) AS process_group,
+              mp.status AS machine_process_status, mp.completed_at AS machine_process_completed_at
        FROM lot_process_issues i
        LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
        LEFT JOIN process_master p1 ON mp.process_type = p1.process_code
@@ -1182,6 +1214,14 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     if (!issueRows.length) throw new Error('Issue not found');
     const issue = issueRows[0];
     if (issue.status !== 'OPEN') throw new Error(`Issue ${issue.issue_number} is already ${issue.status}`);
+    // Stale-completion guard (authoritative): block a second Return when the
+    // linked machine_process is already completed/cancelled. The legacy Control
+    // Tower Complete Process path could complete the process + release the
+    // machine without closing this issue; posting a Return now would create a
+    // duplicate output. Such issues must be reconciled, never returned again.
+    if (isMachineProcessTerminal(issue.machine_process_status)) {
+      throw new Error(STALE_COMPLETION_MESSAGE);
+    }
 
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
