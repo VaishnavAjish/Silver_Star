@@ -8,7 +8,7 @@ import {
   ArrowLeft, GitBranch, GitMerge, Share2,
   Package, MapPin, User, Calendar, Tag, Layers,
   ChevronRight, Send, RotateCcw, Clock, History,
-  ChevronDown, RefreshCw, X, CheckCircle
+  ChevronDown, RefreshCw, X, CheckCircle, AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
