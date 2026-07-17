@@ -165,6 +165,15 @@ router.get('/machines', authenticate, async (req, res) => {
           (SELECT COUNT(*) FILTER (WHERE lpi.status = 'OPEN' AND COALESCE(lpi.remaining_in_process, 0) > 0)::int
            FROM lot_process_issues lpi
            WHERE lpi.machine_process_id = mp.id) AS returnable_issue_count,
+          -- Deep-link target for the "Record Return" action (RETURN_BASED processes):
+          -- the single returnable Process Issue on the ACTIVE machine_process. The
+          -- frontend only uses this when returnable_issue_count = 1; the Return
+          -- workspace re-resolves and re-validates the issue server-side.
+          (SELECT lpi.id
+           FROM lot_process_issues lpi
+           WHERE lpi.machine_process_id = mp.id
+             AND lpi.status = 'OPEN' AND COALESCE(lpi.remaining_in_process, 0) > 0
+           ORDER BY lpi.id ASC LIMIT 1) AS returnable_issue_id,
           (SELECT COALESCE(SUM(mpm.qty), 0)
            FROM   machine_process_materials mpm
            WHERE  mpm.process_id = mp.id) AS materials_issued,

@@ -7,7 +7,15 @@ import {
   Play, Pause, CheckCircle, Wrench, RefreshCw, Search, Filter,
   X, Plus, Zap, Timer, Package, TrendingUp, AlertCircle, Bell,
   Layers, User, Calendar, LayoutGrid, List, ArrowUp, ArrowDown, MoreVertical,
+  RotateCcw,
 } from 'lucide-react';
+
+// A RETURN_BASED process posts its physical output through the Return Engine —
+// never the legacy Control Tower completion modal. For these machines the
+// completion action becomes "Record Return", which launches the existing Return
+// workspace. OUTPUT_BASED processes retain the legacy Complete Process modal.
+const isReturnBasedProcess = (machine, processMap) =>
+  String(processMap?.get(machine?.process_type)?.completion_mode || '').toUpperCase() === 'RETURN_BASED';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useManufacturingSync } from '../../../shared/hooks/useModuleSync';
 import toast from 'react-hot-toast';
@@ -286,13 +294,21 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
               {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
                 <>
                   <ActionMenuItem icon={Pause} label="Put On Hold" desc="Pause the current process temporarily." color="#E65100" onClick={() => { setShowMenu(false); onAction('hold', machine); }} />
-                  <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                  {isReturnBasedProcess(machine, processMap) ? (
+                    <ActionMenuItem icon={RotateCcw} label="Record Return" desc="Record the physical output through Process Return." color="#7B1FA2" onClick={() => { setShowMenu(false); onAction('record_return', machine); }} />
+                  ) : (
+                    <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                  )}
                 </>
               )}
               {machine.process_status === 'hold' && (
                 <>
                   <ActionMenuItem icon={Play} label="Resume" desc="Resume the paused process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('resume', machine); }} />
-                  <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                  {isReturnBasedProcess(machine, processMap) ? (
+                    <ActionMenuItem icon={RotateCcw} label="Record Return" desc="Record the physical output through Process Return." color="#7B1FA2" onClick={() => { setShowMenu(false); onAction('record_return', machine); }} />
+                  ) : (
+                    <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
+                  )}
                 </>
               )}
               {['idle', 'running', 'hold'].includes(machine.machine_status) && (
@@ -638,13 +654,21 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
           {m.process_status === 'running' && m.machine_status !== 'awaiting_output' && (
             <>
               <GActionBtn icon={Pause} label="Hold" color="#E65100" onClick={() => onAction('hold', m)} />
-              <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
+              {isReturnBasedProcess(m, processMap) ? (
+                <GActionBtn icon={RotateCcw} label="Record Return" color="#7B1FA2" onClick={() => onAction('record_return', m)} />
+              ) : (
+                <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
+              )}
             </>
           )}
           {m.process_status === 'hold' && (
             <>
               <GActionBtn icon={Play} label="Resume" color="#2E7D32" onClick={() => onAction('resume', m)} />
-              <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
+              {isReturnBasedProcess(m, processMap) ? (
+                <GActionBtn icon={RotateCcw} label="Record Return" color="#7B1FA2" onClick={() => onAction('record_return', m)} />
+              ) : (
+                <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
+              )}
             </>
           )}
           {['idle', 'running', 'hold'].includes(m.machine_status) && (
@@ -1234,10 +1258,20 @@ export default function ManufacturingDashboard() {
     if (actionType === 'start') {
       setPreselected(machine);
       setStartModal(true);
+    } else if (actionType === 'record_return') {
+      // RETURN_BASED completion is owned by the Return Engine. Deep-link to the
+      // exact returnable Process Issue when there is exactly one; otherwise open
+      // the Process Return queue scoped to this machine_process so the operator
+      // picks. The Return workspace re-resolves and re-validates server-side.
+      if (machine.returnable_issue_count === 1 && machine.returnable_issue_id) {
+        navigate(`/inventory/process-issues/${machine.returnable_issue_id}/return`);
+      } else {
+        navigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`);
+      }
     } else {
       setConfirmModal({ action: actionType, machine });
     }
-  }, []);
+  }, [navigate]);
 
   const handleConfirmAction = async (action, machine, remarks, extra = {}) => {
     try {
@@ -1571,9 +1605,15 @@ export default function ManufacturingDashboard() {
                   </button>
                 )}
                 {selectedAlert.section.key === 'overdue' && (
-                  <button className="btn btn-primary" style={{ background: '#1565C0', borderColor: '#1565C0' }} onClick={() => { handleAction('complete', selectedAlert.item); setSelectedAlert(null); }}>
-                    Complete Process
-                  </button>
+                  isReturnBasedProcess(selectedAlert.item, processMap) ? (
+                    <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleAction('record_return', selectedAlert.item); setSelectedAlert(null); }}>
+                      Record Return
+                    </button>
+                  ) : (
+                    <button className="btn btn-primary" style={{ background: '#1565C0', borderColor: '#1565C0' }} onClick={() => { handleAction('complete', selectedAlert.item); setSelectedAlert(null); }}>
+                      Complete Process
+                    </button>
+                  )
                 )}
                 {selectedAlert.section.key === 'hold' && (
                   <button className="btn btn-primary" style={{ background: '#2E7D32', borderColor: '#2E7D32' }} onClick={() => { handleAction('resume', selectedAlert.item); setSelectedAlert(null); }}>
