@@ -15,7 +15,7 @@ import MixLotsPage from '../../modules/inventory/pages/MixLotsPage';
 import LotReturnPage from '../../modules/inventory/pages/LotReturnPage';
 
 export default function ClipboardPage() {
-  const { items, clear, remove, add, openStockTransferModal, loadClipboard } = useClipboard();
+  const { items, clear, remove, add, addMultiple, openStockTransferModal, loadClipboard } = useClipboard();
   const navigate = useNavigate();
   const api = useApi();
   const [search, setSearch] = useState('');
@@ -63,34 +63,68 @@ export default function ClipboardPage() {
   }, [filteredItems, sortKey]);
 
   /* ── Manual Add ── */
-  const handleManualAdd = async () => {
-    if (!manualId.trim()) return;
+  const handleManualAdd = async (overrideIdString = null) => {
+    const inputStr = typeof overrideIdString === 'string' ? overrideIdString : manualId;
+    if (!inputStr || !inputStr.trim()) return;
+    
+    const tokens = inputStr.split(/[\s,;\n\t]+/).map(s => s.trim()).filter(Boolean);
+    if (tokens.length === 0) return;
+
     setLoading(true);
     try {
-      const res = await api.get(`/api/inventory?search=${encodeURIComponent(manualId.trim())}`);
-      const list = res.data || [];
-      const match = list.find(l =>
-        String(l.lot_op_id) === manualId.trim() ||
-        (l.lot_code && l.lot_code.toLowerCase() === manualId.trim().toLowerCase())
-      );
-      if (match) {
-        if (items.some(i => String(i.entity_id) === String(match.id) && i.entity_type === 'inventory')) {
-          toast('Lot is already in clipboard');
+      let addedCount = 0;
+      let alreadyCount = 0;
+      let notFoundCount = 0;
+      const newItems = [];
+
+      for (const token of tokens) {
+        const res = await api.get(`/api/inventory?search=${encodeURIComponent(token)}`);
+        const list = res.data || [];
+        const match = list.find(l =>
+          String(l.lot_op_id) === token ||
+          (l.lot_code && l.lot_code.toLowerCase() === token.toLowerCase()) ||
+          (l.lot_number && l.lot_number.toLowerCase() === token.toLowerCase())
+        );
+
+        if (match) {
+          const existsInClipboard = items.some(i => String(i.entity_id) === String(match.id) && i.entity_type === 'inventory');
+          const existsInNew = newItems.some(i => String(i.entity_id) === String(match.id));
+          if (existsInClipboard || existsInNew) {
+            alreadyCount++;
+          } else {
+            newItems.push({
+              entity_type: 'inventory',
+              entity_id: match.id,
+              label: match.lot_code || match.lot_number || `Lot ${match.lot_op_id}`,
+              ...match
+            });
+            addedCount++;
+          }
         } else {
-          add({
-            entity_type: 'inventory',
-            entity_id: match.id,
-            label: match.lot_code || match.lot_number || `Lot ${match.lot_op_id}`,
-            ...match
-          });
-          toast.success(`Added ${match.lot_code || match.lot_op_id}`);
-          setManualId('');
+          notFoundCount++;
         }
-      } else {
-        toast.error('Lot not found');
       }
+
+      if (newItems.length > 0) {
+        if (typeof addMultiple === 'function') {
+          await addMultiple(newItems);
+        } else {
+          for (const item of newItems) {
+            await add(item);
+          }
+        }
+      }
+
+      if (tokens.length === 1) {
+        if (addedCount > 0) toast.success(`Added ${newItems[0].label}`);
+        else if (alreadyCount > 0) toast('Lot is already in clipboard');
+        else toast.error('Lot not found');
+      } else {
+        toast.success(`Processed ${tokens.length} lots: ${addedCount} added, ${alreadyCount} exist, ${notFoundCount} not found.`);
+      }
+      setManualId('');
     } catch (err) {
-      toast.error('Failed to search lot');
+      toast.error('Failed to search lot(s)');
     } finally {
       setLoading(false);
     }
@@ -199,6 +233,37 @@ export default function ClipboardPage() {
                 value={manualId}
                 onChange={e => setManualId(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleManualAdd(); }}
+                onPaste={async (e) => {
+                  e.preventDefault();
+                  const pastedText = e.clipboardData.getData('text');
+                  if (pastedText) {
+                    setManualId(pastedText);
+                    await handleManualAdd(pastedText);
+                  }
+                }}
+                onContextMenu={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text && text.trim()) {
+                      setManualId(text);
+                      await handleManualAdd(text);
+                    }
+                  } catch (err) {
+                    console.error('Auto-paste failed', err);
+                  }
+                }}
+                onClick={async (e) => {
+                  if (!manualId) {
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      if (text && text.trim()) {
+                        setManualId(text);
+                        await handleManualAdd(text);
+                      }
+                    } catch (err) {}
+                  }
+                }}
                 placeholder="Add Lot ID / Barcode..."
                 style={{ ...inputSt, minWidth: 160 }}
               />

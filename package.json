@@ -11,5 +11,8 @@
     "build": "cd client && npx vite build && cd .. && rm -rf server/public && cp -r client/dist server/public",
     "db:indexes": "cd server && npm run db:indexes",
     "db:refresh-mv": "psql -U postgres -d silverstar_grow -c \"SELECT refresh_materialized_views();\""
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
   }
 }
