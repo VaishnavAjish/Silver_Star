@@ -242,15 +242,17 @@ export default function ClipboardPage() {
                   }
                 }}
                 onContextMenu={async (e) => {
-                  e.preventDefault();
+                  // We don't prevent default here so the native context menu (with Paste) can still appear 
+                  // if the browser blocks automatic clipboard reading.
                   try {
                     const text = await navigator.clipboard.readText();
                     if (text && text.trim()) {
+                      e.preventDefault(); // Try to prevent only if successful, though it might be too late
                       setManualId(text);
                       await handleManualAdd(text);
                     }
                   } catch (err) {
-                    console.error('Auto-paste failed', err);
+                    // Browser blocked auto-paste (Read permission denied). Native menu will show instead.
                   }
                 }}
                 onClick={async (e) => {
