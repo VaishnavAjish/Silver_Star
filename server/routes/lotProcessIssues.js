@@ -60,6 +60,7 @@ router.get('/', authenticate, async (req, res) => {
       search,           // ILIKE on issue_number, item_name, operator
       machine_search,   // ILIKE filter on machine name
       machine_id,       // exact match on machine id
+      machine_process_id, // exact match — Control Tower scoped Return queue
       date_from,        // filter by issue_date >= date_from
       date_to,          // filter by issue_date <= date_to
       process_type,         // exact match on pi.process_type
@@ -113,6 +114,11 @@ router.get('/', authenticate, async (req, res) => {
     if (machine_id) {
       params.push(parseInt(machine_id));
       where += ` AND pi.machine_id = $${params.length}`;
+    }
+
+    if (machine_process_id) {
+      params.push(parseInt(machine_process_id));
+      where += ` AND pi.machine_process_id = $${params.length}`;
     }
 
     if (machine_search) {
@@ -2103,20 +2109,16 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
               : 0;
 
             if (completionMode === 'OUTPUT_BASED') {
-              // Seed return finished but growth output not yet posted —
-              // keep process running, transition machine to awaiting_output
+              // Seed return finished but output not yet posted — keep the
+              // process (and machine) in its true active state until output
+              // posting completes it. 'awaiting_output' is retired: no
+              // application transaction may newly write that machine status.
               await client.query(
                 `UPDATE machine_processes
                    SET total_paused_minutes = total_paused_minutes + $1, paused_at=NULL
                  WHERE id=$2`,
                 [pausedMinutes, mp.id]
               );
-              await client.query(
-                `UPDATE machines SET status='awaiting_output' WHERE id=$1`,
-                [mp.machine_id]
-              );
-              await logMachineStatus(client, mp.machine_id, mp.status, 'awaiting_output', req.user.id,
-                `All seeds returned — awaiting output entry for process ${mp.process_number}`);
 
               // Phase 34 (FIX 1): the Growth Run (Biscuit) was already created at
               // process START (IN PROCESS). Now that all seeds are returned and the

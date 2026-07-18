@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import Paginator from '../../../shared/components/Paginator';
 import Modal from '../../../shared/components/Modal';
@@ -86,7 +86,12 @@ export default function LotIssueListPage() {
   const [page, setPage] = useState(1);
   const PER_PAGE = 50;
 
-  const hasFilters = !!(search || displayStatus || machineId || fromDate || toDate);
+  // Control Tower scoped navigation: ?machine_process_id=N restricts the queue
+  // to the exact active machine_process (Record Return with several issues).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const machineProcessId = searchParams.get('machine_process_id') || '';
+
+  const hasFilters = !!(search || displayStatus || machineId || fromDate || toDate || machineProcessId);
 
   useEffect(() => {
     api.get('/api/machines?limit=500')
@@ -101,6 +106,7 @@ export default function LotIssueListPage() {
       if (search)        p.set('search', search);
       if (displayStatus) p.set('display_status', displayStatus);
       if (machineId)     p.set('machine_id', machineId);
+      if (machineProcessId) p.set('machine_process_id', machineProcessId);
       if (fromDate)      p.set('date_from', fromDate);
       if (toDate)        p.set('date_to', toDate);
       if (sortBy)        p.set('sort_by', sortBy);
@@ -109,7 +115,7 @@ export default function LotIssueListPage() {
       setTotal(res.totalCount ?? res.total ?? 0);
     } catch (e) {}
     finally { setLoading(false); }
-  }, [search, displayStatus, machineId, fromDate, toDate, sortBy, page]);
+  }, [search, displayStatus, machineId, machineProcessId, fromDate, toDate, sortBy, page]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -136,6 +142,7 @@ export default function LotIssueListPage() {
     setToDate('');
     setSortBy('');
     setPage(1);
+    if (machineProcessId) setSearchParams({}, { replace: true });
   };
 
   return (
@@ -221,6 +228,20 @@ export default function LotIssueListPage() {
           </SelectDropdown>
         </div>
 
+        {machineProcessId && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px',
+            borderRadius: 12, fontSize: 11, fontWeight: 600, alignSelf: 'end',
+            background: '#F3E5F5', color: '#7B1FA2', border: '1px solid #CE93D8',
+            whiteSpace: 'nowrap',
+          }}>
+            Scoped to machine process #{machineProcessId}
+            <button className="icon-btn" title="Remove scope"
+              onClick={() => { setSearchParams({}, { replace: true }); setPage(1); }}>
+              <X size={10} />
+            </button>
+          </span>
+        )}
         {hasFilters && (
           <button className="filter-reset-btn" onClick={clearAllFilters}>
             Clear All

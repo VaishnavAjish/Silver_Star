@@ -10,12 +10,25 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
-// A RETURN_BASED process posts its physical output through the Return Engine —
-// never the legacy Control Tower completion modal. For these machines the
-// completion action becomes "Record Return", which launches the existing Return
-// workspace. OUTPUT_BASED processes retain the legacy Complete Process modal.
-const isReturnBasedProcess = (machine, processMap) =>
-  String(processMap?.get(machine?.process_type)?.completion_mode || '').toUpperCase() === 'RETURN_BASED';
+// A process completes ONLY through the Return Engine unless it is explicitly
+// OUTPUT_BASED — and Growth-group processes ALWAYS use the Return Engine
+// regardless of a stale completion_mode row (owner doctrine: Growth must never
+// use legacy completion). Unknown/missing configuration defaults to the Return
+// Engine, never to legacy direct completion.
+const usesReturnEngine = (machine, processMap) => {
+  const pm = processMap?.get(machine?.process_type);
+  const mode = String(pm?.completion_mode || 'RETURN_BASED').toUpperCase();
+  const group = String(pm?.process_group || (machine?.process_type === 'growth' ? 'GROWTH' : '')).toUpperCase();
+  return mode !== 'OUTPUT_BASED' || group === 'GROWTH';
+};
+
+// READY FOR RETURN — computed presentation badge only. Lifecycle stays RUNNING:
+// active running process, outstanding Return, elapsed runtime >= target.
+const isReadyForReturn = (m) =>
+  m?.process_status === 'running' &&
+  Number(m?.returnable_issue_count) > 0 &&
+  Number(m?.target_runtime_hours) > 0 &&
+  Number(m?.runtime_hours) >= Number(m?.target_runtime_hours);
 import { useApi } from '../../../shared/hooks/useApi';
 import { useManufacturingSync } from '../../../shared/hooks/useModuleSync';
 import toast from 'react-hot-toast';
@@ -29,7 +42,10 @@ const MACHINE_STATUS_CFG = {
   breakdown: { label: 'Breakdown', color: '#C62828', bg: '#FFEBEE', border: '#EF9A9A', glow: '0 0 0 2px #EF9A9A' },
   completed: { label: 'Completed', color: '#1565C0', bg: '#E3F2FD', border: '#90CAF9', glow: 'none' },
   cleaning: { label: 'Cleaning', color: '#6A1B9A', bg: '#F3E5F5', border: '#CE93D8', glow: '0 0 0 2px #CE93D8' },
-  awaiting_output: { label: 'Awaiting Output', color: '#7B1FA2', bg: '#F3E5F5', border: '#CE93D8', glow: '0 0 0 2px #BA68C8' },
+  // Explicit diagnostic state for inconsistent rows (e.g. stale legacy
+  // awaiting_output with no active process) — never rendered as a false
+  // normal state. Live awaiting_output is retired.
+  review: { label: 'Needs Review', color: '#AD1457', bg: '#FCE4EC', border: '#F48FB1', glow: '0 0 0 2px #F48FB1' },
 };
 
 // Process type colors come from process_master.category (loaded via API)
@@ -44,7 +60,7 @@ const CATEGORY_COLORS = {
 const KPI_DEFS = [
   { key: 'total', label: 'Total Machines', icon: Cpu, color: '#1565C0', bg: '#E3F2FD' },
   { key: 'running', label: 'Running', icon: Activity, color: '#2E7D32', bg: '#E8F5E9' },
-  { key: 'awaiting_output', label: 'Awaiting Output', icon: Package, color: '#7B1FA2', bg: '#F3E5F5' },
+  { key: 'ready_for_return', label: 'Ready for Return', icon: RotateCcw, color: '#7B1FA2', bg: '#F3E5F5' },
   { key: 'idle', label: 'AVAILABLE', icon: Timer, color: '#757575', bg: '#F5F5F5' },
   { key: 'hold', label: 'On Hold', icon: Pause, color: '#E65100', bg: '#FFF3E0' },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench, color: '#F57F17', bg: '#FFF8E1' },
@@ -153,7 +169,10 @@ function KpiCard({ def, value }) {
 // Chamber Card  (density-improved)
 // ══════════════════════════════════════════════════════════════════════════════
 const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, processMap }) {
-  const cfg = MACHINE_STATUS_CFG[machine.machine_status] || MACHINE_STATUS_CFG.idle;
+  // Lifecycle comes from the server-derived state (active machine_process
+  // truth + protected overrides) — never from the raw machines.status cache.
+  const state = machine.derived_state || 'review';
+  const cfg = MACHINE_STATUS_CFG[state] || MACHINE_STATUS_CFG.review;
   const hasProcess = !!machine.process_id;
   const [showMenu, setShowMenu] = useState(false);
 
@@ -184,12 +203,15 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
             {machine.code}
           </div>
         </div>
-        <span style={{
-          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-          fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
-          background: '#fff', color: cfg.color, border: `1px solid ${cfg.color}`,
-        }}>
-          {cfg.label}
+        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span style={{
+            display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+            fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
+            background: '#fff', color: cfg.color, border: `1px solid ${cfg.color}`,
+          }}>
+            {cfg.label}
+          </span>
+          <ReadyForReturnBadge machine={machine} />
         </span>
       </div>
 
@@ -251,17 +273,6 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 
       {/* Actions (Icon Only) */}
       <div style={{ padding: '4px 12px 12px 12px', display: 'flex', justifyContent: 'flex-end', position: 'relative' }}>
-        {machine.machine_status === 'awaiting_output' && machine.process_id && (
-          <button
-            onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`)}
-            style={{
-              background: '#fff', border: '1px solid #E0E0E0', color: '#1565C0', borderRadius: 4, padding: '4px 12px',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, marginRight: 'auto'
-            }}
-          >
-            <Package size={12} /> Details
-          </button>
-        )}
         <button
           onClick={() => setShowMenu(!showMenu)}
           style={{
@@ -285,39 +296,31 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
               <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.5px' }}>
                 Machine Actions
               </div>
-              {machine.machine_status === 'idle' && (
+              {state === 'idle' && (
                 <ActionMenuItem icon={Play} label="Start" desc="Begin a new process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('start', machine); }} />
               )}
               {machine.returnable_issue_count > 0 && machine.process_id && (
                   <ActionMenuItem icon={Package} label="Returns" desc="Process returns from this machine." color="#7B1FA2" onClick={() => { setShowMenu(false); onNavigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`); }} />
                 )}
-              {machine.process_status === 'running' && machine.machine_status !== 'awaiting_output' && (
+              {machine.process_status === 'running' && (
                 <>
                   <ActionMenuItem icon={Pause} label="Put On Hold" desc="Pause the current process temporarily." color="#E65100" onClick={() => { setShowMenu(false); onAction('hold', machine); }} />
-                  {isReturnBasedProcess(machine, processMap) ? (
-                    <ActionMenuItem icon={RotateCcw} label="Record Return" desc="Record the physical output through Process Return." color="#7B1FA2" onClick={() => { setShowMenu(false); onAction('record_return', machine); }} />
-                  ) : (
-                    <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
-                  )}
+                  <CompletionMenuItem machine={machine} processMap={processMap} onAction={(t, m) => { setShowMenu(false); onAction(t, m); }} />
                 </>
               )}
               {machine.process_status === 'hold' && (
                 <>
                   <ActionMenuItem icon={Play} label="Resume" desc="Resume the paused process." color="#2E7D32" onClick={() => { setShowMenu(false); onAction('resume', machine); }} />
-                  {isReturnBasedProcess(machine, processMap) ? (
-                    <ActionMenuItem icon={RotateCcw} label="Record Return" desc="Record the physical output through Process Return." color="#7B1FA2" onClick={() => { setShowMenu(false); onAction('record_return', machine); }} />
-                  ) : (
-                    <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => { setShowMenu(false); onAction('complete', machine); }} />
-                  )}
+                  <CompletionMenuItem machine={machine} processMap={processMap} onAction={(t, m) => { setShowMenu(false); onAction(t, m); }} />
                 </>
               )}
-              {['idle', 'running', 'hold'].includes(machine.machine_status) && (
+              {['idle', 'running', 'hold'].includes(state) && (
                 <ActionMenuItem icon={Wrench} label="Maintenance" desc="Move this machine to maintenance mode." color="#F57F17" onClick={() => { setShowMenu(false); onAction('maintenance', machine); }} />
               )}
-              {machine.machine_status !== 'breakdown' && (
+              {state !== 'breakdown' && (
                 <ActionMenuItem icon={AlertTriangle} label="Report Breakdown" desc="Stop the machine and record a breakdown." color="#C62828" onClick={() => { setShowMenu(false); onAction('breakdown', machine); }} />
               )}
-              {['maintenance', 'breakdown', 'cleaning'].includes(machine.machine_status) && (
+              {['maintenance', 'breakdown', 'cleaning', 'review'].includes(state) && (
                 <ActionMenuItem icon={CheckCircle} label="Set Idle" desc="Mark machine as ready for production." color="#757575" onClick={() => { setShowMenu(false); onAction('idle', machine); }} />
               )}
             </div>
@@ -329,8 +332,9 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
 }); // end MachineCard memo
 
 function LastCompletedRunDisplay({ machine }) {
-  const status = machine.machine_status || 'idle';
-  if (status !== 'idle') return null;
+  // Shown only on AVAILABLE machines; data comes solely from completed
+  // machine_process rows (status='completed' AND completed_at IS NOT NULL).
+  if ((machine.derived_state || 'review') !== 'idle') return null;
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #E0E0E0' }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#9E9E9E', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
@@ -363,15 +367,18 @@ function StatCell({ label, value }) {
   );
 }
 
-function ActionMenuItem({ icon: Icon, label, desc, color, onClick }) {
+function ActionMenuItem({ icon: Icon, label, desc, color, onClick, disabled = false }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px',
-        background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+        background: 'transparent', border: 'none', borderRadius: 6,
+        cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left',
+        opacity: disabled ? 0.55 : 1,
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = '#F5F5F5'; }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = '#F5F5F5'; }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
     >
       <Icon size={14} color={color} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -380,6 +387,48 @@ function ActionMenuItem({ icon: Icon, label, desc, color, onClick }) {
         <div style={{ fontSize: 10, color: '#757575' }}>{desc}</div>
       </div>
     </button>
+  );
+}
+
+// ── Completion action for an ACTIVE process ───────────────────────────────────
+// The Return Engine is the only completion path unless the process is
+// explicitly legacy OUTPUT_BASED (non-Growth). Zero returnable issues on an
+// active Return-engine process is an explicit unavailable state — never
+// silently hidden, never a write from the Control Tower (it is a launcher).
+const RETURN_UNAVAILABLE_REASON = 'No returnable Process Issue found for this active process.';
+
+function CompletionMenuItem({ machine, processMap, onAction }) {
+  if (!usesReturnEngine(machine, processMap)) {
+    return <ActionMenuItem icon={CheckCircle} label="Complete Process" desc="Finish the current run and continue." color="#1565C0" onClick={() => onAction('complete', machine)} />;
+  }
+  if (Number(machine.returnable_issue_count) > 0) {
+    return <ActionMenuItem icon={RotateCcw} label="Record Return" desc="Record physical output through Process Return." color="#7B1FA2" onClick={() => onAction('record_return', machine)} />;
+  }
+  return <ActionMenuItem icon={AlertCircle} label="Return Unavailable" desc={RETURN_UNAVAILABLE_REASON} color="#9E9E9E" disabled />;
+}
+
+function CompletionGridBtn({ machine, processMap, onAction }) {
+  if (!usesReturnEngine(machine, processMap)) {
+    return <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', machine)} />;
+  }
+  if (Number(machine.returnable_issue_count) > 0) {
+    return <GActionBtn icon={RotateCcw} label="Record Return" color="#7B1FA2" onClick={() => onAction('record_return', machine)} />;
+  }
+  return <GActionBtn icon={AlertCircle} label="Return Unavailable" color="#9E9E9E" disabled />;
+}
+
+// READY FOR RETURN chip — informational only; the lifecycle chip stays RUNNING.
+function ReadyForReturnBadge({ machine }) {
+  if (!isReadyForReturn(machine)) return null;
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
+      background: '#F3E5F5', color: '#7B1FA2', border: '1px solid #CE93D8',
+      whiteSpace: 'nowrap',
+    }}>
+      Ready for Return
+    </span>
   );
 }
 
@@ -402,11 +451,12 @@ function ActionBtn({ icon: Icon, label, color, onClick }) {
 }
 
 // ── Grid row action button (slightly more compact label) ──────────────────────
-function GActionBtn({ icon: Icon, label, color, onClick }) {
+function GActionBtn({ icon: Icon, label, color, onClick, disabled = false }) {
   return (
     <button
-      title={label}
-      onClick={onClick}
+      title={disabled ? RETURN_UNAVAILABLE_REASON : label}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 3,
         padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
@@ -427,7 +477,7 @@ function GActionBtn({ icon: Icon, label, color, onClick }) {
 function GridView({ machines, sortConfig, onSort, onAction, onNavigate, processMap }) {
   const cols = [
     { key: 'code', label: 'Machine', w: 130 },
-    { key: 'machine_status', label: 'Status', w: 104 },
+    { key: 'derived_state', label: 'Status', w: 104 },
     { key: 'operator_name', label: 'Operator / Location', w: 140 },
     { key: 'process_type', label: 'Type', w: 90 },
     { key: 'growth_run_number', label: 'Growth No.', w: 130 },
@@ -492,7 +542,8 @@ function SortTh({ col, label, w, sortConfig, onSort }) {
 }
 
 const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, processMap }) {
-  const cfg = MACHINE_STATUS_CFG[m.machine_status] || MACHINE_STATUS_CFG.idle;
+  const state = m.derived_state || 'review';
+  const cfg = MACHINE_STATUS_CFG[state] || MACHINE_STATUS_CFG.review;
   const runtimePct = m.target_runtime_hours && m.runtime_hours != null
     ? Math.min(100, Math.round((m.runtime_hours / m.target_runtime_hours) * 100))
     : null;
@@ -500,10 +551,10 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
   const hasProcess = !!m.process_id;
 
   // Inline alert flags derived from row data
-  const alertBreakdown = m.machine_status === 'breakdown';
+  const alertBreakdown = state === 'breakdown';
   const alertOverdue = eta?.overdue && m.process_status === 'running';
   const alertLongHold = m.process_status === 'hold';
-  const alertMaint = m.machine_status === 'maintenance';
+  const alertMaint = state === 'maintenance';
   const anyAlert = alertBreakdown || alertOverdue || alertLongHold || alertMaint;
 
   return (
@@ -526,14 +577,17 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
 
       {/* Status */}
       <td style={{ ...TD, width: 104 }}>
-        <span style={{
-          display: 'inline-block', padding: '2px 7px', borderRadius: 10,
-          fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-          background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
-          whiteSpace: 'nowrap',
-        }}>
-          {cfg.label}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <span style={{
+            display: 'inline-block', padding: '2px 7px', borderRadius: 10,
+            fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+            background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+            whiteSpace: 'nowrap',
+          }}>
+            {cfg.label}
+          </span>
+          <ReadyForReturnBadge machine={m} />
+        </div>
       </td>
 
       {/* Operator */}
@@ -644,40 +698,32 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
       {/* Actions */}
       <td style={{ ...TD, width: 240, padding: '4px 8px' }}>
         <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', alignItems: 'center' }}>
-          {m.machine_status === 'idle' && (
+          {state === 'idle' && (
             <GActionBtn icon={Play} label="Start" color="#2E7D32" onClick={() => onAction('start', m)} />
           )}
           {m.returnable_issue_count > 0 && m.process_id && (
             <GActionBtn icon={Package} label="Returns" color="#7B1FA2"
               onClick={() => onNavigate(`/inventory/process-issues?machine_process_id=${m.process_id}`)} />
           )}
-          {m.process_status === 'running' && m.machine_status !== 'awaiting_output' && (
+          {m.process_status === 'running' && (
             <>
               <GActionBtn icon={Pause} label="Hold" color="#E65100" onClick={() => onAction('hold', m)} />
-              {isReturnBasedProcess(m, processMap) ? (
-                <GActionBtn icon={RotateCcw} label="Record Return" color="#7B1FA2" onClick={() => onAction('record_return', m)} />
-              ) : (
-                <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
-              )}
+              <CompletionGridBtn machine={m} processMap={processMap} onAction={onAction} />
             </>
           )}
           {m.process_status === 'hold' && (
             <>
               <GActionBtn icon={Play} label="Resume" color="#2E7D32" onClick={() => onAction('resume', m)} />
-              {isReturnBasedProcess(m, processMap) ? (
-                <GActionBtn icon={RotateCcw} label="Record Return" color="#7B1FA2" onClick={() => onAction('record_return', m)} />
-              ) : (
-                <GActionBtn icon={CheckCircle} label="Complete" color="#1565C0" onClick={() => onAction('complete', m)} />
-              )}
+              <CompletionGridBtn machine={m} processMap={processMap} onAction={onAction} />
             </>
           )}
-          {['idle', 'running', 'hold'].includes(m.machine_status) && (
+          {['idle', 'running', 'hold'].includes(state) && (
             <GActionBtn icon={Wrench} label="Maint." color="#F57F17" onClick={() => onAction('maintenance', m)} />
           )}
-          {m.machine_status !== 'breakdown' && (
+          {state !== 'breakdown' && (
             <GActionBtn icon={AlertTriangle} label="Breakdown" color="#C62828" onClick={() => onAction('breakdown', m)} />
           )}
-          {['maintenance', 'breakdown', 'cleaning'].includes(m.machine_status) && (
+          {['maintenance', 'breakdown', 'cleaning', 'review'].includes(state) && (
             <GActionBtn icon={CheckCircle} label="Set Idle" color="#757575" onClick={() => onAction('idle', m)} />
           )}
         </div>
@@ -691,7 +737,7 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
 // ══════════════════════════════════════════════════════════════════════════════
 function AlertRail({ alerts, onClose, onClearAll, onSelectAlert }) {
   const sections = [
-    { key: 'awaiting_output', label: 'Awaiting Output', icon: Package, color: '#7B1FA2' },
+    { key: 'ready_for_return', label: 'Ready for Return', icon: RotateCcw, color: '#7B1FA2' },
     { key: 'breakdown', label: 'Breakdown', icon: AlertTriangle, color: '#C62828' },
     { key: 'overdue', label: 'Overdue Runtime', icon: Clock, color: '#E65100' },
     { key: 'hold', label: 'On Hold', icon: Pause, color: '#F57F17' },
@@ -860,17 +906,17 @@ function StartProcessModal({ machines, operators, seedLots, processes, onSubmit,
               <label style={lbl}>Machine *</label>
               <SelectDropdown style={inp} value={form.machine_id} onChange={set('machine_id')}>
                 <option value="">— select machine —</option>
-                {allMachines.filter(m => m.machine_status === 'idle').length > 0 && (
-                  <optgroup label="Idle (ready)">
-                    {allMachines.filter(m => m.machine_status === 'idle').map(m =>
+                {allMachines.filter(m => m.derived_state === 'idle').length > 0 && (
+                  <optgroup label="Available (ready)">
+                    {allMachines.filter(m => m.derived_state === 'idle').map(m =>
                       <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
                     )}
                   </optgroup>
                 )}
-                {allMachines.filter(m => m.machine_status !== 'idle').length > 0 && (
-                  <optgroup label="Other (has active process)">
-                    {allMachines.filter(m => m.machine_status !== 'idle').map(m =>
-                      <option key={m.id} value={m.id}>{m.code} — {m.name} [{m.machine_status}]</option>
+                {allMachines.filter(m => m.derived_state !== 'idle').length > 0 && (
+                  <optgroup label="Other (not available)">
+                    {allMachines.filter(m => m.derived_state !== 'idle').map(m =>
+                      <option key={m.id} value={m.id}>{m.code} — {m.name} [{m.derived_state}]</option>
                     )}
                   </optgroup>
                 )}
@@ -961,15 +1007,14 @@ function StartProcessModal({ machines, operators, seedLots, processes, onSubmit,
 // ══════════════════════════════════════════════════════════════════════════════
 // Confirm Action Modal
 // ══════════════════════════════════════════════════════════════════════════════
-function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
+// The legacy growth-return mini modal (weight/height/length/width fields with
+// a save-and-release submit) is REMOVED: physical output is recorded only
+// through the Return from Process workspace. This modal now only confirms
+// simple state actions (hold/resume/maintenance/breakdown/idle) and legacy
+// OUTPUT_BASED completion with remarks — it never collects measurements.
+function ConfirmActionModal({ action, machine, onConfirm, onClose }) {
   const [remarks, setRemarks] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  // Growth Run Return measurements (only used when completing a growth process)
-  const [meas, setMeas] = useState({ weight: '', length: '', width: '', height: '' });
-  const setM = k => e => setMeas(m => ({ ...m, [k]: e.target.value }));
-
-  // A GROWTH process completes through the Growth Run Return dialog.
-  const isGrowthReturn = action === 'complete' && isGrowth;
 
   const cfg = {
     hold: { label: 'Hold Process', color: '#E65100', icon: Pause },
@@ -981,14 +1026,6 @@ function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
   }[action] || { label: action, color: '#333', icon: Activity };
 
   const Icon = cfg.icon;
-  const title = isGrowthReturn ? 'Growth Run Return' : cfg.label;
-
-  const w = meas.weight === '' ? null : parseFloat(meas.weight);
-  const h = meas.height === '' ? null : parseFloat(meas.height);
-  
-  const weightInvalid = isGrowthReturn && (w === null || w <= 0);
-  const heightInvalid = isGrowthReturn && (h === null || h <= 0);
-  const growthValid = !isGrowthReturn || (!weightInvalid && !heightInvalid);
 
   const fieldStyle = {
     width: '100%', padding: '6px 8px', border: '1px solid #E0E0E0',
@@ -999,13 +1036,7 @@ function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
   const handleConfirm = async () => {
     setSubmitting(true);
     try {
-      const extra = isGrowthReturn ? {
-        weight: meas.weight,
-        length: meas.length,
-        width:  meas.width,
-        height: meas.height,
-      } : {};
-      await onConfirm(action, machine, remarks, extra);
+      await onConfirm(action, machine, remarks);
     } catch {
       // onConfirm has its own catch; this is a safety net
     } finally {
@@ -1015,10 +1046,10 @@ function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: isGrowthReturn ? 460 : 420 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, color: cfg.color }}>
-            <Icon size={16} /> {title}
+            <Icon size={16} /> {cfg.label}
           </div>
           <button className="icon-btn" onClick={onClose}><X size={14} /></button>
         </div>
@@ -1028,41 +1059,7 @@ function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
             {machine.process_number && (
               <><br /><span style={{ fontSize: 11, color: '#757575' }}>Process: {machine.process_number}</span></>
             )}
-            {isGrowthReturn && (
-              <><br /><span style={{ fontSize: 11, color: '#757575' }}>
-                Enter the measured Growth Run (biscuit) dimensions to release the machine.
-              </span></>
-            )}
           </p>
-
-          {isGrowthReturn && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={labelStyle}>Weight (ct) <span style={{ color: '#C62828' }}>*</span></label>
-                <input type="number" step="0.0001" min="0" 
-                  style={{...fieldStyle, borderColor: (meas.weight !== '' && weightInvalid) ? '#C62828' : '#E0E0E0'}}
-                  value={meas.weight} onChange={setM('weight')} placeholder="e.g. 15.80" />
-                {meas.weight !== '' && weightInvalid && <div style={{color: '#C62828', fontSize: 10, marginTop: 4}}>Weight must be {'>'} 0</div>}
-              </div>
-              <div>
-                <label style={labelStyle}>Height (mm) <span style={{ color: '#C62828' }}>*</span></label>
-                <input type="number" step="0.001" min="0" 
-                  style={{...fieldStyle, borderColor: (meas.height !== '' && heightInvalid) ? '#C62828' : '#E0E0E0'}}
-                  value={meas.height} onChange={setM('height')} placeholder="e.g. 2.10" />
-                {meas.height !== '' && heightInvalid && <div style={{color: '#C62828', fontSize: 10, marginTop: 4}}>Height must be {'>'} 0</div>}
-              </div>
-              <div>
-                <label style={labelStyle}>Length (mm)</label>
-                <input type="number" step="0.001" min="0" style={fieldStyle}
-                  value={meas.length} onChange={setM('length')} placeholder="optional" />
-              </div>
-              <div>
-                <label style={labelStyle}>Width (mm)</label>
-                <input type="number" step="0.001" min="0" style={fieldStyle}
-                  value={meas.width} onChange={setM('width')} placeholder="optional" />
-              </div>
-            </div>
-          )}
 
           <div>
             <label style={labelStyle}>Remarks</label>
@@ -1076,9 +1073,9 @@ function ConfirmActionModal({ action, machine, isGrowth, onConfirm, onClose }) {
             className="btn btn-primary"
             style={{ background: cfg.color, borderColor: cfg.color }}
             onClick={handleConfirm}
-            disabled={submitting || !growthValid}
+            disabled={submitting}
           >
-            {submitting ? 'Processing…' : (isGrowthReturn ? 'Save & Release' : 'Confirm')}
+            {submitting ? 'Processing…' : 'Confirm'}
           </button>
         </div>
       </div>
@@ -1129,7 +1126,7 @@ export default function ManufacturingDashboard() {
   const alertCount = useMemo(() => {
     if (!visibleAlerts) return 0;
     return [
-      visibleAlerts.awaiting_output?.length, visibleAlerts.breakdown?.length,
+      visibleAlerts.ready_for_return?.length, visibleAlerts.breakdown?.length,
       visibleAlerts.overdue?.length, visibleAlerts.hold?.length,
       visibleAlerts.maintenance_due?.length, visibleAlerts.yield_risk?.length,
     ].reduce((a, b) => (a || 0) + (b || 0), 0);
@@ -1186,6 +1183,13 @@ export default function ManufacturingDashboard() {
   const processMap = useMemo(
     () => new Map(processes.map(p => [p.process_code, p])),
     [processes]
+  );
+
+  // READY FOR RETURN — informational KPI count computed from the loaded
+  // machines (presentation only; machine lifecycle stays RUNNING).
+  const readyForReturnCount = useMemo(
+    () => machines.filter(isReadyForReturn).length,
+    [machines]
   );
 
   // ── Data loading ─────────────────────────────────────────────────────────────
@@ -1259,30 +1263,34 @@ export default function ManufacturingDashboard() {
       setPreselected(machine);
       setStartModal(true);
     } else if (actionType === 'record_return') {
-      // RETURN_BASED completion is owned by the Return Engine. Deep-link to the
-      // exact returnable Process Issue when there is exactly one; otherwise open
-      // the Process Return queue scoped to this machine_process so the operator
-      // picks. The Return workspace re-resolves and re-validates server-side.
-      if (machine.returnable_issue_count === 1 && machine.returnable_issue_id) {
+      // Completion is owned by the Return Engine — the Control Tower is only a
+      // launcher and performs NO write. Exactly one returnable issue deep-links
+      // to its Return workspace; several open the queue scoped to this
+      // machine_process; zero is an explicit unavailable state (never silent).
+      // The Return workspace re-resolves and re-validates server-side.
+      const count = Number(machine.returnable_issue_count) || 0;
+      if (count === 1 && machine.returnable_issue_id) {
         navigate(`/inventory/process-issues/${machine.returnable_issue_id}/return`);
-      } else {
+      } else if (count > 1) {
         navigate(`/inventory/process-issues?machine_process_id=${machine.process_id}`);
+      } else {
+        toast.error(`Return Unavailable — ${RETURN_UNAVAILABLE_REASON}`);
       }
     } else {
       setConfirmModal({ action: actionType, machine });
     }
   }, [navigate]);
 
-  const handleConfirmAction = async (action, machine, remarks, extra = {}) => {
+  const handleConfirmAction = async (action, machine, remarks) => {
     try {
       if (action === 'hold') {
         await api.patch(`/api/manufacturing/processes/${machine.process_id}/hold`, { remarks });
       } else if (action === 'resume') {
         await api.patch(`/api/manufacturing/processes/${machine.process_id}/resume`, { remarks });
       } else if (action === 'complete') {
-        // Growth processes pass biscuit measurements (weight/length/width/height)
-        // via `extra` (Growth Run Return). Non-growth send only remarks.
-        await api.patch(`/api/manufacturing/processes/${machine.process_id}/complete`, { remarks, ...extra });
+        // Legacy OUTPUT_BASED completion only (remarks, no measurements). The
+        // server rejects with 409 for any Return-engine-owned process.
+        await api.patch(`/api/manufacturing/processes/${machine.process_id}/complete`, { remarks });
       } else if (action === 'maintenance') {
         await api.patch(`/api/manufacturing/machines/${machine.id}/status`, { new_status: 'maintenance', remarks });
       } else if (action === 'breakdown') {
@@ -1378,7 +1386,10 @@ export default function ManufacturingDashboard() {
         overflowX: 'auto', flexWrap: 'nowrap',
         background: '#F5F5F5', borderBottom: '1px solid #E0E0E0', flexShrink: 0,
       }}>
-        {KPI_DEFS.map(def => <KpiCard key={def.key} def={def} value={kpi?.[def.key]} />)}
+        {KPI_DEFS.map(def => (
+          <KpiCard key={def.key} def={def}
+            value={def.key === 'ready_for_return' ? readyForReturnCount : kpi?.[def.key]} />
+        ))}
       </div>
 
       {/* ── Filter bar ── */}
@@ -1605,15 +1616,11 @@ export default function ManufacturingDashboard() {
                   </button>
                 )}
                 {selectedAlert.section.key === 'overdue' && (
-                  isReturnBasedProcess(selectedAlert.item, processMap) ? (
-                    <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleAction('record_return', selectedAlert.item); setSelectedAlert(null); }}>
-                      Record Return
-                    </button>
-                  ) : (
-                    <button className="btn btn-primary" style={{ background: '#1565C0', borderColor: '#1565C0' }} onClick={() => { handleAction('complete', selectedAlert.item); setSelectedAlert(null); }}>
-                      Complete Process
-                    </button>
-                  )
+                  // Alert rows carry no returnable-issue counts, so the launcher
+                  // opens the Return queue scoped to this machine_process.
+                  <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleNavigate(`/inventory/process-issues?machine_process_id=${selectedAlert.item.process_id}`); setSelectedAlert(null); }}>
+                    Record Return
+                  </button>
                 )}
                 {selectedAlert.section.key === 'hold' && (
                   <button className="btn btn-primary" style={{ background: '#2E7D32', borderColor: '#2E7D32' }} onClick={() => { handleAction('resume', selectedAlert.item); setSelectedAlert(null); }}>
@@ -1630,9 +1637,9 @@ export default function ManufacturingDashboard() {
                     Hold Process
                   </button>
                 )}
-                {selectedAlert.section.key === 'awaiting_output' && (
+                {selectedAlert.section.key === 'ready_for_return' && (
                   <button className="btn btn-primary" style={{ background: '#7B1FA2', borderColor: '#7B1FA2' }} onClick={() => { handleNavigate(`/inventory/process-issues?machine_process_id=${selectedAlert.item.process_id}`); setSelectedAlert(null); }}>
-                    Enter Output
+                    Record Return
                   </button>
                 )}
               </div>
@@ -1657,8 +1664,6 @@ export default function ManufacturingDashboard() {
         <ConfirmActionModal
           action={confirmModal.action}
           machine={confirmModal.machine}
-          isGrowth={String(processMap?.get(confirmModal.machine?.process_type)?.process_group
-            || (confirmModal.machine?.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH'}
           onConfirm={handleConfirmAction}
           onClose={() => setConfirmModal(null)}
         />
