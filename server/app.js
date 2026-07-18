@@ -360,7 +360,10 @@ if (process.env.OTEL_ENABLED === 'true') {
 }
 // NOTE: SIGTERM / SIGINT handlers are registered in index.js — do NOT duplicate here.
 
-// Auto-fix completion mode for Growth processes
-require('./db/pool').primaryPool.query("UPDATE process_master SET completion_mode = 'OUTPUT_BASED' WHERE process_group = 'GROWTH'").catch(console.error);
+// NOTE: application startup must never mutate Process Master business
+// configuration (completion mode is owner-controlled via guarded migrations,
+// e.g. phase65). A boot-time reset here previously reverted Growth to the
+// legacy output-based mode on every PM2 restart and defeated the
+// Return-engine unification.
 
 module.exports = app;
