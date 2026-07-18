@@ -580,7 +580,7 @@ export default function InventoryPage() {
     localStorage.setItem('inv_default_template', id);
   };
 
-  const canSelectRow = r => r && (r.status === 'IN STOCK' || r.status === 'IN PROCESS');
+  const canSelectRow = r => !!r;
 
   const toggleMix = (id, e) => {
     e?.stopPropagation();
