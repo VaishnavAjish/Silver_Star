@@ -48,7 +48,7 @@ SELECT 'MACHINE_CLASSIFICATION' AS section,
 FROM machines m
 LEFT JOIN active_mp amp ON amp.machine_id = m.id AND amp.rn = 1
 LEFT JOIN issue_agg ia  ON ia.machine_process_id = amp.id
-ORDER BY 12, m.code;
+ORDER BY 10, m.code;
 
 -- ── 2. Stale machine candidates (reconciliation targets) ─────────────────────
 -- machines.status = 'awaiting_output' with NO active machine_process: after
