@@ -971,8 +971,8 @@ router.patch('/processes/:id/complete', authenticate, async (req, res) => {
       SET status='completed', completed_at=NOW(),
           total_paused_minutes = total_paused_minutes + $1,
           paused_at=NULL, remarks=COALESCE($2, remarks)
-      WHERE id=$3
-    `, [extraMinutes, remarks || null, proc.id]);
+      WHERE machine_id=$3 AND status IN ('running', 'hold')
+    `, [extraMinutes, remarks || null, proc.machine_id]);
 
     const { rows: mRows } = await client.query('SELECT status FROM machines WHERE id=$1', [proc.machine_id]);
     await client.query(`UPDATE machines SET status='idle' WHERE id=$1`, [proc.machine_id]);
@@ -1034,10 +1034,14 @@ router.patch('/machines/:id/status', authenticate, async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: 'Conflict: The active process has been fully returned but remains active. This is an inconsistent state that cannot be cleared by a manual idle action.' });
         } else {
-          // awaiting_output is retired: an OUTPUT_BASED process with all issues
-          // returned keeps its true active state until output posting completes
-          // it — the READY FOR RETURN badge is computed, never a status write.
-          finalStatus = proc.status === 'running' ? 'running' : 'hold';
+          // The user explicitly requested to force this machine to idle.
+          // Auto-complete ALL active OUTPUT_BASED processes to honor the user's intent
+          // and prevent ANY stranded processes from reverting the machine state.
+          await client.query(
+            "UPDATE machine_processes SET status='completed', completed_at=NOW(), remarks = COALESCE(remarks || ' | ', '') || 'Auto-completed by manual machine state reset' WHERE machine_id=$1 AND status IN ('running', 'hold')",
+            [req.params.id]
+          );
+          finalStatus = 'idle';
         }
       }
     }
