@@ -12,6 +12,11 @@ const {
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
+// Growth-Again display context + atomic machine release (SSD-100 defect class):
+// pure services, unit-tested without a DB.
+const { resolveIssueGrowthContext } = require('../services/growthIssueContext');
+const { assessMachineRelease } = require('../services/machineReleaseGuard');
+const { requiresReturnEngineCompletion } = require('../services/completionEngineGuard');
 
 const router = express.Router();
 
@@ -183,6 +188,12 @@ router.get('/', authenticate, async (req, res) => {
       `SELECT pi.*,
               sl.lot_number AS source_lot_number, sl.lot_code AS source_lot_code,
               pl.lot_number AS process_lot_number, pl.lot_code AS process_lot_code, pl.status AS process_lot_status,
+              -- Carrier identity (Growth Again: the process lot IS the carrier;
+              -- resolveIssueGrowthContext prefers these over the legacy gr link).
+              pl.run_no AS process_lot_run_no,
+              pl.dim_length AS process_lot_dim_length, pl.dim_depth AS process_lot_dim_depth,
+              pl.dim_height AS process_lot_dim_height, pl.dim_unit AS process_lot_dim_unit,
+              pli.category AS process_lot_category,
               i.name AS item_name, i.category,
               u.full_name AS created_by_name,
               mach.code AS machine_code, mach.name AS machine_name,
@@ -231,13 +242,14 @@ router.get('/', authenticate, async (req, res) => {
        JOIN inventory sl       ON sl.id   = pi.source_lot_id
        JOIN items i            ON i.id    = sl.item_id
        LEFT JOIN inventory pl  ON pl.id   = pi.process_lot_id
+       LEFT JOIN items pli     ON pli.id  = pl.item_id
        LEFT JOIN users u       ON u.id    = pi.created_by
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op      ON op.id   = pi.operator_id
        LEFT JOIN process_master pm ON pm.process_code = pi.process_type
        LEFT JOIN machine_processes mproc ON mproc.id = pi.machine_process_id
        LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
-                              AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+                              AND gr.item_id IN (SELECT id FROM items WHERE category IN ('growth_run','growth_diamond'))
        LEFT JOIN items gri     ON gri.id = gr.item_id
        LEFT JOIN inventory rt  ON rt.id = sl.root_lot_id
        ${where}
@@ -256,11 +268,13 @@ router.get('/', authenticate, async (req, res) => {
        LEFT JOIN users op      ON op.id   = pi.operator_id
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN inventory gr  ON gr.machine_process_id = pi.machine_process_id
-                              AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+                              AND gr.item_id IN (SELECT id FROM items WHERE category IN ('growth_run','growth_diamond'))
        ${where}`,
       baseParams
     );
-    res.json({ data: rows, total: parseInt(cnt.count) });
+    // Deterministic growth identity (snapshot → carrier → legacy link) so a
+    // Growth-Again row never shows "—" while its carrier holds the data.
+    res.json({ data: rows.map(resolveIssueGrowthContext), total: parseInt(cnt.count) });
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[lotProcessIssues.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -331,6 +345,8 @@ router.get('/:id', authenticate, async (req, res) => {
               pl.dim_depth AS process_lot_dim_depth,
               pl.dim_height AS process_lot_dim_height,
               pl.dim_unit AS process_lot_dim_unit,
+              pl.run_no AS process_lot_run_no,
+              pli.category AS process_lot_category,
               i.name AS item_name, i.category,
               u.full_name AS created_by_name,
               mach.code AS machine_code, mach.name AS machine_name,
@@ -361,6 +377,7 @@ router.get('/:id', authenticate, async (req, res) => {
        JOIN inventory sl      ON sl.id   = pi.source_lot_id
        JOIN items i           ON i.id    = sl.item_id
        LEFT JOIN inventory pl ON pl.id   = pi.process_lot_id
+       LEFT JOIN items pli    ON pli.id  = pl.item_id
        LEFT JOIN users u      ON u.id    = pi.created_by
        LEFT JOIN machines mach ON mach.id = pi.machine_id
        LEFT JOIN users op     ON op.id   = pi.operator_id
@@ -370,7 +387,7 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN process_master pm1 ON mp.process_type = pm1.process_code
        LEFT JOIN process_master pm2 ON pi.process_type = pm2.process_code
        LEFT JOIN inventory gr ON gr.machine_process_id = pi.machine_process_id
-                             AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+                             AND gr.item_id IN (SELECT id FROM items WHERE category IN ('growth_run','growth_diamond'))
        LEFT JOIN items gri    ON gri.id = gr.item_id
        LEFT JOIN inventory rt ON rt.id = sl.root_lot_id
        WHERE pi.id = $1`,
@@ -392,7 +409,10 @@ router.get('/:id', authenticate, async (req, res) => {
        ORDER BY r.created_at`,
       [req.params.id]
     );
-    res.json({ ...rows[0], return: rets[rets.length - 1] || null, returns: rets });
+    // Same deterministic growth identity as the queue — the Return workspace
+    // must show the carrier's permanent Growth Number, current Run and issued
+    // dimensions even when the legacy growth_run link cannot resolve.
+    res.json({ ...resolveIssueGrowthContext(rows[0]), return: rets[rets.length - 1] || null, returns: rets });
   } catch (err) { require('fs').writeFileSync('global_500_err.txt', '[lotProcessIssues.js] ' + req.path + '\n' + err.message + '\n' + err.stack); res.status(500).json({ error: err.message }); }
 });
 
@@ -1922,13 +1942,16 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         req.user.id);
     }
 
-    // 5. Update issue remaining and status
-    await client.query(
+    // 5. Update issue remaining and status — exactly one row, or abort.
+    const issueUpd = await client.query(
       `UPDATE lot_process_issues
          SET remaining_in_process = $1, status = $2, updated_at = NOW()
        WHERE id = $3`,
       [remainingAfter, isFinal ? 'RETURNED' : 'OPEN', issueId]
     );
+    if (issueUpd.rowCount !== 1) {
+      throw new Error(`Return aborted: expected to update exactly one Process Issue (#${issueId}), updated ${issueUpd.rowCount}.`);
+    }
 
     // 6. If final return: consume the process lot.
     //    EXCEPTION 1 — a Growth Run biscuit is never consumed by a return; it is
@@ -2082,7 +2105,17 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           req.user.id);
       }
 
-      // Auto-complete or transition machine_process when all sibling issues are RETURNED
+      // Auto-complete or transition machine_process when all sibling issues are
+      // RETURNED. A machine-bound Issue MUST carry its machine_process linkage:
+      // a committed full Return may never leave "inventory returned + machine
+      // still running/no active process" (SSD-100 / PI-202607-0385 defect).
+      if (!issue.machine_process_id && issue.machine_id) {
+        throw new Error(
+          'Final Return blocked: this Issue is machine-bound but has no linked ' +
+          'machine process, so the machine cannot be released atomically. ' +
+          'Reconcile the Issue linkage first.'
+        );
+      }
       if (issue.machine_process_id) {
         const { rows: [{ cnt }] } = await client.query(
           `SELECT COUNT(*) AS cnt FROM lot_process_issues
@@ -2091,24 +2124,27 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         );
         if (parseInt(cnt) === 0) {
           const { rows: mpRows } = await client.query(
-            'SELECT mp.*, pm.completion_mode FROM machine_processes mp \
+            'SELECT mp.*, pm.completion_mode, pm.process_group FROM machine_processes mp \
              LEFT JOIN process_master pm ON pm.process_code = mp.process_type \
              WHERE mp.id = $1 FOR UPDATE OF mp',
             [issue.machine_process_id]
           );
           if (mpRows.length && ['running', 'hold'].includes(mpRows[0].status)) {
             const mp = mpRows[0];
-            // An in-place transformation IS the terminal output of its process —
-            // there is no separate output posting afterwards, so the machine
-            // must complete now and never wait in awaiting_output.
-            const completionMode = isTransformReturn
-              ? 'RETURN_BASED'
-              : (mp.completion_mode || 'RETURN_BASED');
+            // An in-place transformation IS the terminal output of its process,
+            // and Return-engine-owned processes (RETURN_BASED, all Growth-group
+            // rows even with a stale OUTPUT_BASED completion_mode, unknown
+            // modes) complete through the Return — never by waiting for a
+            // separate output posting.
+            const completesViaReturn = isTransformReturn || requiresReturnEngineCompletion({
+              completionMode: mp.completion_mode,
+              processGroup: mp.process_group,
+            });
             const pausedMinutes = mp.status === 'hold' && mp.paused_at
               ? (Date.now() - new Date(mp.paused_at).getTime()) / 60000
               : 0;
 
-            if (completionMode === 'OUTPUT_BASED') {
+            if (!completesViaReturn) {
               // Seed return finished but output not yet posted — keep the
               // process (and machine) in its true active state until output
               // posting completes it. 'awaiting_output' is retired: no
@@ -2140,18 +2176,55 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
                 throw new Error(`Failed to advance Growth Run to IN STOCK for process ${mp.process_number}: ${gErr.message}`);
               }
             } else {
-              // RETURN_BASED: auto-complete the process immediately
-              await client.query(
+              // Return-engine completion: complete the process AND release the
+              // machine in THIS transaction — or roll the whole Return back.
+              // Linkage guards first (pure, tested in machineReleaseGuard):
+              // right machine, active process, exactly one active process.
+              const { rows: [{ active_cnt }] } = await client.query(
+                `SELECT COUNT(*) AS active_cnt FROM machine_processes
+                 WHERE machine_id = $1 AND status IN ('running','hold')`,
+                [mp.machine_id]
+              );
+              const release = assessMachineRelease({
+                issueMachineId: issue.machine_id,
+                machineProcess: mp,
+                activeProcessCount: parseInt(active_cnt),
+              });
+              if (!release.ok) throw new Error(release.reason);
+
+              const mpUpd = await client.query(
                 `UPDATE machine_processes
                    SET status='completed', completed_at=NOW(),
                        total_paused_minutes = total_paused_minutes + $1, paused_at=NULL
-                 WHERE id=$2`,
+                 WHERE id=$2 AND status IN ('running','hold')`,
                 [pausedMinutes, mp.id]
               );
-              await client.query(`UPDATE machines SET status='idle' WHERE id=$1`, [mp.machine_id]);
+              if (mpUpd.rowCount !== 1) {
+                throw new Error(`Return aborted: expected to complete exactly one machine process (#${mp.id}), updated ${mpUpd.rowCount}.`);
+              }
+              const macUpd = await client.query(`UPDATE machines SET status='idle' WHERE id=$1`, [mp.machine_id]);
+              if (macUpd.rowCount !== 1) {
+                throw new Error(`Return aborted: expected to release exactly one machine (#${mp.machine_id}), updated ${macUpd.rowCount}.`);
+              }
               await logMachineStatus(client, mp.machine_id, mp.status, 'idle', req.user.id,
                 `All lots returned — process ${mp.process_number} auto-completed`);
-              
+
+              // Growth first cycle completed via Return: advance the single
+              // biscuit IN PROCESS → IN STOCK (idempotent; no-op for non-growth
+              // groups and for identity-preserving carriers already posted by
+              // the return outcome above).
+              try {
+                const biscuit = await advanceGrowthRunToStock(client, mp.id);
+                if (biscuit) {
+                  await logOp(client, biscuit.id, 'growth_run_in_stock', 'machine_process', mp.id,
+                    0, 'IN STOCK',
+                    `Growth Run ${biscuit.lot_number} completed → IN STOCK (process ${mp.process_number} completed via Return)`,
+                    req.user.id);
+                }
+              } catch (gErr) {
+                throw new Error(`Failed to advance Growth Run to IN STOCK for process ${mp.process_number}: ${gErr.message}`);
+              }
+
               // Real-Time: process completed
               dispatchEvent('process.completed', {
                 process_number: mp.process_number, machine_process_id: mp.id,
