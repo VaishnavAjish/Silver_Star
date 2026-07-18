@@ -65,7 +65,7 @@ SELECT 'INVENTORY_100594' AS section,
        inv.dim_length, inv.dim_depth, inv.dim_height, inv.dim_unit,
        inv.machine_process_id, inv.root_lot_id, it.category
 FROM inventory inv JOIN items it ON it.id = inv.item_id
-WHERE inv.id = 100594;
+WHERE inv.id = (SELECT process_lot_id FROM lot_process_issues WHERE issue_number = 'PI-202607-0385');
 
 -- ── 5. Returns against the Issue ─────────────────────────────────────────────
 SELECT 'RETURNS' AS section,
@@ -108,7 +108,7 @@ SELECT 'CLASSIFICATION' AS section,
   (SELECT completed_at FROM mp)      AS mp_completed_at,
   (SELECT status::text FROM m)       AS machine_stored_status,
   (SELECT n FROM act)                AS active_process_count,
-  (SELECT status FROM inventory WHERE id = 100594) AS inventory_status;
+  (SELECT status FROM inventory WHERE id = (SELECT process_lot_id FROM lot_process_issues WHERE issue_number = 'PI-202607-0385')) AS inventory_status;
 
 -- ── 7. Machine status history (audit trail) ──────────────────────────────────
 SELECT 'STATUS_LOG' AS section, msl.old_status, msl.new_status, msl.changed_at, msl.remarks

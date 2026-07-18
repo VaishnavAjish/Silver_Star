@@ -69,9 +69,9 @@ BEGIN
   SELECT MAX(created_at) INTO v_return_ts
   FROM lot_process_returns WHERE issue_id = v_issue.id AND is_final = true;
 
-  SELECT status INTO v_inv_status FROM inventory WHERE id = 100594;
+  SELECT status INTO v_inv_status FROM inventory WHERE id = v_issue.process_lot_id;
   IF v_inv_status IS DISTINCT FROM 'IN STOCK' THEN
-    RAISE EXCEPTION 'phase71: inventory 100594 is % (expected IN STOCK) — aborting', v_inv_status;
+    RAISE EXCEPTION 'phase71: inventory % is % (expected IN STOCK) — aborting', v_issue.process_lot_id, COALESCE(v_inv_status, '<NULL>');
   END IF;
 
   SELECT COUNT(*) INTO v_open_siblings
