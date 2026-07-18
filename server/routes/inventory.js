@@ -40,7 +40,14 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     if (status)         { params.push(status);         where += ` AND inv.status = $${params.length}`; }
-    if (category)       { params.push(category);       where += ` AND i.category = $${params.length}`; }
+    if (category) {
+      if (category === 'growth_run') {
+        where += ` AND i.category IN ('growth_run', 'growth_diamond')`;
+      } else {
+        params.push(category);
+        where += ` AND i.category = $${params.length}`;
+      }
+    }
     if (type_filter)    { params.push(type_filter);    where += ` AND i.type = $${params.length}`; }
     if (operation_type) { params.push(operation_type); where += ` AND inv.operation_type = $${params.length}`; }
     if (process_type)   { params.push(process_type);   where += ` AND COALESCE(mp.process_type, lpi.process_type) = $${params.length}`; }
