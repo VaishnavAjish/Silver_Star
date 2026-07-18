@@ -10,11 +10,18 @@ const {
   advanceGrowthRunToStock,
   recordGrowthCycle,
 } = require('../services/growthRunService');
+const {
+  requiresReturnEngineCompletion,
+  RETURN_ENGINE_REQUIRED_MESSAGE,
+} = require('../services/completionEngineGuard');
+const { derivedStateSql } = require('../services/machineStateModel');
 
 const router = express.Router();
 
 // ── Controlled status vocabulary (lowercase — matches machine_status ENUM) ───
-const MACHINE_STATUSES = ['idle','running','hold','maintenance','breakdown','completed','cleaning','awaiting_output'];
+// 'awaiting_output' is retired as a live lifecycle state: the ENUM value stays
+// readable for history, but no application transaction may newly write it.
+const MACHINE_STATUSES = ['idle','running','hold','maintenance','breakdown','completed','cleaning'];
 
 // ── Runtime computation SQL fragment ─────────────────────────────────────────
 // Returns elapsed active hours (excludes paused time).
@@ -53,8 +60,20 @@ async function logMachineStatus(client, machineId, oldStatus, newStatus, userId,
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/kpi', authenticate, async (req, res) => {
   try {
+    // Counts use the SAME canonical classification as the /machines card query
+    // (machineStateModel.derivedStateSql) — active machine_process truth plus
+    // maintenance/breakdown/cleaning overrides — so cards and KPI can never
+    // disagree. 'review' surfaces inconsistent rows instead of hiding them.
     const { rows: machineCounts } = await pool.query(`
-      SELECT status::text, COUNT(*) AS cnt FROM machines GROUP BY status
+      SELECT ${derivedStateSql('m', 'amp')} AS state, COUNT(*) AS cnt
+      FROM machines m
+      LEFT JOIN LATERAL (
+        SELECT mp.id, mp.status FROM machine_processes mp
+        WHERE mp.machine_id = m.id AND mp.status IN ('running','hold')
+        ORDER BY CASE mp.status WHEN 'running' THEN 1 ELSE 2 END, mp.id DESC
+        LIMIT 1
+      ) amp ON true
+      GROUP BY 1
     `);
 
     const { rows: completedToday } = await pool.query(`
@@ -68,8 +87,7 @@ router.get('/kpi', authenticate, async (req, res) => {
     `);
 
     const counts = {};
-    MACHINE_STATUSES.forEach(s => { counts[s] = 0; });
-    machineCounts.forEach(r => { counts[r.status] = parseInt(r.cnt); });
+    machineCounts.forEach(r => { counts[r.state] = parseInt(r.cnt); });
 
     res.json({
       total:            Object.values(counts).reduce((a, b) => a + b, 0),
@@ -79,7 +97,7 @@ router.get('/kpi', authenticate, async (req, res) => {
       maintenance:      counts.maintenance      || 0,
       breakdown:        counts.breakdown        || 0,
       cleaning:         counts.cleaning         || 0,
-      awaiting_output:  counts.awaiting_output  || 0,
+      review:           counts.review           || 0,
       completed_today:  parseInt(completedToday[0].cnt),
       expected_yield:   parseFloat(expectedYield[0].total) || 0,
     });
@@ -104,9 +122,12 @@ router.get('/machines', authenticate, async (req, res) => {
       params.push(parseInt(dept));
       where.push(`m.department_id = $${params.length}`);
     }
+    // Status filters match the DERIVED lifecycle state (active-process truth +
+    // protected overrides), not the raw machines.status cache column.
+    let derivedStatusIdx = null;
     if (status) {
       params.push(status);
-      where.push(`m.status::text = $${params.length}`);
+      derivedStatusIdx = params.length;
     }
     if (search) {
       params.push(`%${search}%`);
@@ -129,6 +150,7 @@ router.get('/machines', authenticate, async (req, res) => {
     if (length_max) subWhere.push(`dim_length <= ${parseFloat(length_max)}`);
     if (height_min) subWhere.push(`dim_height >= ${parseFloat(height_min)}`);
     if (height_max) subWhere.push(`dim_height <= ${parseFloat(height_max)}`);
+    if (derivedStatusIdx) subWhere.push(`derived_state = $${derivedStatusIdx}`);
     const subWhereClause = subWhere.length > 0 ? `WHERE ${subWhere.join(' AND ')}` : '';
 
     const { rows } = await pool.query(`
@@ -139,6 +161,10 @@ router.get('/machines', authenticate, async (req, res) => {
           m.name,
           m.type          AS machine_type,
           m.status::text  AS machine_status,
+          -- Canonical derived lifecycle state — same classification as /kpi
+          -- (machineStateModel.derivedStateSql). Cards, counts and filters all
+          -- read THIS, never the raw status cache, so they cannot contradict.
+          ${derivedStateSql('m', 'mp')} AS derived_state,
           m.department_id,
           d.name          AS department_name,
           l.name          AS location_name,
@@ -224,10 +250,10 @@ router.get('/machines', authenticate, async (req, res) => {
       ) sub
       ${subWhereClause}
       ORDER BY
-        CASE sub.machine_status
+        CASE sub.derived_state
           WHEN 'running'          THEN 1
-          WHEN 'awaiting_output'  THEN 2
-          WHEN 'hold'             THEN 3
+          WHEN 'hold'             THEN 2
+          WHEN 'review'           THEN 3
           WHEN 'breakdown'        THEN 4
           WHEN 'maintenance'      THEN 5
           WHEN 'cleaning'         THEN 6
@@ -243,7 +269,8 @@ router.get('/machines', authenticate, async (req, res) => {
       `SELECT COUNT(DISTINCT m.id) AS cnt
        FROM machines m
        LEFT JOIN machine_processes mp ON mp.machine_id = m.id AND mp.status IN ('running','hold')
-       WHERE ${where.join(' AND ')}`,
+       WHERE ${where.join(' AND ')}
+       ${derivedStatusIdx ? `AND ${derivedStateSql('m', 'mp')} = $${derivedStatusIdx}` : ''}`,
       params
     );
 
@@ -259,7 +286,7 @@ router.get('/machines', authenticate, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/alerts', authenticate, async (req, res) => {
   try {
-    const [maintenance, overdue, hold, breakdown, yieldRisk, awaitingOutput] = await Promise.all([
+    const [maintenance, overdue, hold, breakdown, yieldRisk, readyForReturn] = await Promise.all([
 
       pool.query(`
         SELECT m.id, m.code, m.name, m.next_service
@@ -308,13 +335,23 @@ router.get('/alerts', authenticate, async (req, res) => {
         ORDER  BY m.code LIMIT 20
       `),
 
+      // READY FOR RETURN — computed informational condition, NOT a lifecycle
+      // state: running process, target runtime reached, Return outstanding.
       pool.query(`
         SELECT m.id, m.code, m.name, mp.id AS process_id, mp.process_number,
                mp.process_type, mp.started_at,
-               mp.expected_rough_qty, ${RUNTIME_SQL} AS runtime_hours
+               mp.expected_rough_qty, ${RUNTIME_SQL} AS runtime_hours,
+               mp.target_runtime_hours
         FROM   machines m
         JOIN   machine_processes mp ON mp.machine_id = m.id AND mp.status = 'running'
-        WHERE  m.status::text = 'awaiting_output'
+        WHERE  mp.target_runtime_hours IS NOT NULL
+          AND  ${RUNTIME_SQL} >= mp.target_runtime_hours
+          AND  EXISTS (
+                 SELECT 1 FROM lot_process_issues lpi
+                 WHERE lpi.machine_process_id = mp.id
+                   AND lpi.status = 'OPEN'
+                   AND COALESCE(lpi.remaining_in_process, 0) > 0
+               )
         ORDER  BY mp.started_at LIMIT 20
       `),
     ]);
@@ -325,7 +362,7 @@ router.get('/alerts', authenticate, async (req, res) => {
       hold:             hold.rows,
       breakdown:        breakdown.rows,
       yield_risk:       yieldRisk.rows,
-      awaiting_output:  awaitingOutput.rows,
+      ready_for_return: readyForReturn.rows,
     });
   } catch (err) {
     logger.error('alerts error', { error: err.message, stack: err.stack });
@@ -744,11 +781,13 @@ router.patch('/processes/:id/complete', authenticate, async (req, res) => {
     await client.query("SET LOCAL statement_timeout = '25000ms'");
     const { rows } = await client.query(
       `SELECT mp.*,
+              pm.completion_mode,
               COALESCE(pm.process_group,
                        CASE WHEN mp.process_type = 'growth' THEN 'GROWTH' ELSE 'OTHER' END) AS process_group
          FROM machine_processes mp
          LEFT JOIN process_master pm ON pm.process_code = mp.process_type
-        WHERE mp.id = $1`,
+        WHERE mp.id = $1
+        FOR UPDATE OF mp`,
       [req.params.id]
     );
     if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Process not found' }); }
@@ -756,6 +795,32 @@ router.patch('/processes/:id/complete', authenticate, async (req, res) => {
     if (!['running','hold'].includes(proc.status)) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Process is not active' });
+    }
+
+    // ── Return-engine ownership guard ────────────────────────────────────────
+    // RETURN_BASED processes (and ALL Growth-group processes, regardless of a
+    // stale completion_mode row) complete ONLY through Process Return. Reject
+    // BEFORE any inventory / issue / machine_process / machine / history write
+    // so an old client, stale bundle or direct API call cannot bypass the
+    // Return Engine.
+    if (requiresReturnEngineCompletion({
+      completionMode: proc.completion_mode,
+      processGroup: proc.process_group,
+    })) {
+      const { rows: navIssues } = await client.query(
+        `SELECT id FROM lot_process_issues
+          WHERE machine_process_id = $1 AND status = 'OPEN'
+            AND COALESCE(remaining_in_process, 0) > 0
+          ORDER BY id ASC`,
+        [proc.id]
+      );
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: RETURN_ENGINE_REQUIRED_MESSAGE,
+        machine_process_id: proc.id,
+        returnable_issue_id: navIssues.length === 1 ? navIssues[0].id : null,
+        returnable_issue_count: navIssues.length,
+      });
     }
 
     const isGrowth = String(proc.process_group || '').toUpperCase() === 'GROWTH';
@@ -965,12 +1030,13 @@ router.patch('/machines/:id/status', authenticate, async (req, res) => {
         const proc = activeProcs[0];
         if (proc.open_issues > 0) {
           finalStatus = proc.status === 'running' ? 'running' : 'hold';
-        } else if (proc.completion_mode === 'OUTPUT_BASED') {
-          finalStatus = 'awaiting_output';
         } else if (proc.completion_mode === 'RETURN_BASED') {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: 'Conflict: The active process has been fully returned but remains active. This is an inconsistent state that cannot be cleared by a manual idle action.' });
         } else {
+          // awaiting_output is retired: an OUTPUT_BASED process with all issues
+          // returned keeps its true active state until output posting completes
+          // it — the READY FOR RETURN badge is computed, never a status write.
           finalStatus = proc.status === 'running' ? 'running' : 'hold';
         }
       }
