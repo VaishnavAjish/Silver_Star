@@ -228,7 +228,7 @@ router.get('/machines', authenticate, async (req, res) => {
             FROM machine_processes cmp
             LEFT JOIN inventory cgr
                    ON cgr.machine_process_id = cmp.id
-                  AND cgr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+                  AND cgr.item_id IN (SELECT id FROM items WHERE category IN ('growth_run','growth_diamond'))
             WHERE cmp.machine_id = m.id
               AND cmp.status = 'completed'
               AND cmp.completed_at IS NOT NULL
@@ -244,7 +244,7 @@ router.get('/machines', authenticate, async (req, res) => {
         LEFT JOIN users u ON u.id = mp.operator_id
         LEFT JOIN inventory gr
                ON gr.machine_process_id = mp.id
-              AND gr.item_id = (SELECT id FROM items WHERE category = 'growth_run' LIMIT 1)
+              AND gr.item_id IN (SELECT id FROM items WHERE category IN ('growth_run','growth_diamond'))
         WHERE ${where.join(' AND ')}
         ORDER BY m.id, CASE mp.status WHEN 'running' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END
       ) sub

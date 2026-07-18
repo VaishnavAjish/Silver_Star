@@ -403,15 +403,12 @@ export default function LotIssueListPage() {
             <button className="btn btn-primary"
               onClick={() => {
                 setShowModal(false);
-                // Correction 2,3,4: Growth Runs must use the new Control Tower Return dialog.
-                if (detail.category === 'growth_run' && detail.process_type === 'growth') {
-                  navigate('/manufacturing/control-tower');
-                } else {
-                  navigate(`/inventory/process-issues/${detail.id}/return`);
-                }
+                // The Return Engine is the only completion path — Growth Runs
+                // included. The legacy Control Tower completion dialog is retired.
+                navigate(`/inventory/process-issues/${detail.id}/return`);
               }}
             >
-              <RotateCcw size={12} /> {(detail.category === 'growth_run' && detail.process_type === 'growth') ? 'Complete Growth Run' : 'Record Return'}
+              <RotateCcw size={12} /> Record Return
             </button>
           </div>
         ) : undefined}
