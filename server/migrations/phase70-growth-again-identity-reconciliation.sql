@@ -1,35 +1,31 @@
 -- ============================================================================
--- PHASE 70 — GUARDED GROWTH-AGAIN IDENTITY RECONCILIATION (100594 / 100867)
+-- PHASE 70 — GUARDED GROWTH-AGAIN IDENTITY RECONCILIATION (220 / 493)
 --
 -- Purpose: collapse the duplicate Growth identity created when Growth Diamond
--- SSD013-APR26-011 (inventory 100594) was re-issued to a GROWTH process and
+-- SSD013-APR26-011 (inventory 220) was re-issued to a GROWTH process and
 -- the legacy Step 6 minted a NEW Partial Growth Run SSD001-JUL26-055
--- (inventory 100867) for the SAME physical carrier. Root cause is fixed in
+-- (inventory 493) for the SAME physical carrier. Root cause is fixed in
 -- code (services/growthCarrier.js + routes/lotProcessIssues.js); this script
 -- repairs the ONE frozen production pair.
 --
 -- End state (exactly ONE active physical carrier):
---   * 100594 stays the active IN PROCESS carrier, Run advanced R1 → R2 (the
+--   * 220 stays the active IN PROCESS carrier, Run advanced R1 → R2 (the
 --     Growth Again that DID physically happen), wrong ATTACHED_TO_GROWTH
 --     cleared. Identity, lot, Growth Number, root, qty, weight, value and
 --     genealogy untouched.
---   * 100867 neutralized per existing reversal conventions: CONSUMED +
+--   * 493 neutralized per existing reversal conventions: CONSUMED +
 --     RETIRED, qty/weight/value zeroed (it never carried value), detached
 --     from the machine process so it can never resolve as a biscuit
 --     candidate again. History rows are KEPT — no hard delete.
 --   * Issue / machine_process / machine_process_lots already reference
---     100594 (verified as a precondition) — nothing else is rewired.
+--     220 (verified as a precondition) — nothing else is rewired.
 --
 -- Guarded: every precondition RAISES and ROLLS BACK the whole transaction.
 -- Idempotent: a second run is a NOTICE no-op once the end state holds.
--- Guard logic mirrored (unit-tested) in services/growthIdentityReconciliation.js.
---
--- Run the read-only diagnostic FIRST and keep its output:
---   server/sql/growth-again-identity-diagnostic.sql
 --
 -- OWNER APPROVAL REQUIRED before running. Not applied automatically, never at
 -- application startup. Run on EC2:
---   psql -U postgres -d silverstar_grow \
+--   PGPASSWORD='...' psql -h <host> -U postgres -d silverstar_grow \
 --     -f server/migrations/phase70-growth-again-identity-reconciliation.sql
 -- ============================================================================
 
@@ -40,8 +36,8 @@ SET LOCAL statement_timeout = '15s';
 
 DO $$
 DECLARE
-  c_original_id  CONSTANT integer := 100594;
-  c_duplicate_id CONSTANT integer := 100867;
+  c_original_id  CONSTANT integer := 220;
+  c_duplicate_id CONSTANT integer := 493;
   c_original_lot  CONSTANT text := 'SSD013-APR26-011';
   c_duplicate_lot CONSTANT text := 'SSD001-JUL26-055';
 
@@ -137,18 +133,24 @@ BEGIN
   IF v_cnt > 0 THEN
     RAISE EXCEPTION 'phase70: duplicate referenced by % issue(s) — downstream activity — aborting', v_cnt;
   END IF;
-  SELECT count(*) INTO v_cnt FROM process_return_lines WHERE lot_id = c_duplicate_id;
+  SELECT count(*) INTO v_cnt FROM lot_process_returns WHERE lot_id = c_duplicate_id;
   IF v_cnt > 0 THEN
-    RAISE EXCEPTION 'phase70: duplicate referenced by % return line(s) — downstream activity — aborting', v_cnt;
+    RAISE EXCEPTION 'phase70: duplicate referenced by % return row(s) — downstream activity — aborting', v_cnt;
   END IF;
-  SELECT count(*) INTO v_cnt FROM growth_run_cycles WHERE growth_run_id = c_duplicate_id;
-  IF v_cnt > 0 THEN
-    RAISE EXCEPTION 'phase70: duplicate has % growth cycle(s) — downstream activity — aborting', v_cnt;
+  -- Guard: growth_run_cycles may not exist yet on production — check safely.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE tablename = 'growth_run_cycles') THEN
+    EXECUTE 'SELECT count(*) FROM growth_run_cycles WHERE growth_run_id = $1' INTO v_cnt USING c_duplicate_id;
+    IF v_cnt > 0 THEN
+      RAISE EXCEPTION 'phase70: duplicate has % growth cycle(s) — downstream activity — aborting', v_cnt;
+    END IF;
   END IF;
-  SELECT count(*) INTO v_cnt FROM lot_mix_components
-   WHERE mixed_lot_id = c_duplicate_id OR source_lot_id = c_duplicate_id;
-  IF v_cnt > 0 THEN
-    RAISE EXCEPTION 'phase70: duplicate has % mix component link(s) — downstream activity — aborting', v_cnt;
+  -- Guard: lot_mix_components may not exist — check safely.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE tablename = 'lot_mix_components') THEN
+    EXECUTE 'SELECT count(*) FROM lot_mix_components WHERE mixed_lot_id = $1 OR source_lot_id = $1'
+      INTO v_cnt USING c_duplicate_id;
+    IF v_cnt > 0 THEN
+      RAISE EXCEPTION 'phase70: duplicate has % mix component link(s) — downstream activity — aborting', v_cnt;
+    END IF;
   END IF;
   SELECT count(*) INTO v_cnt FROM inventory
    WHERE parent_lot_id = c_duplicate_id
@@ -156,9 +158,12 @@ BEGIN
   IF v_cnt > 0 THEN
     RAISE EXCEPTION 'phase70: duplicate has % child lot(s) — downstream activity — aborting', v_cnt;
   END IF;
-  SELECT count(*) INTO v_cnt FROM machine_process_lots WHERE inventory_lot_id = c_duplicate_id;
-  IF v_cnt > 0 THEN
-    RAISE EXCEPTION 'phase70: duplicate linked in % machine_process_lots row(s) — downstream activity — aborting', v_cnt;
+  -- Guard: machine_process_lots may not exist — check safely.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE tablename = 'machine_process_lots') THEN
+    EXECUTE 'SELECT count(*) FROM machine_process_lots WHERE inventory_lot_id = $1' INTO v_cnt USING c_duplicate_id;
+    IF v_cnt > 0 THEN
+      RAISE EXCEPTION 'phase70: duplicate linked in % machine_process_lots row(s) — downstream activity — aborting', v_cnt;
+    END IF;
   END IF;
   SELECT count(*) INTO v_cnt FROM lot_op_log
    WHERE lot_id = c_duplicate_id AND operation <> 'growth_run_created';
