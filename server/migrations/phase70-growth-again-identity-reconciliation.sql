@@ -207,13 +207,13 @@ BEGIN
   INSERT INTO lot_op_log
     (lot_id, operation, reference_type, reference_id, qty_delta, new_status, notes, performed_by)
   VALUES
-    (c_original_id, 'growth_again_identity_reconciliation', 'machine_process',
+    (c_original_id, 'ga_identity_reconcile', 'machine_process',
      v_orig.machine_process_id, 0, 'IN PROCESS',
      'GROWTH_AGAIN_IDENTITY_RECONCILIATION | carrier ' || c_original_lot
        || ' confirmed as the single Growth identity; Run R1 -> R2; wrong '
        || 'ATTACHED_TO_GROWTH cleared; duplicate ' || c_duplicate_lot
        || ' (inventory ' || c_duplicate_id || ') neutralized', NULL),
-    (c_duplicate_id, 'growth_again_identity_reconciliation', 'machine_process',
+    (c_duplicate_id, 'ga_identity_reconcile', 'machine_process',
      v_orig.machine_process_id, 0, 'CONSUMED',
      'GROWTH_AGAIN_IDENTITY_RECONCILIATION | duplicate identity of '
        || c_original_lot || ' (inventory ' || c_original_id
