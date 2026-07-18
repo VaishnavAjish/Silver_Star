@@ -263,7 +263,9 @@ export default function ClipboardPage() {
                         setManualId(text);
                         await handleManualAdd(text);
                       }
-                    } catch (err) {}
+                    } catch (err) {
+                      toast.error('Auto-paste blocked by browser! Please click the 🔒 Lock icon near the URL bar and "Allow" Clipboard permissions.', { id: 'clip-err', duration: 6000 });
+                    }
                   }
                 }}
                 placeholder="Add Lot ID / Barcode..."
