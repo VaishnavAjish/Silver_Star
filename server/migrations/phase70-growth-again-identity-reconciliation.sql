@@ -133,7 +133,9 @@ BEGIN
   IF v_cnt > 0 THEN
     RAISE EXCEPTION 'phase70: duplicate referenced by % issue(s) — downstream activity — aborting', v_cnt;
   END IF;
-  SELECT count(*) INTO v_cnt FROM lot_process_returns WHERE lot_id = c_duplicate_id;
+  SELECT count(*) INTO v_cnt FROM lot_process_returns r
+   JOIN lot_process_issues lpi ON lpi.id = r.issue_id
+   WHERE lpi.source_lot_id = c_duplicate_id OR lpi.process_lot_id = c_duplicate_id;
   IF v_cnt > 0 THEN
     RAISE EXCEPTION 'phase70: duplicate referenced by % return row(s) — downstream activity — aborting', v_cnt;
   END IF;
