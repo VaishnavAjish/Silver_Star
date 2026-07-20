@@ -47,7 +47,7 @@ const ROOT_PATHS = new Set([
 // this component only renders. Groups are accessible <button>s with
 // aria-expanded; compact mode is icon-only with tooltips (a group header in
 // compact mode opens its first child).
-function SidebarItem({ item, onNavigate, compact, collapsedSet, onToggleCollapse }) {
+function SidebarItem({ item, onNavigate, compact, navState, onToggleCollapse }) {
   const location = useLocation();
 
   // Direct link (no children)
@@ -74,8 +74,10 @@ function SidebarItem({ item, onNavigate, compact, collapsedSet, onToggleCollapse
   const isActive = children.some(c =>
     c.path && (location.pathname === c.path || location.pathname.startsWith(c.path + '/'))
   );
-  // Default expanded; user may collapse. An active section always shows open.
-  const expanded = compact ? false : (!collapsedSet.has(item.id) || isActive);
+  
+  // Default expanded only if active.
+  const isExpandedDefault = isActive;
+  const expanded = compact ? false : (navState[item.id] !== undefined ? navState[item.id] : isExpandedDefault);
 
   const onHeader = (e) => {
     if (compact) {
@@ -83,7 +85,7 @@ function SidebarItem({ item, onNavigate, compact, collapsedSet, onToggleCollapse
       const first = children[0];
       if (first) onNavigate(first, item, e);
     } else {
-      onToggleCollapse(item.id);
+      onToggleCollapse(item.id, expanded);
     }
   };
 
@@ -125,17 +127,16 @@ function LayoutInner() {
   const { user, logout, hasPermission, hasRole } = useAuth();
 
   // Sidebar UI state (device-local): compact icon-only mode + remembered
-  // collapsed sections. Stored in localStorage for instant first paint.
+  // expanded sections. Stored in localStorage for instant first paint.
   const [compact, setCompact] = useState(() => localStorage.getItem('nav.compact') === '1');
-  const [collapsedSet, setCollapsedSet] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('nav.collapsed') || '[]')); }
-    catch { return new Set(); }
+  const [navState, setNavState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nav.state') || '{}'); }
+    catch { return {}; }
   });
   const toggleCompact = () => setCompact(v => { const n = !v; localStorage.setItem('nav.compact', n ? '1' : '0'); return n; });
-  const toggleCollapse = (id) => setCollapsedSet(prev => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    localStorage.setItem('nav.collapsed', JSON.stringify([...next]));
+  const toggleCollapse = (id, currentExpanded) => setNavState(prev => {
+    const next = { ...prev, [id]: !currentExpanded };
+    localStorage.setItem('nav.state', JSON.stringify(next));
     return next;
   });
 
@@ -350,7 +351,7 @@ function LayoutInner() {
               item={item}
               onNavigate={handleNavigate}
               compact={compact}
-              collapsedSet={collapsedSet}
+              navState={navState}
               onToggleCollapse={toggleCollapse}
             />
           ))}
