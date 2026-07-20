@@ -161,15 +161,15 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
       item_type: 'i.type',
       item_reorder_level: 'i.reorder_level',
       // Location fields
-      location_id: 'inv.location_id',
-      location_name: 'l.name',
+      location_id: 'COALESCE(inv.location_id, m.location_id)',
+      location_name: 'COALESCE(l.name, ml.name)',
       // Vendor fields
       vendor_id: 'inv.vendor_id',
       vendor_name: 'v.name',
       // Department fields
-      department_id: 'inv.department_id',
-      dept_name: 'd.name',
-      dept_location_name: 'dl.name',
+      department_id: 'COALESCE(inv.department_id, m.department_id)',
+      dept_name: 'COALESCE(d.name, md.name)',
+      dept_location_name: 'COALESCE(dl.name, mdl.name)',
       // Parent/Root lot fields
       parent_lot_name: 'COALESCE(pl.lot_code, pl.lot_number)',
       root_lot_name: 'COALESCE(rl.lot_code, rl.lot_number)',
@@ -191,6 +191,10 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
              LEFT JOIN inventory pl ON pl.id = inv.parent_lot_id
              LEFT JOIN inventory rl ON rl.id = inv.root_lot_id
              LEFT JOIN machine_processes mp ON mp.id = inv.machine_process_id
+             LEFT JOIN machines m ON mp.machine_id = m.id
+             LEFT JOIN departments md ON m.department_id = md.id
+             LEFT JOIN locations ml ON m.location_id = ml.id
+             LEFT JOIN locations mdl ON md.location_id = mdl.id
              LEFT JOIN process_master pm ON pm.process_code = mp.process_type
              LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = inv.id AND lpi.status = 'OPEN'
              LEFT JOIN process_master pm2 ON pm2.process_code = lpi.process_type
