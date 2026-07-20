@@ -138,14 +138,21 @@ function classifyGrowthIssueLots({ isGrowthGroup, lots }) {
  * @param {{ category?: string|null, name?: string|null }} item
  * @returns {'growth_run'|'growth_diamond'|null}
  */
-function resolveCarrierCategory({ category, name } = {}) {
+const CARRIER_NAME_ALIASES = Object.freeze([
+  { category: 'growth_run',     pattern: /^(partial\s+)?growth\s+run$/ },
+  { category: 'growth_diamond', pattern: /^growth\s+diamond$/ },
+]);
+
+function resolveCarrierCategory({ category, name } = {}, aliases = CARRIER_NAME_ALIASES) {
   const cat = String(category || '').toLowerCase().trim();
   if (GROWTH_CARRIER_CATEGORIES.includes(cat)) return cat;
-  if (cat) return null; // explicit non-carrier category (seed, rough, …)
+  if (cat) return null; // explicit non-carrier category (seed, rough, …) is authoritative
   const n = String(name || '').toLowerCase().trim();
-  if (/^(partial\s+)?growth\s+run$/.test(n)) return 'growth_run';
-  if (/^growth\s+diamond$/.test(n)) return 'growth_diamond';
-  return null;
+  const matches = aliases.filter(a => a.pattern.test(n));
+  // Deterministic alias resolution: exactly ONE approved canonical match
+  // classifies; zero or MULTIPLE matches stay unresolved (fail closed) —
+  // an ambiguous legacy item is never chosen LIMIT-1 style.
+  return matches.length === 1 ? matches[0].category : null;
 }
 
 /**
@@ -168,6 +175,7 @@ module.exports = {
   classifyGrowthIssueLots,
   RUN_INCREMENT_SQL,
   nextRunNo,
+  CARRIER_NAME_ALIASES,
   resolveCarrierCategory,
   isIdentityPreservingGrowthCarrier,
 };

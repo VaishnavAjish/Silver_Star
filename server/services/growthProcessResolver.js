@@ -19,6 +19,9 @@ const CANONICAL_GROWTH_PROCESS_CODES = Object.freeze(['pr-01', 'growth']);
 const GROWTH_PROCESS_UNRESOLVED_MESSAGE =
   'Growth carrier process classification is unresolved. No lot was created.';
 
+const RETURN_PROCESS_UNRESOLVED_MESSAGE =
+  'Return process classification is unresolved. No inventory or process state was changed.';
+
 /**
  * Resolve whether a process is a Growth process from stable Process Master
  * data. Client-provided display strings are never consulted; an explicit
@@ -65,5 +68,6 @@ function resolveGrowthProcessContext({ processMasterId = null, processCode = nul
 module.exports = {
   CANONICAL_GROWTH_PROCESS_CODES,
   GROWTH_PROCESS_UNRESOLVED_MESSAGE,
+  RETURN_PROCESS_UNRESOLVED_MESSAGE,
   resolveGrowthProcessContext,
 };

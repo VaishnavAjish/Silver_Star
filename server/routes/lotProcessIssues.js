@@ -14,6 +14,7 @@ const {
 const {
   resolveGrowthProcessContext,
   GROWTH_PROCESS_UNRESOLVED_MESSAGE,
+  RETURN_PROCESS_UNRESOLVED_MESSAGE,
 } = require('../services/growthProcessResolver');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
@@ -1196,8 +1197,16 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
       processCode: issue.process_type, processGroup: issue.process_group,
     });
     const isGrowthGroupIssue = validateCtx.isGrowthProcess;
-    const isGrowthRunInput = !!processLot &&
-      resolveCarrierCategory({ category: processLot.category, name: processLot.item_name }) === 'growth_run';
+    const validateCarrierCategory = processLot
+      ? resolveCarrierCategory({ category: processLot.category, name: processLot.item_name })
+      : null;
+    // Fail closed (mirrors the posting endpoint): a carrier on an UNRESOLVED
+    // process classification is never routed — Growth must be proven, and
+    // known non-Growth processes keep their configured routes.
+    if (validateCarrierCategory && !validateCtx.isResolved) {
+      return res.json({ valid: false, route: 'REJECT', error: RETURN_PROCESS_UNRESOLVED_MESSAGE });
+    }
+    const isGrowthRunInput = validateCarrierCategory === 'growth_run';
     let biscuit = null;
     let biscuitCandidateCount = 0;
     if (isGrowthGroupIssue && !isGrowthRunInput && issue.machine_process_id) {
@@ -1391,14 +1400,23 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       processCode: issue.process_type, processGroup: issue.process_group,
     });
     const isGrowthGroupIssue = returnCtx.isGrowthProcess;
-    // Growth-Again identity: a growth_diamond block returned from a GROWTH
-    // process is the SAME identity-preserving carrier as a growth_run biscuit —
-    // it returns in place (no child lot, never consumed). Outside GROWTH
-    // (laser ops, Final Block transform) growth_diamond keeps its legacy
-    // routes. An UNRESOLVED process classification ALSO routes in place:
-    // the fail-safe is identity preservation, never generic child-lot output.
+    // Fail closed: a carrier returned through an UNRESOLVED process
+    // classification is rejected BEFORE any write (no Return row, no
+    // inventory/issue/machine change). A Growth Diamond legitimately flows
+    // through known non-Growth workflows (Final Block transform, laser ops) —
+    // unresolved must never be assumed to be Growth, and must never fall
+    // through to a generic allowed_outputs rule.
+    if (carrierCategory && !returnCtx.isResolved) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: RETURN_PROCESS_UNRESOLVED_MESSAGE });
+    }
+    // Growth-Again identity: a growth_diamond block returned from a PROVEN
+    // GROWTH process is the SAME identity-preserving carrier as a growth_run
+    // biscuit — it returns in place (no child lot, never consumed). On proven
+    // non-Growth processes (laser ops, Final Block transform) growth_diamond
+    // keeps its configured process-specific routes.
     const isGrowthCarrier =
-      isGrowthRun || (carrierCategory === 'growth_diamond' && (returnCtx.isGrowthProcess || !returnCtx.isResolved));
+      isGrowthRun || (carrierCategory === 'growth_diamond' && returnCtx.isGrowthProcess);
 
     // Phase C: COMPONENT mode (Seed Remove) legitimately posts multiple lines
     // against a biscuit input — the single-disposition rule is QUANTITY-only.

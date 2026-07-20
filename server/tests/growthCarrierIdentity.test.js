@@ -100,8 +100,37 @@ test('no identity-bearing carrier can reach the generic child-lot branch', () =>
   assert.ok(invariantAt > -1, 'defensive invariant present');
   assert.ok(childCodeAt > -1, 'generic child-lot branch still exists for non-carriers');
   assert.ok(invariantAt < childCodeAt, 'invariant throws BEFORE nextReturnLotCode/INSERT');
-  assert.match(lpiSrc, /carrierCategory === 'growth_diamond' && \(returnCtx\.isGrowthProcess \|\| !returnCtx\.isResolved\)/,
-    'unresolved classification routes the diamond in place — fail-safe is identity preservation');
+  assert.match(lpiSrc, /carrierCategory === 'growth_diamond' && returnCtx\.isGrowthProcess/,
+    'a diamond returns in place ONLY on a PROVEN Growth process — known non-Growth ' +
+    'processes (Final Block transform, laser) keep their configured routes');
+});
+
+test('unresolved return process fails closed with 409 BEFORE any write', () => {
+  const postStart = lpiSrc.indexOf("router.post('/:id/return',");
+  const body = lpiSrc.slice(postStart);
+  const rejectAt = body.indexOf('return res.status(409).json({ error: RETURN_PROCESS_UNRESOLVED_MESSAGE });');
+  assert.ok(rejectAt > -1, 'carrier + unresolved classification → 409');
+  const firstReturnInsert = body.indexOf('INSERT INTO lot_process_returns');
+  const firstIssueUpdate  = body.indexOf('UPDATE lot_process_issues');
+  const firstInvWrite     = body.search(/UPDATE\s+inventory|INSERT\s+INTO\s+inventory/);
+  assert.ok(firstReturnInsert > -1 && rejectAt < firstReturnInsert, 'rejects before the Return INSERT');
+  assert.ok(firstIssueUpdate > -1 && rejectAt < firstIssueUpdate, 'rejects before any Issue update');
+  assert.ok(firstInvWrite > -1 && rejectAt < firstInvWrite, 'rejects before any inventory write');
+  assert.match(lpiSrc, /route: 'REJECT', error: RETURN_PROCESS_UNRESOLVED_MESSAGE/,
+    'validate preflight mirrors the same fail-closed rejection');
+});
+
+test('alias resolution is deterministic: one match classifies, many or none stay unresolved', () => {
+  const dup = [
+    { category: 'growth_run', pattern: /^ambiguous legacy item$/ },
+    { category: 'growth_diamond', pattern: /^ambiguous legacy item$/ },
+  ];
+  assert.equal(resolveCarrierCategory({ category: null, name: 'Ambiguous Legacy Item' }, dup), null,
+    'multiple canonical matches are unresolved — never a LIMIT-1 style pick');
+  assert.equal(resolveCarrierCategory({ category: null, name: 'Growth Diamond' }), 'growth_diamond',
+    'exactly one canonical alias match is accepted');
+  assert.equal(resolveCarrierCategory({ category: 'rough', name: 'Growth Diamond' }), null,
+    'an explicit Rough category can never be promoted through its name');
 });
 
 test('Seed Remove COMPONENT splits remain the approved exception', () => {
