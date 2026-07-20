@@ -7,8 +7,14 @@ const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowt
 // unit-tested in tests/growthAgainIdentity.test.js.
 const {
   isGrowthCarrierCategory, appliesSeedAttachment, classifyGrowthIssueLots,
-  RUN_INCREMENT_SQL,
+  RUN_INCREMENT_SQL, resolveCarrierCategory, isIdentityPreservingGrowthCarrier,
 } = require('../services/growthCarrier');
+// Canonical Growth process resolution (pr-01 included) — fail-closed for
+// carriers when the process classification cannot be resolved.
+const {
+  resolveGrowthProcessContext,
+  GROWTH_PROCESS_UNRESOLVED_MESSAGE,
+} = require('../services/growthProcessResolver');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
@@ -452,15 +458,22 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         throw new Error(`Unknown or inactive process type: '${normalizedPType}'. Configure it in Management → Process Master.`);
       const processRules = pmRows[0];
 
-      // Growth Run state machine: is this a GROWTH-group process? (Growth Again
-      // re-issues an existing biscuit back into a growth chamber.)
-      const isGrowthGroup =
-        String(processRules.process_group || (normalizedPType === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+      // Growth Run state machine: is this a GROWTH-group process? Resolved
+      // from stable Process Master data (canonical pr-01 included) — never a
+      // client label, never the old `=== 'growth'` fallback that let a
+      // carrier slip into generic output handling when process_group was null.
+      const growthCtx = resolveGrowthProcessContext({
+        processMasterId: processRules.id,
+        processCode: normalizedPType,
+        processGroup: processRules.process_group,
+      });
+      const isGrowthGroup = growthCtx.isGrowthProcess;
       // Set true when an existing Growth carrier (growth_run biscuit OR
       // growth_diamond block) is re-issued to a growth process, so Step 6
       // reuses the SAME inventory row instead of minting a new Growth Run.
       let isGrowthAgain = false;
       let growthAgainCarrierId = null;
+      let growthAgainCarrierRootLotId = null;
 
       // Enforce inventory rules
       if (processRules.requires_inventory && !lotsArr.length)
@@ -538,10 +551,34 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // is locked so a concurrent duplicate Issue serializes on the row lock
       // and then fails the IN STOCK gate here. Rejects rough inputs, multiple
       // carriers, carrier+seed mixes, and partial growth_diamond re-issues.
+      // Fail-closed: an identity-bearing Growth carrier may never be issued
+      // through an UNRESOLVED process classification — the silent fallback to
+      // generic handling is exactly how '-R1' child lots were minted.
+      if (!growthCtx.isResolved &&
+          lockedLots.some(({ lot }) => isIdentityPreservingGrowthCarrier(lot, null))) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: GROWTH_PROCESS_UNRESOLVED_MESSAGE });
+      }
+      // In a resolved Growth issue every lot must be classifiable: a legacy
+      // row with NO category that matches no approved carrier alias is
+      // ambiguous — reject instead of guessing (and instead of letting it
+      // create a child lot later).
+      if (isGrowthGroup) {
+        const ambiguous = lockedLots.find(({ lot }) =>
+          !String(lot.category || '').trim() && !isIdentityPreservingGrowthCarrier(lot, null));
+        if (ambiguous) {
+          throw new Error(
+            `Lot ${ambiguous.lot.lot_number} has no Item Master category and matches no approved ` +
+            'Growth carrier alias — fix the item record before issuing it to a Growth process.'
+          );
+        }
+      }
       const growthClassification = classifyGrowthIssueLots({
         isGrowthGroup,
         lots: lockedLots.map(({ lot, qty }) => ({
-          category: lot.category,
+          // Alias-resolved category so a canonical carrier with an incomplete
+          // legacy category row still classifies as a carrier.
+          category: resolveCarrierCategory({ category: lot.category, name: lot.item_name }) || lot.category,
           status: lot.status,
           lotNumber: lot.lot_number,
           requestedQty: qty,
@@ -592,11 +629,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // inventory row — its id never changes through the laser stage. We
         // reference the biscuit directly and skip child-lot minting entirely,
         // so no phantom GR-xxxx-IP lots are ever created.
-        const isGrowthRun = lot.category === 'growth_run';
+        const carrierCategory = resolveCarrierCategory({ category: lot.category, name: lot.item_name });
+        const isGrowthRun = carrierCategory === 'growth_run';
         // Growth-Again identity: growth_run AND growth_diamond are both
         // identity-preserving carriers when entering a GROWTH process — the
         // SAME row re-grows; no clone, no seed attachment, no new Growth Run.
-        const isGrowthCarrier = isGrowthCarrierCategory(lot.category);
+        // Resolved via canonical Item Master identity (legacy aliases included).
+        const isGrowthCarrier = carrierCategory !== null;
 
         // RULE 1: Issuing a lot to a process is NOT a physical split. The lot
         // already exists (the legitimate split happened upstream, e.g. 1019 →
@@ -695,7 +734,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // Growth Again) is NEVER a seed attachment — it IS the growth identity.
         // The source-lot remainder stays NULL (AVAILABLE).
         // Requires phase62 — deploy coupling documented in the migration.
-        if (appliesSeedAttachment(lot.category, isGrowthGroup)) {
+        if (appliesSeedAttachment(carrierCategory || lot.category, isGrowthGroup)) {
           await client.query(
             `UPDATE inventory SET manufacturing_state = 'ATTACHED_TO_GROWTH', updated_at = NOW()
              WHERE id = $1`,
@@ -724,11 +763,15 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           if (isGrowthCarrier && isGrowthGroup) {   // re-growing an existing carrier (Growth Again)
             isGrowthAgain = true;
             growthAgainCarrierId = lot.id;
+            growthAgainCarrierRootLotId = lot.root_lot_id ?? null;
           }
-          await client.query(
+          const inPlaceUpd = await client.query(
             `UPDATE inventory SET status='IN PROCESS', machine_process_id=$1, updated_at=NOW() WHERE id=$2`,
             [machProc.id, lot.id]
           );
+          if (inPlaceUpd.rowCount !== 1) {
+            throw new Error(`Issue aborted: expected to move exactly one inventory row (#${lot.id}) IN PROCESS, updated ${inPlaceUpd.rowCount}.`);
+          }
         } else if (rough) {
           await client.query(
             `UPDATE inventory SET qty=$1, weight=$2, total_value=$3, status=$4, updated_at=NOW() WHERE id=$5`,
@@ -819,12 +862,21 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       //    genealogy stay untouched.
       let growthRun = null;
       if (isGrowthAgain) {
-        const { rows: [carrier] } = await client.query(
+        const runUpd = await client.query(
           `UPDATE inventory SET run_no = ${RUN_INCREMENT_SQL}, updated_at = NOW()
            WHERE id = $1
            RETURNING *`,
           [growthAgainCarrierId]
         );
+        // Same-row contract assertions: exactly one carrier row advanced, and
+        // its Root Lot / genealogy anchor is untouched by the re-issue.
+        if (runUpd.rowCount !== 1) {
+          throw new Error(`Growth Again aborted: expected to advance the Run on exactly one carrier row (#${growthAgainCarrierId}), updated ${runUpd.rowCount}.`);
+        }
+        const carrier = runUpd.rows[0];
+        if (String(carrier.root_lot_id ?? '') !== String(growthAgainCarrierRootLotId ?? '')) {
+          throw new Error('Growth Again aborted: carrier root_lot_id changed during re-issue — identity invariant violated.');
+        }
         growthRun = carrier;
         await logOp(client, carrier.id, 'growth_again', 'machine_process', machProc.id,
           0, 'IN PROCESS',
@@ -1140,9 +1192,12 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     );
     const processLot = lotRows[0] || null;
 
-    const isGrowthGroupIssue =
-      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
-    const isGrowthRunInput = !!processLot && processLot.category === 'growth_run';
+    const validateCtx = resolveGrowthProcessContext({
+      processCode: issue.process_type, processGroup: issue.process_group,
+    });
+    const isGrowthGroupIssue = validateCtx.isGrowthProcess;
+    const isGrowthRunInput = !!processLot &&
+      resolveCarrierCategory({ category: processLot.category, name: processLot.item_name }) === 'growth_run';
     let biscuit = null;
     let biscuitCandidateCount = 0;
     if (isGrowthGroupIssue && !isGrowthRunInput && issue.machine_process_id) {
@@ -1325,21 +1380,25 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     const processLot = lotRows[0];
 
     const isSeed     = processLot.category === 'seed';
+    const carrierCategory = resolveCarrierCategory({ category: processLot.category, name: processLot.item_name });
     // Genealogy fix: a Growth Run (biscuit) is a SINGLE lifecycle record. When it
     // is returned from a downstream process (laser ops, etc.) the engine must NOT
     // clone it into a `-R1` child lot and must NOT consume the original — the
     // biscuit stays in place. (The issue side was already guarded by FIX 2; this
     // is the symmetric guard on the return side.)
-    const isGrowthRun = processLot.category === 'growth_run';
-    const isGrowthGroupIssue =
-      String(issue.process_group || (issue.process_type === 'growth' ? 'GROWTH' : 'OTHER')).toUpperCase() === 'GROWTH';
+    const isGrowthRun = carrierCategory === 'growth_run';
+    const returnCtx = resolveGrowthProcessContext({
+      processCode: issue.process_type, processGroup: issue.process_group,
+    });
+    const isGrowthGroupIssue = returnCtx.isGrowthProcess;
     // Growth-Again identity: a growth_diamond block returned from a GROWTH
     // process is the SAME identity-preserving carrier as a growth_run biscuit —
     // it returns in place (no child lot, never consumed). Outside GROWTH
     // (laser ops, Final Block transform) growth_diamond keeps its legacy
-    // routes. Mirrors buildReturnPlan's carrier rule.
+    // routes. An UNRESOLVED process classification ALSO routes in place:
+    // the fail-safe is identity preservation, never generic child-lot output.
     const isGrowthCarrier =
-      isGrowthRun || (processLot.category === 'growth_diamond' && isGrowthGroupIssue);
+      isGrowthRun || (carrierCategory === 'growth_diamond' && (returnCtx.isGrowthProcess || !returnCtx.isResolved));
 
     // Phase C: COMPONENT mode (Seed Remove) legitimately posts multiple lines
     // against a biscuit input — the single-disposition rule is QUANTITY-only.
@@ -1762,6 +1821,17 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         }
       }
 
+      // ── Universal identity invariant (defense-in-depth) ────────────────────
+      // No identity-bearing Growth carrier may ever reach the generic child-lot
+      // branch, regardless of allowed_outputs config — this is the exact path
+      // that minted SSD027-APR26-033-R1 / SSD047-JUN26-032-R1 (new inventory
+      // id, Run reset to R1, blank Root Lot, original consumed). Seed Remove
+      // COMPONENT splits are the approved exception and are excluded; in-place
+      // transforms and carrier returns have already `continue`d above.
+      if (!isComponentReturn &&
+          resolveCarrierCategory({ category: processLot.category, name: processLot.item_name })) {
+        throw new Error('Identity-bearing Growth carrier cannot create a child Return lot.');
+      }
       const childCode = await nextReturnLotCode(client, processLot.id, parentCode, suffix);
       const { rows: dup } = await client.query(
         'SELECT 1 FROM inventory WHERE lot_code=$1 OR lot_number=$1', [childCode]

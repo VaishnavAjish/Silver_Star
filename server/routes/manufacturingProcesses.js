@@ -15,6 +15,7 @@ const {
   RETURN_ENGINE_REQUIRED_MESSAGE,
 } = require('../services/completionEngineGuard');
 const { derivedStateSql } = require('../services/machineStateModel');
+const { isIdentityPreservingGrowthCarrier } = require('../services/growthCarrier');
 
 const router = express.Router();
 
@@ -645,7 +646,9 @@ router.post('/processes', authenticate, async (req, res) => {
       // into a process. Any lot currently IN PROCESS (e.g. a Growth Run still in
       // the chamber) must be rejected even if it slipped past the picker filter.
       const { rows: lkRows } = await client.query(
-        `SELECT id, status, lot_number FROM inventory WHERE id = $1 FOR UPDATE`,
+        `SELECT inv.id, inv.status, inv.lot_number, i.category, i.name AS item_name
+           FROM inventory inv JOIN items i ON i.id = inv.item_id
+          WHERE inv.id = $1 FOR UPDATE OF inv`,
         [lot.inventory_lot_id]
       );
       if (!lkRows.length) {
@@ -657,6 +660,17 @@ router.post('/processes', authenticate, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(409).json({
           error: `Lot ${lkRows[0].lot_number || lot.inventory_lot_id} is ${lkRows[0].status} and cannot be issued to a process. Only IN STOCK lots are selectable.`,
+        });
+      }
+      // Identity-bearing Growth carriers must go through the Issue-to-Process
+      // engine (lot_process_issues), which owns Growth-Again identity: same
+      // row, atomic Run increment, no child lots, no seed attachment. This
+      // direct start path links lots WITHOUT a Process Issue, so a carrier
+      // here would bypass every identity guard — fail closed.
+      if (isIdentityPreservingGrowthCarrier(lkRows[0], null)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Lot ${lkRows[0].lot_number} is an identity-preserving Growth carrier — start its cycle through Issue to Process (Growth Again), not the direct start path. No lot was created.`,
         });
       }
       await client.query(`
