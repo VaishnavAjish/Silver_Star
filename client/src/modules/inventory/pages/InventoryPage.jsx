@@ -23,6 +23,10 @@ import LotIssuePage from './LotIssuePage';
 import MixLotsPage from './MixLotsPage';
 import LotReturnPage from './LotReturnPage';
 import { getAllowedActions } from '../utils/actionMatrix';
+import {
+  LOCATION_COL, DEPARTMENT_COL, SOURCE_COL,
+  resolveLocation, resolveDepartment, resolveSource,
+} from '../utils/inventoryDisplay';
 
 const ALL_COLS = [
   { key: 'item_name', label: 'Item' },
@@ -41,8 +45,9 @@ const ALL_COLS = [
   { key: 'weight', label: 'Weight', width: 75, num: true },
   { key: 'rate', label: 'Rate (₹)', width: 90, num: true },
   { key: 'total_value', label: 'Value (₹)', width: 105, num: true },
-  { key: 'source_module', label: 'Location', width: 130 },
-  { key: 'dept_location_name', label: 'Department Name', width: 100 },
+  { key: LOCATION_COL.key, label: LOCATION_COL.label, width: LOCATION_COL.width },
+  { key: DEPARTMENT_COL.key, label: DEPARTMENT_COL.label, width: DEPARTMENT_COL.width },
+  { key: SOURCE_COL.key, label: SOURCE_COL.label, width: SOURCE_COL.width },
   { key: 'vendor_name', label: 'Vendor', width: 100 },
   { key: 'batch_no', label: 'Batch', width: 80 },
   { key: 'purchase_date', label: 'Date', width: 90 },
@@ -65,9 +70,9 @@ const COL_TO_SORT = {
   weight: 'weight',
   total_value: 'value',
   rate: 'value',
-  location_name:    'location',
-  source_module:    'dept',
-  dept_location_name: 'dept_loc',
+  [LOCATION_COL.key]:   LOCATION_COL.sortKey,
+  [DEPARTMENT_COL.key]: DEPARTMENT_COL.sortKey,
+  [SOURCE_COL.key]:     SOURCE_COL.sortKey,
   vendor_name: 'vendor',
   status: 'status',
   operation_type: 'op_type',
@@ -649,6 +654,9 @@ export default function InventoryPage() {
       const headers = activeCols.map(c => c.label);
       const csvRows = rows.map(row => activeCols.map(col => {
         const v = row[col.key];
+        if (col.key === 'location_name') return resolveLocation(row);
+        if (col.key === 'dept_name') return resolveDepartment(row);
+        if (col.key === 'source_module') return resolveSource(row);
         if (col.key === 'lot_code') return row.lot_code || row.lot_number;
         if (col.key === 'purchase_date') return v ? new Date(v).toLocaleDateString('en-IN') : '';
         if (col.key === 'genealogy_path') return v || '';
@@ -718,16 +726,24 @@ export default function InventoryPage() {
         return row.status === 'IN PROCESS' && row.current_process_name
           ? <span className="badge" style={{ background: '#E0F2FE', color: '#0369A1', borderColor: '#BAE6FD' }}>{row.current_process_name}</span>
           : '—';
-      case 'source_module':
-        return (row.location_name || row.dept_location_name)
-          ? <span style={{ fontSize: 11, color: 'var(--g700)', fontWeight: 500 }}>{row.location_name || row.dept_location_name}</span>
-          : row.source_module
-            ? <span style={{ fontSize: 11, color: 'var(--g500)', fontWeight: 400 }}>{row.source_module.charAt(0).toUpperCase() + row.source_module.slice(1)}</span>
-            : '—';
-      case 'dept_location_name':
-        return row.dept_location_name
-          ? <span style={{ fontSize: 11, color: 'var(--g700)', fontWeight: 500 }}>{row.dept_location_name}</span>
+      case 'location_name': {
+        const loc = resolveLocation(row);
+        return loc
+          ? <span style={{ fontSize: 11, color: 'var(--g700)', fontWeight: 500 }}>{loc}</span>
           : '—';
+      }
+      case 'dept_name': {
+        const dept = resolveDepartment(row);
+        return dept
+          ? <span style={{ fontSize: 11, color: 'var(--g700)', fontWeight: 500 }}>{dept}</span>
+          : '—';
+      }
+      case 'source_module': {
+        const src = resolveSource(row);
+        return src
+          ? <span style={{ fontSize: 11, color: 'var(--g500)', fontWeight: 400 }}>{src}</span>
+          : '—';
+      }
       case 'operation_type':
         return row.operation_type
           ? <span className={`badge ${opBadge[row.operation_type] || 'b-draft'}`}>{row.operation_type}</span>

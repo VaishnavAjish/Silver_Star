@@ -57,12 +57,12 @@ router.get('/', authenticate, async (req, res) => {
     if (split_only === 'true') where += " AND inv.source_type = 'split'";
 
     if (req.query.location_id && req.query.location_id !== '') {
-      const val = req.query.location_id;
-      if (isNaN(parseInt(val))) {
-        params.push(val);
-        where += ` AND inv.location_id IS NULL AND d.location_id IS NULL AND inv.source_module = $${params.length}`;
-      } else {
-        params.push(parseInt(val));
+      // Location filters through canonical Location IDs only (physical inventory
+      // location, or the department's location). It must never match on
+      // source_module — transaction origin is not a Location.
+      const locId = parseInt(req.query.location_id);
+      if (!isNaN(locId)) {
+        params.push(locId);
         where += ` AND (inv.location_id = $${params.length} OR (inv.location_id IS NULL AND d.location_id = $${params.length}))`;
       }
     }
@@ -231,12 +231,6 @@ router.get('/filters/active', authenticate, async (req, res) => {
     const [locationsResult, accountBasesResult, vendorsResult, processesResult] = await Promise.all([
       pool.query(`
         SELECT id::text, name FROM locations
-        UNION
-        SELECT DISTINCT inv.source_module as id, INITCAP(inv.source_module) as name
-        FROM inventory inv
-        LEFT JOIN departments d ON inv.department_id = d.id
-        WHERE inv.source_module IS NOT NULL AND inv.source_module != ''
-          AND inv.location_id IS NULL AND d.location_id IS NULL
         ORDER BY name
       `),
       pool.query(`
