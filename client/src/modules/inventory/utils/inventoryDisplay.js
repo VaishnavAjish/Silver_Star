@@ -10,8 +10,8 @@
 //   - source_module       transaction origin           (inv.source_module)
 //
 // Location must NEVER fall back to source_module. Source values such as
-// "Growth Run", "Return from Process" or "Process Issues" belong only in the
 // Source column.
+// Note: Location column must never display source_module values.
 
 export const LOCATION_COL   = { key: 'location_name', label: 'Location',        sortKey: 'location',      width: 130 };
 export const DEPARTMENT_COL = { key: 'dept_name',     label: 'Department Name', sortKey: 'dept',          width: 120 };
