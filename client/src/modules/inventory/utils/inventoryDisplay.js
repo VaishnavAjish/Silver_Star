@@ -14,7 +14,7 @@
 // Note: Location column must never display source_module values.
 
 export const LOCATION_COL   = { key: 'location_name', label: 'Location',        sortKey: 'location',      width: 130 };
-export const DEPARTMENT_COL = { key: 'dept_name',     label: 'Department Name', sortKey: 'dept',          width: 120 };
+export const DEPARTMENT_COL = { key: 'dept_name',     label: 'Department',      sortKey: 'dept',          width: 120 };
 export const SOURCE_COL     = { key: 'source_module', label: 'Source',          sortKey: 'source_module', width: 120 };
 
 // Physical Location: real location, then the department's location, never the
