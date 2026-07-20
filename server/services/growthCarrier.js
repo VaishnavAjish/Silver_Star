@@ -129,6 +129,38 @@ function classifyGrowthIssueLots({ isGrowthGroup, lots }) {
   return ok(true, idx);
 }
 
+/**
+ * Canonical carrier category from stable Item Master identity — never from a
+ * display label alone. Explicit non-carrier categories return null; a legacy
+ * row with an EMPTY category resolves through the approved item-name aliases
+ * ('Growth Run' / 'Partial Growth Run' / 'Growth Diamond') so migrated records
+ * with incomplete category data are still identity-preserving carriers.
+ * @param {{ category?: string|null, name?: string|null }} item
+ * @returns {'growth_run'|'growth_diamond'|null}
+ */
+function resolveCarrierCategory({ category, name } = {}) {
+  const cat = String(category || '').toLowerCase().trim();
+  if (GROWTH_CARRIER_CATEGORIES.includes(cat)) return cat;
+  if (cat) return null; // explicit non-carrier category (seed, rough, …)
+  const n = String(name || '').toLowerCase().trim();
+  if (/^(partial\s+)?growth\s+run$/.test(n)) return 'growth_run';
+  if (/^growth\s+diamond$/.test(n)) return 'growth_diamond';
+  return null;
+}
+
+/**
+ * ONE canonical predicate: is this inventory row an identity-preserving Growth
+ * carrier? Accepts the inventory row (with joined category / item_name fields)
+ * and the item row where separately available. Ambiguous rows resolve to
+ * false and are handled fail-closed by the callers — never via child-lot output.
+ */
+function isIdentityPreservingGrowthCarrier(inventoryRow, itemRow) {
+  return resolveCarrierCategory({
+    category: (itemRow && itemRow.category) ?? (inventoryRow && inventoryRow.category),
+    name: (itemRow && itemRow.name) ?? (inventoryRow && inventoryRow.item_name),
+  }) !== null;
+}
+
 module.exports = {
   GROWTH_CARRIER_CATEGORIES,
   isGrowthCarrierCategory,
@@ -136,4 +168,6 @@ module.exports = {
   classifyGrowthIssueLots,
   RUN_INCREMENT_SQL,
   nextRunNo,
+  resolveCarrierCategory,
+  isIdentityPreservingGrowthCarrier,
 };
