@@ -15,7 +15,6 @@ export const SYSTEM_TEMPLATES = {
 //   source_module      → the old, mis-keyed Location column
 //   dept_location_name → the old "Department Name" column
 const KEY_RENAMES = {
-  dept_name: 'location_name',
   source_module: 'location_name',
   dept_location_name: 'dept_name',
 };

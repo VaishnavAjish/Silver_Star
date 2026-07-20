@@ -167,7 +167,6 @@ export default function InventoryPage() {
           const migratedCols = Array.isArray(rawCols) 
             ? rawCols.map(k => {
                 const KEY_RENAMES = {
-                  dept_name: 'location_name',
                   source_module: 'location_name',
                   dept_location_name: 'dept_name',
                 };
