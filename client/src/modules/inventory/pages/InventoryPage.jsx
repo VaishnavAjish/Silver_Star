@@ -162,15 +162,28 @@ export default function InventoryPage() {
       const res = await api.get('/api/inventory-templates');
       if (Array.isArray(res)) {
         setDbTemplates(res);
-        setUserTemplates(res.map(t => ({
-          id: t.id.toString(),
-          label: t.name,
-          cols: t.columns_config,
-          filters: t.filters_config,
-          isSystem: false,
-          isGlobal: t.is_global,
-          author: t.full_name || null
-        })));
+        setUserTemplates(res.map(t => {
+          const rawCols = t.columns_config || [];
+          const migratedCols = Array.isArray(rawCols) 
+            ? rawCols.map(k => {
+                const KEY_RENAMES = {
+                  dept_name: 'location_name',
+                  source_module: 'location_name',
+                  dept_location_name: 'dept_name',
+                };
+                return KEY_RENAMES[k] ?? k;
+              })
+            : rawCols;
+          return {
+            id: t.id.toString(),
+            label: t.name,
+            cols: migratedCols,
+            filters: t.filters_config,
+            isSystem: false,
+            isGlobal: t.is_global,
+            author: t.full_name || null
+          };
+        }));
       }
     } catch (err) { console.error(err); }
   }, [api]);
