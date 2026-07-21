@@ -69,62 +69,63 @@ async function migrate() {
 
     // 4. Preflight Machine Check
     console.log('Locking machines for preflight and update...');
-    const allMachines = await client.query(`SELECT id, code, name, status, type, department_id, location_id FROM machines ORDER BY id`);
+    const { rows: ssdRows } = await client.query(`SELECT id, code, name, status, type, department_id, location_id FROM machines WHERE name LIKE 'SSD-%' FOR UPDATE`);
+    const { rows: lsRows } = await client.query(`SELECT id, code, name, status, type, department_id, location_id FROM machines WHERE name LIKE 'LS-%' FOR UPDATE`);
+
+    console.log(`Found ${ssdRows.length} SSD machines and ${lsRows.length} LS machines.`);
+
+    const expectedSSDNames = new Set();
+    for(let i=1; i<=116; i++) expectedSSDNames.add(`SSD-${String(i).padStart(3, '0')}`);
     
-    console.log('--- ACTUAL MACHINES IN DATABASE ---');
-    console.log(JSON.stringify(allMachines.rows.slice(0, 10), null, 2));
-    if (allMachines.rows.length > 10) {
-      console.log(`...and ${allMachines.rows.length - 10} more machines. Sample from end:`);
-      console.log(JSON.stringify(allMachines.rows.slice(-5), null, 2));
-    }
-    
-    throw new Error('DUMPING MACHINES FOR ANALYSIS. TRANSACTION ABORTED.');
+    const expectedLSNames = new Set();
+    for(let i=1; i<=5; i++) expectedLSNames.add(`LS-${String(i).padStart(2, '0')}`);
+
+    const actualSSDNames = new Set(ssdRows.map(m => m.name));
+    const actualLSNames = new Set(lsRows.map(m => m.name));
+
+    const missingSSD = [...expectedSSDNames].filter(c => !actualSSDNames.has(c));
+    const missingLS = [...expectedLSNames].filter(c => !actualLSNames.has(c));
+
+    if (missingSSD.length > 0) throw new Error(`Missing SSD machines: ${missingSSD.join(', ')}`);
+    if (missingLS.length > 0) throw new Error(`Missing LS machines: ${missingLS.join(', ')}`);
 
     // 5. Perform Update
     let updated = 0;
-    let alreadyCorrect = 0;
-
-    const processMachine = async (m, expectedCategory, expectedDeptId, expectedLocId) => {
-      if (m.type === expectedCategory && m.department_id === expectedDeptId && m.location_id === expectedLocId) {
-        alreadyCorrect++;
-      } else {
-        await client.query(`
-          UPDATE machines 
-          SET type = $1, department_id = $2, location_id = $3
-          WHERE id = $4
-        `, [expectedCategory, expectedDeptId, expectedLocId, m.id]);
-        updated++;
-      }
-    };
-
-    console.log('Mapping SSD machines...');
+    
+    console.log(`Updating ${ssdRows.length} SSD machines...`);
     for (const m of ssdRows) {
-      const num = parseInt(m.code.split('-')[1], 10);
+      const num = parseInt(m.name.split('-')[1], 10);
       let expectedLocId;
       if (num >= 1 && num <= 50) expectedLocId = O06;
       else if (num >= 51 && num <= 100) expectedLocId = O05;
       else if (num >= 101 && num <= 116) expectedLocId = O04;
-      else throw new Error(`Out of range SSD machine: ${m.code}`);
+      else throw new Error(`Out of range SSD machine: ${m.name}`);
 
-      await processMachine(m, 'PLASMA_CVD', dp01.id, expectedLocId);
+      await client.query(`
+        UPDATE machines 
+        SET type = $1, department_id = $2, location_id = $3
+        WHERE id = $4
+      `, ['PLASMA_CVD', dp01.id, expectedLocId, m.id]);
+      updated++;
     }
 
-    console.log('Mapping LS machines...');
+    console.log(`Updating ${lsRows.length} LS machines...`);
     for (const m of lsRows) {
-      await processMachine(m, 'LASER', dp03.id, O03);
+      await client.query(`
+        UPDATE machines 
+        SET type = $1, department_id = $2, location_id = $3
+        WHERE id = $4
+      `, ['LASER', dp03.id, O03, m.id]);
+      updated++;
     }
 
-    console.log(`Preflight complete. Mapped successfully.`);
-    console.log(`Already Correct: ${alreadyCorrect}`);
-    console.log(`Updated: ${updated}`);
-    console.log(`Total Handled: ${alreadyCorrect + updated} / 121`);
-
-    if (alreadyCorrect + updated !== 121) {
-       throw new Error(`Assertion failed: expected 121 handled machines, got ${alreadyCorrect + updated}`);
+    if (updated !== 121) {
+       throw new Error(`Assertion failed: expected 121 handled machines, got ${updated}`);
     }
 
     await client.query('COMMIT');
     console.log('Transaction COMMITTED successfully.');
+    console.log(`SUCCESS! Mapped ${updated} machines to canonical definitions.`);
 
   } catch (e) {
     await client.query('ROLLBACK');
