@@ -37,15 +37,15 @@ async function migrate() {
 
     // 2. Resolve Master Data
     console.log('Resolving Master Data...');
-    const depts = await client.query("SELECT id, code FROM departments WHERE code IN ('DP01', 'DP03')");
-    const dp01 = depts.rows.find(d => d.code === 'DP01');
-    const dp03 = depts.rows.find(d => d.code === 'DP03');
-    if (!dp01 || !dp03) throw new Error('Missing required Departments (DP01 or DP03).');
+    const depts = await client.query("SELECT id, name, code FROM departments");
+    const dp01 = depts.rows.find(d => d.code === 'DP01' || d.name.includes('DP01') || d.name === 'CVD');
+    const dp03 = depts.rows.find(d => d.code === 'DP03' || d.name.includes('DP03') || d.name === 'Laser');
+    if (!dp01 || !dp03) throw new Error(`Missing required Departments. Found: ${JSON.stringify(depts.rows)}`);
 
-    const locs = await client.query("SELECT id, code FROM locations WHERE code IN ('O01', 'O03', 'O04', 'O05', 'O06')");
-    const getLocId = (code) => {
-      const loc = locs.rows.find(l => l.code === code);
-      if (!loc) throw new Error(`Missing required Location: ${code}`);
+    const locs = await client.query("SELECT id, name, code FROM locations");
+    const getLocId = (str) => {
+      const loc = locs.rows.find(l => (l.code === str) || (l.name && l.name.includes(str)));
+      if (!loc) throw new Error(`Missing required Location: ${str}. Found: ${JSON.stringify(locs.rows)}`);
       return loc.id;
     };
     const [O01, O03, O04, O05, O06] = ['O01', 'O03', 'O04', 'O05', 'O06'].map(getLocId);
