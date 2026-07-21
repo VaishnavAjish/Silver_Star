@@ -48,7 +48,7 @@ async function migrate() {
       if (!loc) throw new Error(`Missing required Location: ${str}. Found: ${JSON.stringify(locs.rows)}`);
       return loc.id;
     };
-    const [O01, O03, O04, O05, O06] = ['O01', 'O03', 'O04', 'O05', 'O06'].map(getLocId);
+    const [O01, O03, O04, O05, O06] = ['001', '003', '004', '005', '006'].map(getLocId);
 
     // 3. Insert Department Locations
     console.log('Inserting Department-Location mappings...');
