@@ -181,9 +181,8 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
     dimStr = `${parseFloat(machine.dim_length).toFixed(2)} × ${parseFloat(machine.dim_width).toFixed(2)} × ${parseFloat(machine.dim_height).toFixed(2)}`;
   }
 
-  const operatorDisplay = machine.operator_name 
-    ? `${machine.operator_name} (${machine.location_name || 'No Location'})` 
-    : (machine.location_name || 'No Location');
+  const operatorDisplay = machine.operator_name ? `Op: ${machine.operator_name}` : 'No Operator';
+  const masterDisplay = `${machine.machine_category_label || 'Unknown Category'} • ${machine.department_name || 'No Dept'} • ${machine.location_name || 'No Loc'}`;
 
   return (
     <div style={{
@@ -236,6 +235,9 @@ const MachineCard = memo(function MachineCard({ machine, onAction, onNavigate, p
             )}
           </div>
           <div style={{ fontSize: 11, color: '#616161', marginTop: 6, fontWeight: 500 }}>
+            {masterDisplay}
+          </div>
+          <div style={{ fontSize: 10, color: '#9E9E9E', marginTop: 2 }}>
             {operatorDisplay}
           </div>
         </div>
@@ -590,9 +592,9 @@ const GridRow = memo(function GridRow({ machine: m, idx, onAction, onNavigate, p
         </div>
       </td>
 
-      {/* Operator */}
       <td style={{ ...TD, width: 140, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {m.operator_name ? `${m.operator_name} (${m.location_name || 'No Location'})` : (m.location_name || <span style={{ color: '#BDBDBD' }}>—</span>)}
+        <div style={{ fontSize: 11, color: '#424242' }}>{m.operator_name || <span style={{ color: '#BDBDBD' }}>No Operator</span>}</div>
+        <div style={{ fontSize: 9, color: '#9E9E9E', marginTop: 2 }}>{m.machine_category_label || 'Unknown'} • {m.location_name || '—'}</div>
       </td>
 
       {/* Process Type */}
@@ -1097,6 +1099,7 @@ export default function ManufacturingDashboard() {
   const [operators, setOperators] = useState([]);
   const [seedLots, setSeedLots] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1159,7 +1162,7 @@ export default function ManufacturingDashboard() {
 
   // ── Shared filters ───────────────────────────────────────────────────────────
   const [filters, setFilters] = usePersistedFilters('mfg_dashboard_filters', {
-    dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
+    category: '', location: '', dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
     length_min: '', length_max: '', height_min: '', height_max: '',
   });
   const setFilter = k => v => setFilters(f => ({ ...f, [k]: v }));
@@ -1216,7 +1219,7 @@ export default function ManufacturingDashboard() {
   }, [filters]);
 
 
-  // Load lookup data once (operators, seed lots, departments, process master)
+  // Load lookup data once (operators, seed lots, departments, locations, process master)
   // Each call is independent — one failure does not blank the others.
   useEffect(() => {
     (async () => {
@@ -1228,6 +1231,10 @@ export default function ManufacturingDashboard() {
       try {
         const d = await api.get('/api/departments?limit=100');
         setDepartments([...new Map((d?.data || []).map(x => [x.id, x])).values()]);
+      } catch { }
+      try {
+        const loc = await api.get('/api/locations?limit=100');
+        setLocations([...new Map((loc?.data || []).map(x => [x.id, x])).values()]);
       } catch { }
       try {
         const r = await api.get('/api/process-master?active=true');
@@ -1415,10 +1422,27 @@ export default function ManufacturingDashboard() {
         </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Category</label>
+            <SelectDropdown style={{ width: 120, height: 32 }} value={filters.category} onChange={e => setFilter('category')(e.target.value)}>
+              <option value="">All Categories</option>
+              <option value="PLASMA_CVD">Plasma CVD</option>
+              <option value="LASER">Laser</option>
+            </SelectDropdown>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Department</label>
             <SelectDropdown style={{ width: 140, height: 32 }} value={filters.dept} onChange={e => setFilter('dept')(e.target.value)}>
               <option value="">All Departments</option>
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </SelectDropdown>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Location</label>
+            <SelectDropdown style={{ width: 120, height: 32 }} value={filters.location} onChange={e => setFilter('location')(e.target.value)}>
+              <option value="">All Locations</option>
+              {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </SelectDropdown>
           </div>
 
@@ -1433,9 +1457,9 @@ export default function ManufacturingDashboard() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Operator / Location</label>
-            <SelectDropdown style={{ width: 160, height: 32 }} value={filters.operator} onChange={e => setFilter('operator')(e.target.value)}>
-              <option value="">All Operators / Locations</option>
+            <label style={{ fontSize: 10, fontWeight: 600, color: '#616161', textTransform: 'none' }}>Operator</label>
+            <SelectDropdown style={{ width: 140, height: 32 }} value={filters.operator} onChange={e => setFilter('operator')(e.target.value)}>
+              <option value="">All Operators</option>
               {operators.map(o => <option key={o.id} value={o.id}>{o.full_name}</option>)}
             </SelectDropdown>
           </div>

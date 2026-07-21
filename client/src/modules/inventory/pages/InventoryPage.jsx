@@ -164,15 +164,7 @@ export default function InventoryPage() {
         setDbTemplates(res);
         setUserTemplates(res.map(t => {
           const rawCols = t.columns_config || [];
-          const migratedCols = Array.isArray(rawCols) 
-            ? rawCols.map(k => {
-                const KEY_RENAMES = {
-                  source_module: 'location_name',
-                  dept_location_name: 'dept_name',
-                };
-                return KEY_RENAMES[k] ?? k;
-              })
-            : rawCols;
+          const migratedCols = Array.isArray(rawCols) ? rawCols : [];
           return {
             id: t.id.toString(),
             label: t.name,

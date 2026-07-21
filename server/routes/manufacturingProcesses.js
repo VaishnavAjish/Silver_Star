@@ -114,11 +114,19 @@ router.get('/kpi', authenticate, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/machines', authenticate, async (req, res) => {
   try {
-    const { dept, status, operator, process_type, overdue, search, length_min, length_max, height_min, height_max, limit = 200, offset = 0 } = req.query;
+    const { dept, category, location, status, operator, process_type, overdue, search, length_min, length_max, height_min, height_max, limit = 200, offset = 0 } = req.query;
 
     const params = [];
     const where  = ['1=1'];
 
+    if (category && category !== 'ALL') {
+      params.push(category);
+      where.push(`m.type = $${params.length}`);
+    }
+    if (location) {
+      params.push(parseInt(location));
+      where.push(`m.location_id = $${params.length}`);
+    }
     if (dept) {
       params.push(parseInt(dept));
       where.push(`m.department_id = $${params.length}`);
@@ -161,6 +169,8 @@ router.get('/machines', authenticate, async (req, res) => {
           m.code,
           m.name,
           m.type          AS machine_type,
+          m.type          AS machine_category,
+          CASE WHEN m.type = 'PLASMA_CVD' THEN 'Plasma CVD' WHEN m.type = 'LASER' THEN 'Laser' ELSE m.type END AS machine_category_label,
           m.status::text  AS machine_status,
           -- Canonical derived lifecycle state — same classification as /kpi
           -- (machineStateModel.derivedStateSql). Cards, counts and filters all
@@ -168,6 +178,7 @@ router.get('/machines', authenticate, async (req, res) => {
           ${derivedStateSql('m', 'mp')} AS derived_state,
           m.department_id,
           d.name          AS department_name,
+          m.location_id,
           l.name          AS location_name,
           m.capacity,
           m.next_service,
