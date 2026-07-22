@@ -21,12 +21,12 @@ async function main() {
     // STEP 1 & 2: Read-Only Diagnostic
     // ──────────────────────────────────────────────────────────────────────────
     const { rows: issues } = await client.query(`
-      SELECT pi.*, p.code as process_code, p.process_group,
+      SELECT pi.*, pm.process_code, pm.process_group,
              m.code as machine_code, mp.status as mp_status, mp.completed_at as mp_completed_at,
              inv.lot_number, inv.category as process_lot_category, inv.weight as process_lot_weight,
              inv.root_lot_id, inv.id as process_lot_id_val
       FROM lot_process_issues pi
-      LEFT JOIN processes p ON p.id = pi.process_id
+      LEFT JOIN process_master pm ON pm.process_code = pi.process_type
       LEFT JOIN machine_processes mp ON mp.id = pi.machine_process_id
       LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN inventory inv ON inv.id = COALESCE(pi.process_lot_id, pi.source_lot_id)
@@ -319,7 +319,7 @@ async function main() {
     log(`\n## Final Status\n\nFAILED — TRANSACTION ROLLED BACK\nError: ${err.message}`);
   } finally {
     client.release();
-    await pool.end();
+    await pool.primaryPool.end();
   }
 }
 
