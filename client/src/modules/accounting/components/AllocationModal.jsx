@@ -61,23 +61,43 @@ export default function AllocationModal({
         : `/api/receipts/open?customer_id=${entityId}`;
       const endpoint = excludeJeId ? `${base}&exclude_je_id=${excludeJeId}` : base;
       const res = await api.get(endpoint);
-      setDocs(res.data || []);
+      const loaded = res.data || [];
+      setDocs(loaded);
+
+      // Auto-prefill if opening allocation for the first time
+      if ((!existingAllocations || existingAllocations.length === 0) && loaded.length > 0) {
+        let left = maxAmount;
+        const seed = {};
+        for (const doc of loaded) {
+          if (left <= 0.005) break;
+          const docId = doc.source_id || doc.id;
+          const outstanding = parseFloat(doc.outstanding_amount || doc.outstanding || doc.balance_due || 0);
+          const take = Math.min(outstanding, left);
+          if (take > 0) {
+            seed[docId] = String(take);
+            left -= take;
+          }
+        }
+        setAmounts(seed);
+      }
     } catch (err) {
       setError(err.message || 'Failed to load open documents');
     } finally {
       setLoading(false);
     }
-  }, [api, entityId, isVendor, excludeJeId]);
+  }, [api, entityId, isVendor, excludeJeId, maxAmount, existingAllocations]);
 
   // Load on open; seed amounts from existingAllocations
   useEffect(() => {
     if (!isOpen) return;
     loadDocs();
-    const seed = {};
-    existingAllocations.forEach(a => {
-      seed[a.target_id] = String(a.allocated_amount || '');
-    });
-    setAmounts(seed);
+    if (existingAllocations && existingAllocations.length > 0) {
+      const seed = {};
+      existingAllocations.forEach(a => {
+        seed[a.target_id] = String(a.allocated_amount || '');
+      });
+      setAmounts(seed);
+    }
   }, [isOpen, entityId]); // eslint-disable-line
 
   // ── Derived values ────────────────────────────────────────────────────────

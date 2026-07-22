@@ -205,7 +205,10 @@ router.get('/:id', authenticate, async (req, res) => {
     const r = await pool.query(`
       SELECT c.*,
         COALESCE(ob.open_balance,    0)                                     AS open_balance,
-        COALESCE(ob.overdue_balance, 0)                                     AS overdue_balance,
+        GREATEST(0, LEAST(
+          COALESCE(ob.raw_overdue_balance, 0),
+          COALESCE(ob.open_balance, 0) + COALESCE(je_adj.adjustment, 0)
+        ))                                                                  AS overdue_balance,
         lr.last_receipt_date,
         COALESCE(je_adj.adjustment,  0)                                     AS je_adjustment,
         COALESCE(ob.open_balance, 0) + COALESCE(je_adj.adjustment, 0)      AS total_balance
@@ -218,7 +221,7 @@ router.get('/:id', authenticate, async (req, res) => {
           SUM(COALESCE(inv.balance_due, inv.grand_total))
             FILTER (WHERE inv.payment_status != 'PAID' AND inv.status != 'cancelled'
               AND (inv.doc_date + (${DUE_DAYS_SQL}) * INTERVAL '1 day') < CURRENT_DATE)
-            AS overdue_balance
+            AS raw_overdue_balance
         FROM invoices inv WHERE inv.customer_id = $1
       ) ob ON TRUE
       LEFT JOIN (

@@ -223,21 +223,33 @@ router.get('/', authenticate, async (req, res) => {
           LIMIT $${lp} OFFSET $${op}
         ),
         vendor_pns AS (
-          SELECT id, vendor_id, grand_total, COALESCE(amount_paid, 0) AS amount_paid, doc_date, payment_term
-          FROM purchase_notes
-          WHERE status != 'cancelled' AND payment_status != 'PAID'
-            AND vendor_id IN (SELECT id FROM paginated_vendors)
+          SELECT pn.id, pn.vendor_id, pn.grand_total, pn.doc_date, pn.payment_term,
+                 COALESCE(pn.balance_due, GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0)) AS balance_due
+          FROM purchase_notes pn
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS total_paid
+            FROM payment_allocations
+            GROUP BY purchase_note_id
+          ) pa_agg ON pa_agg.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT target_id, SUM(allocated_amount) AS total_je
+            FROM je_allocations
+            WHERE target_type = 'bill'
+            GROUP BY target_id
+          ) ja_agg ON ja_agg.target_id = pn.id
+          WHERE pn.status != 'cancelled' AND pn.payment_status != 'PAID'
+            AND pn.vendor_id IN (SELECT id FROM paginated_vendors)
         ),
         vendor_balances AS (
           SELECT
             pn.vendor_id,
-            SUM(GREATEST(pn.grand_total - pn.amount_paid, 0)) AS open_balance,
+            SUM(pn.balance_due) AS open_balance,
             SUM(CASE WHEN (pn.doc_date + (
               CASE pn.payment_term
                 WHEN '7 Days' THEN 7 WHEN '15 Days' THEN 15 WHEN '30 Days' THEN 30
                 WHEN '45 Days' THEN 45 WHEN '60 Days' THEN 60 WHEN '90 Days' THEN 90 ELSE 0 END
             )) < CURRENT_DATE
-                     THEN GREATEST(pn.grand_total - pn.amount_paid, 0) ELSE 0 END) AS overdue_balance
+                     THEN pn.balance_due ELSE 0 END) AS overdue_balance
           FROM vendor_pns pn
           GROUP BY pn.vendor_id
         ),
@@ -289,7 +301,10 @@ router.get('/:id', authenticate, async (req, res) => {
       SELECT
         v.*,
         COALESCE(b.open_balance,    0)                                      AS open_balance,
-        COALESCE(b.overdue_balance, 0)                                      AS overdue_balance,
+        GREATEST(0, LEAST(
+          COALESCE(b.raw_overdue_balance, 0),
+          COALESCE(b.open_balance, 0) + COALESCE(je_adj.adjustment, 0)
+        ))                                                                  AS overdue_balance,
         b.last_payment_date,
         COALESCE(je_adj.adjustment, 0)                                      AS je_adjustment,
         COALESCE(b.open_balance, 0) + COALESCE(je_adj.adjustment, 0)       AS total_balance
@@ -298,10 +313,10 @@ router.get('/:id', authenticate, async (req, res) => {
         SELECT
           pn.vendor_id,
           SUM(CASE WHEN pn.payment_status != 'PAID'
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END)    AS open_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0) ELSE 0 END)    AS open_balance,
           SUM(CASE WHEN pn.payment_status != 'PAID'
                         AND (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0), 0) ELSE 0 END)    AS overdue_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0) ELSE 0 END)    AS raw_overdue_balance,
           (SELECT MAX(p.date) FROM payments p WHERE p.vendor_id = pn.vendor_id) AS last_payment_date
         FROM purchase_notes pn
         LEFT JOIN (
@@ -309,6 +324,12 @@ router.get('/:id', authenticate, async (req, res) => {
           FROM payment_allocations
           GROUP BY purchase_note_id
         ) pa_agg ON pa_agg.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT target_id, SUM(allocated_amount) AS total_je
+          FROM je_allocations
+          WHERE target_type = 'bill'
+          GROUP BY target_id
+        ) ja_agg ON ja_agg.target_id = pn.id
         WHERE pn.status != 'cancelled' AND pn.vendor_id = $1 AND pn.payment_status != 'PAID'
         GROUP BY pn.vendor_id
       ) b ON b.vendor_id = v.id
