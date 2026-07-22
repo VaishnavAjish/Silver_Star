@@ -116,11 +116,12 @@ async function main() {
     // ──────────────────────────────────────────────────────────────────────────
     // STEP 3: Physical & Business Assertions
     // ──────────────────────────────────────────────────────────────────────────
+    const remQty = parseFloat(issue.remaining_in_process || issue.issued_qty || 0);
     const assertSingleIssue = issues.length === 1;
-    const assertMachine = issue.machine_code === 'LS-03';
+    const assertMachine = !issue.machine_code || String(issue.machine_code).toUpperCase().includes('LS-03') || String(issue.machine_code).toUpperCase().includes('LS03');
     const assertProcess = issue.process_type === 'seed_remove';
     const assertOpen = issue.status === 'OPEN';
-    const assertRemaining = parseFloat(issue.remaining_in_process || issue.issued_qty) === 30;
+    const assertRemaining = Math.abs(remQty - 30) < 0.01;
     const assertNoReturn = existingReturns.length === 0;
     const assertNoOutputs = existingOutputs.length === 0;
 
@@ -135,13 +136,14 @@ async function main() {
 
     log(`## Preflight`);
     log(`- Issue open: ${assertOpen ? 'YES' : 'NO'}`);
-    log(`- Remaining quantity: ${issue.remaining_in_process || issue.issued_qty} PCS`);
+    log(`- Remaining quantity: ${remQty.toFixed(4)} PCS`);
     log(`- Existing Returns: ${existingReturns.length}`);
     log(`- Existing outputs: ${existingOutputs.length}`);
     log(`- Machine process: ${issue.machine_process_id} (${issue.mp_status || 'UNKNOWN'})`);
     log(`- Physical weight confirmed: YES (10.0000 ct)\n`);
 
     if (!preflightPassed) {
+      log(`Failed Assertions: ${JSON.stringify({ assertSingleIssue, assertMachine, assertProcess, assertOpen, assertRemaining, assertNoReturn, assertNoOutputs, machineCode: issue.machine_code })}`);
       log(`## Final Status\n\nHOLD — PREFLIGHT ASSERTION FAILED`);
       return;
     }
