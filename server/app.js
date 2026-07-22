@@ -67,9 +67,9 @@ app.use(streamResponse);
 
 // ── Rate Limiting ──────────────────────────────────────────────────────────
 const authLimiter = rateLimit({
-  windowMs: 30 * 1000, // 30-second window
-  max: 5,              // 5 attempts per window
-  message: { error: 'Too many login attempts, please try again in 30 seconds' },
+  windowMs: 60 * 1000, // 1-minute window
+  max: 30,             // 30 attempts per minute
+  message: { error: 'Too many login attempts, please try again in a minute' },
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // don't count successful logins toward the limit
@@ -77,7 +77,7 @@ const authLimiter = rateLimit({
 
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 500,
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 1000,
   message: { error: 'Too many requests, try again later' },
   standardHeaders: true,
   legacyHeaders: false,
