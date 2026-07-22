@@ -23,13 +23,14 @@ async function main() {
     const { rows: issues } = await client.query(`
       SELECT pi.*, pm.process_code, pm.process_group,
              m.code as machine_code, mp.status as mp_status, mp.completed_at as mp_completed_at,
-             inv.lot_number, inv.category as process_lot_category, inv.weight as process_lot_weight,
+             inv.lot_number, item.category as process_lot_category, inv.weight as process_lot_weight,
              inv.root_lot_id, inv.id as process_lot_id_val
       FROM lot_process_issues pi
       LEFT JOIN process_master pm ON pm.process_code = pi.process_type
       LEFT JOIN machine_processes mp ON mp.id = pi.machine_process_id
       LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN inventory inv ON inv.id = COALESCE(pi.process_lot_id, pi.source_lot_id)
+      LEFT JOIN items item ON item.id = inv.item_id
       WHERE pi.issue_number = $1
     `, [issueCode]);
 
