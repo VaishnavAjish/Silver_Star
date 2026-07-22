@@ -70,26 +70,22 @@ async function main() {
     let proofSource = null;
     if (attachedSeeds.length > 0) {
       for (const s of attachedSeeds) {
-        // Check movements
-        const { rows: moves } = await client.query(
-          `SELECT * FROM inventory_movements WHERE inventory_id = $1 AND weight > 0 ORDER BY created_at ASC LIMIT 1`,
-          [s.id]
-        );
-        if (moves.length > 0) {
-          provenHistoricalWeight = parseFloat(moves[0].weight);
-          proofSource = `inventory_movements (id ${moves[0].id})`;
-          break;
-        }
-        // Check lot_op_log
-        const { rows: ops } = await client.query(
-          `SELECT * FROM lot_op_log WHERE lot_id = $1 AND details->>'weight' IS NOT NULL ORDER BY created_at ASC LIMIT 1`,
-          [s.id]
-        );
-        if (ops.length > 0 && parseFloat(ops[0].details.weight) > 0) {
-          provenHistoricalWeight = parseFloat(ops[0].details.weight);
-          proofSource = `lot_op_log (id ${ops[0].id})`;
-          break;
-        }
+        // Check lot_op_log for historical reference weight
+        try {
+          const { rows: ops } = await client.query(
+            `SELECT * FROM lot_op_log WHERE lot_id = $1 ORDER BY created_at ASC`,
+            [s.id]
+          );
+          for (const op of ops) {
+            const w = parseFloat(op.details?.weight || op.details?.refWeight || 0);
+            if (w > 0) {
+              provenHistoricalWeight = w;
+              proofSource = `lot_op_log (id ${op.id})`;
+              break;
+            }
+          }
+          if (provenHistoricalWeight !== null) break;
+        } catch(e) {}
       }
     }
 
