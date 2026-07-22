@@ -2,11 +2,16 @@ const express = require('express');
 const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
 const { authenticate, authorize } = require('../middleware/auth');
-const { syncBillStatus, syncInvoiceStatus } = require('../services/openDocumentService');
+const { syncBillStatus, syncInvoiceStatus, autoAllocateJE, autoAllocateAllUnallocatedJEs } = require('../services/openDocumentService');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 
 const router = express.Router();
+
+// Run auto-allocation on server startup for unallocated JEs
+autoAllocateAllUnallocatedJEs().catch(err => {
+  logger.error('[autoAllocateAllUnallocatedJEs init error]', { error: err.message });
+});
 
 function validateLines(lines) {
   if (!lines || lines.length < 2) throw new Error('At least 2 lines required');
@@ -88,7 +93,10 @@ async function insertJournal(client, { date, description, sourceType, sourceId, 
        line.entityType || null, line.entityId || null, line.referenceNo || null]
     );
   }
-  if (status === 'posted') await updateBalances(client, cleanLines);
+  if (status === 'posted') {
+    await updateBalances(client, cleanLines);
+    await autoAllocateJE(jeR.rows[0].id, client);
+  }
   return jeR.rows[0];
 }
 
@@ -293,7 +301,10 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
            line.entityType || null, line.entityId || null, line.referenceNo || null]
         );
       }
-      if (status === 'posted') await updateBalances(client, parsed.lines);
+      if (status === 'posted') {
+        await updateBalances(client, parsed.lines);
+        await autoAllocateJE(je.id, client);
+      }
       await client.query('COMMIT');
       dispatchEvent('journal.updated', { id: je.id, je_number: je.je_number, action: 'draft_updated' });
       return res.json({ success: true, id: je.id, mode: 'draft_updated' });

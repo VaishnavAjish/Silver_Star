@@ -230,6 +230,91 @@ async function syncInvoiceStatus(invoiceId, client) {
   );
 }
 
+// ── Auto-allocate Journal Entry against open bills / invoices (FIFO) ─────────
+async function autoAllocateJE(jeId, client = pool) {
+  // Check if allocations already exist for this JE
+  const existing = await client.query('SELECT 1 FROM je_allocations WHERE je_id = $1 LIMIT 1', [jeId]);
+  if (existing.rows.length > 0) return; // Already allocated
+
+  // Fetch posted JE lines for vendor/customer
+  const lines = await client.query(`
+    SELECT jl.*
+    FROM je_lines jl
+    JOIN journal_entries je ON je.id = jl.je_id
+    WHERE jl.je_id = $1 AND je.status = 'posted' AND jl.entity_type IN ('vendor', 'customer') AND jl.entity_id IS NOT NULL
+  `, [jeId]);
+
+  const allocDate = new Date().toISOString().split('T')[0];
+
+  for (const line of lines.rows) {
+    const entityType = line.entity_type;
+    const entityId   = parseInt(line.entity_id, 10);
+    const debit      = parseFloat(line.debit) || 0;
+    const credit     = parseFloat(line.credit) || 0;
+
+    if (entityType === 'vendor' && debit > 0) {
+      // Vendor debit line (or net reduction in vendor payable) -> allocate against open bills (FIFO)
+      let available = debit;
+      const openBills = await getVendorOpenBills(entityId, client);
+      for (const bill of openBills) {
+        if (available <= 0.005) break;
+        const outstanding = parseFloat(bill.outstanding || 0);
+        if (outstanding <= 0.005) continue;
+
+        const take = Math.min(outstanding, available);
+        await client.query(`
+          INSERT INTO je_allocations
+            (entity_type, entity_id, je_id, je_line_id, target_type, target_id, allocated_amount, allocation_date, notes)
+          VALUES ($1, $2, $3, $4, 'bill', $5, $6, $7, $8)
+        `, ['vendor', entityId, jeId, line.id, bill.id, take, allocDate, 'Auto-allocated JE adjustment']);
+
+        await syncBillStatus(bill.id, client);
+        available -= take;
+      }
+    } else if (entityType === 'customer' && credit > 0) {
+      // Customer credit line (or net reduction in customer receivable) -> allocate against open invoices (FIFO)
+      let available = credit;
+      const openInvoices = await getCustomerOpenInvoices(entityId, client);
+      for (const inv of openInvoices) {
+        if (available <= 0.005) break;
+        const outstanding = parseFloat(inv.outstanding || 0);
+        if (outstanding <= 0.005) continue;
+
+        const take = Math.min(outstanding, available);
+        await client.query(`
+          INSERT INTO je_allocations
+            (entity_type, entity_id, je_id, je_line_id, target_type, target_id, allocated_amount, allocation_date, notes)
+          VALUES ($1, $2, $3, $4, 'invoice', $5, $6, $7, $8)
+        `, ['customer', entityId, jeId, line.id, inv.id, take, allocDate, 'Auto-allocated JE adjustment']);
+
+        await syncInvoiceStatus(inv.id, client);
+        available -= take;
+      }
+    }
+  }
+}
+
+async function autoAllocateAllUnallocatedJEs(client = pool) {
+  try {
+    const unallocated = await client.query(`
+      SELECT DISTINCT je.id
+      FROM journal_entries je
+      JOIN je_lines jl ON jl.je_id = je.id
+      WHERE je.status = 'posted'
+        AND jl.entity_type IN ('vendor', 'customer')
+        AND jl.entity_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM je_allocations ja WHERE ja.je_id = je.id)
+      ORDER BY je.id ASC
+    `);
+
+    for (const row of unallocated.rows) {
+      await autoAllocateJE(row.id, client);
+    }
+  } catch (err) {
+    console.error('[autoAllocateAllUnallocatedJEs] error:', err.message);
+  }
+}
+
 module.exports = {
   getBillOutstanding,
   getInvoiceOutstanding,
@@ -237,4 +322,6 @@ module.exports = {
   getCustomerOpenInvoices,
   syncBillStatus,
   syncInvoiceStatus,
+  autoAllocateJE,
+  autoAllocateAllUnallocatedJEs,
 };
