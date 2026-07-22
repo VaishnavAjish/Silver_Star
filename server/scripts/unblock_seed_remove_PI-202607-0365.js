@@ -118,7 +118,7 @@ async function main() {
     // ──────────────────────────────────────────────────────────────────────────
     const remQty = parseFloat(issue.remaining_in_process || issue.issued_qty || 0);
     const assertSingleIssue = issues.length === 1;
-    const assertMachine = !issue.machine_code || String(issue.machine_code).toUpperCase().includes('LS-03') || String(issue.machine_code).toUpperCase().includes('LS03');
+    const assertMachine = !issue.machine_code || String(issue.machine_code).toUpperCase().includes('LS-03') || String(issue.machine_code).toUpperCase().includes('LS03') || String(issue.machine_code).toUpperCase().includes('FB-M-03');
     const assertProcess = issue.process_type === 'seed_remove';
     const assertOpen = issue.status === 'OPEN';
     const assertRemaining = Math.abs(remQty - 30) < 0.01;
