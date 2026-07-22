@@ -61,17 +61,17 @@ router.post('/login', asyncWrap(async (req, res) => {
     `SELECT COUNT(*) as failed_count, MAX(created_at) as last_attempt
      FROM login_attempts
      WHERE username = $1 AND ip_address = $2 AND success = false
-       AND created_at > NOW() - INTERVAL '15 minutes'`,
+       AND created_at > NOW() - INTERVAL '5 minutes'`,
     [username.toLowerCase(), ip]
   );
 
   const failedCount = parseInt(lockoutCheck.rows[0]?.failed_count || '0');
   if (failedCount >= 5) {
     const lastAttempt = lockoutCheck.rows[0]?.last_attempt;
-    const lockoutUntil = new Date(new Date(lastAttempt).getTime() + 15 * 60 * 1000);
+    const lockoutUntil = new Date(new Date(lastAttempt).getTime() + 5 * 60 * 1000);
     logger.warn('[Auth] Account locked due to failed attempts', { username, ip, failedCount });
     return res.status(429).json({ 
-      error: 'Too many failed attempts. Account locked for 15 minutes.',
+      error: 'Too many failed attempts. Account locked for 5 minutes.',
       lockoutUntil: lockoutUntil.toISOString()
     });
   }
