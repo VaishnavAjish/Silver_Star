@@ -49,7 +49,10 @@ router.get('/roles', ...adminOnly, (_req, res) => res.json(ROLES));
 // POST /api/admin/users
 router.post('/users', ...adminOnly, async (req, res) => {
   try {
-    const { username, email, password, full_name, role, department_id } = req.body;
+    let { username, email, password, full_name, role, department_id } = req.body;
+    username = (username || '').trim();
+    email = email ? email.trim() : null;
+    full_name = (full_name || '').trim();
     if (!username || !password || !full_name) return res.status(400).json({ error: 'username, password, full_name required' });
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
@@ -88,7 +91,10 @@ router.post('/users', ...adminOnly, async (req, res) => {
 router.put('/users/:id', ...adminOnly, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { username, email, full_name, role, department_id } = req.body;
+    let { username, email, full_name, role, department_id } = req.body;
+    username = (username || '').trim();
+    email = email ? email.trim() : null;
+    full_name = (full_name || '').trim();
     if (!username || !full_name) return res.status(400).json({ error: 'username, full_name required' });
     if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (id === req.user.id && role !== 'admin' && role !== 'super_admin') return res.status(400).json({ error: 'Cannot change your own role away from admin' });

@@ -49,7 +49,8 @@ const issueTokens = async (res, user) => {
 
 // POST /api/auth/login
 router.post('/login', asyncWrap(async (req, res) => {
-  const { username, password, mfaToken } = req.body;
+  const { password, mfaToken } = req.body;
+  const username = (req.body.username || '').trim();
   const ip = req.ip || req.connection.remoteAddress;
 
   if (!username || !password) {
