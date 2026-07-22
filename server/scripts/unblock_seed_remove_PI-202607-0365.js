@@ -77,7 +77,11 @@ async function main() {
             [s.id]
           );
           for (const op of ops) {
-            const w = parseFloat(op.details?.weight || op.details?.refWeight || 0);
+            let w = 0;
+            if (op.notes && typeof op.notes === 'string') {
+              const match = op.notes.match(/weight[^\d]*([\d\.]+)/i);
+              if (match) w = parseFloat(match[1]);
+            }
             if (w > 0) {
               provenHistoricalWeight = w;
               proofSource = `lot_op_log (id ${op.id})`;
@@ -169,14 +173,14 @@ async function main() {
 
     // Write audit log
     await client.query(`
-      INSERT INTO lot_op_log (lot_id, operation, reference_type, reference_id, details)
+      INSERT INTO lot_op_log (lot_id, operation, reference_type, reference_id, notes)
       VALUES ($1, $2, $3, $4, $5)
     `, [
       issue.process_lot_id_val || issue.source_lot_id,
       pathUsed === 'A' ? 'seed_reference_reconstruct' : 'seed_reference_override',
       'lot_process_issues',
       issue.id,
-      JSON.stringify({ reason: auditReason, old_ref: 0.0000, new_ref: provenOrAuthRef })
+      auditReason
     ]);
 
     await client.query('COMMIT');
