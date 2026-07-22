@@ -90,13 +90,13 @@ async function main() {
     }
 
     const { rows: existingReturns } = await client.query(
-      `SELECT * FROM process_returns WHERE process_issue_id = $1`, [issue.id]
+      `SELECT * FROM lot_process_returns WHERE issue_id = $1`, [issue.id]
     );
 
     const { rows: existingOutputs } = await client.query(
       `SELECT * FROM inventory WHERE id IN (
-        SELECT inventory_id FROM process_return_outputs WHERE process_return_id IN (
-          SELECT id FROM process_returns WHERE process_issue_id = $1
+        SELECT lot_id FROM process_return_lines WHERE return_id IN (
+          SELECT id FROM lot_process_returns WHERE issue_id = $1
         )
       )`, [issue.id]
     );
@@ -248,7 +248,7 @@ async function main() {
     // POST-RETURN VERIFICATION
     // ──────────────────────────────────────────────────────────────────────────
     const { rows: verifyReturns } = await client.query(
-      `SELECT * FROM process_returns WHERE process_issue_id = $1`, [issue.id]
+      `SELECT * FROM lot_process_returns WHERE issue_id = $1`, [issue.id]
     );
 
     const { rows: verifyIssue } = await client.query(
@@ -261,9 +261,9 @@ async function main() {
 
     const { rows: verifyOutputs } = await client.query(`
       SELECT inv.*, pro.return_type
-      FROM process_return_outputs pro
-      JOIN inventory inv ON inv.id = pro.inventory_id
-      WHERE pro.process_return_id IN (SELECT id FROM process_returns WHERE process_issue_id = $1)
+      FROM process_return_lines pro
+      JOIN inventory inv ON inv.id = pro.lot_id
+      WHERE pro.return_id IN (SELECT id FROM lot_process_returns WHERE issue_id = $1)
     `, [issue.id]);
 
     const returnPosted = verifyReturns.length === 1 && verifyIssue[0].status === 'RETURNED';
