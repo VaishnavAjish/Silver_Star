@@ -55,3 +55,23 @@ test('Frontend LotIssuePage contract: checks requires_machine', () => {
     'LotIssuePage.jsx validation must only require machineId when requiresMachine is true'
   );
 });
+
+test('Machine-less execution contract: growthRunService and manufacturingProcesses use LEFT JOIN machines', () => {
+  const growthRunServiceSource = fs.readFileSync(
+    path.join(__dirname, '../services/growthRunService.js'),
+    'utf8'
+  );
+  assert.ok(
+    growthRunServiceSource.includes('LEFT JOIN machines m ON m.id = mp.machine_id'),
+    'growthRunService.js must use LEFT JOIN machines so machine-less process execution rows resolve without throwing'
+  );
+
+  const mfgProcSource = fs.readFileSync(
+    path.join(__dirname, '../routes/manufacturingProcesses.js'),
+    'utf8'
+  );
+  assert.ok(
+    !mfgProcSource.includes('FROM machine_processes mp\n      JOIN machines m'),
+    'manufacturingProcesses.js must not use INNER JOIN machines for machine_processes queries'
+  );
+});

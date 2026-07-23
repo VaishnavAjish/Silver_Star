@@ -404,7 +404,7 @@ router.get('/processes', authenticate, async (req, res) => {
              m.code AS machine_code, m.name AS machine_name,
              u.full_name AS operator_name
       FROM machine_processes mp
-      JOIN machines m ON m.id = mp.machine_id
+      LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN users u ON u.id = mp.operator_id
       WHERE ${where.join(' AND ')}
       ORDER BY mp.created_at DESC
@@ -432,7 +432,7 @@ router.get('/processes/:id', authenticate, async (req, res) => {
              m.code AS machine_code, m.name AS machine_name,
              u.full_name AS operator_name
       FROM machine_processes mp
-      JOIN machines m ON m.id = mp.machine_id
+      LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN users u ON u.id = mp.operator_id
       WHERE mp.id = $1
     `, [req.params.id]);
@@ -477,7 +477,7 @@ router.get('/processes/:id/output-context', authenticate, async (req, res) => {
              u.full_name AS operator_name,
              pm.process_name, pm.completion_mode, pm.output_type
       FROM machine_processes mp
-      JOIN machines m ON m.id = mp.machine_id
+      LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN departments d ON d.id = m.department_id
       LEFT JOIN users u ON u.id = mp.operator_id
       LEFT JOIN process_master pm ON pm.process_code = mp.process_type

@@ -122,7 +122,7 @@ async function createGrowthRun(client, machineProcessId, opts = {}) {
             m.name AS machine_name,
             pm.process_group
        FROM machine_processes mp
-       JOIN machines m ON m.id = mp.machine_id
+       LEFT JOIN machines m ON m.id = mp.machine_id
        LEFT JOIN process_master pm ON pm.process_code = mp.process_type
       WHERE mp.id = $1
       FOR UPDATE OF mp`,
