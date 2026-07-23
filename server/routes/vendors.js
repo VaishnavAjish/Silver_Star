@@ -76,6 +76,9 @@ router.get('/summary', authenticate, async (req, res) => {
             pn.grand_total,
             pn.doc_date,
             pn.payment_term,
+            (CASE WHEN pn.payment_term ~ '[0-9]'
+                  THEN regexp_replace(pn.payment_term, '[^0-9]', '', 'g')::int
+                  ELSE 0 END) AS due_days,
             COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_allocated,
             GREATEST(0, pn.grand_total - (COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0))) AS outstanding
           FROM purchase_notes pn
@@ -106,7 +109,7 @@ router.get('/summary', authenticate, async (req, res) => {
           (SELECT available_advances FROM advances) AS available_advances,
           GREATEST(0, COALESCE(SUM(b.outstanding), 0) - (SELECT available_advances FROM advances)) AS net_payable,
           COALESCE(SUM(
-            CASE WHEN (b.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE AND b.outstanding > 0.005
+            CASE WHEN (b.doc_date + INTERVAL '1 day' * b.due_days)::date < CURRENT_DATE AND b.outstanding > 0.005
                  THEN b.outstanding ELSE 0 END
           ), 0) AS overdue,
           (SELECT unallocated_payments_count FROM unallocated) AS unallocated_payments,
