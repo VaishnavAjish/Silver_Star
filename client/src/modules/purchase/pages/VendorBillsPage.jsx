@@ -4,7 +4,7 @@ import { useNavigate, Link, useParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import DataGrid from '../../../shared/components/DataGrid';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
-import { Plus, Receipt, X, Save, Trash2, Edit, ShoppingCart } from 'lucide-react';
+import { Plus, Receipt, X, Save, Trash2, Edit, ShoppingCart, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import QuickCreateVendorModal from '../../../shared/components/QuickCreateVendorModal';
 import QuickCreateModal from '../../../features/quick-create/QuickCreateModal';
