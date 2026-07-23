@@ -208,7 +208,7 @@ async function applyAdvancesToBill({ purchaseNoteId, vendorId, mode = 'auto', al
   await client.query(`
     CREATE TABLE IF NOT EXISTS vendor_advance_applications (
       id               SERIAL PRIMARY KEY,
-      advance_id       INTEGER NOT NULL REFERENCES vendor_advances(id),
+      advance_id       INTEGER NOT NULL,
       purchase_note_id INTEGER NOT NULL REFERENCES purchase_notes(id),
       vendor_id        INTEGER NOT NULL REFERENCES vendors(id),
       amount           NUMERIC(15,2) NOT NULL CHECK (amount > 0),
