@@ -191,8 +191,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const isLaser  = processGroup === 'LASER';
 
   // Boolean visibility flags — default to permissive (true) while loading
-  const showInventory = selectedProcess ? !!selectedProcess.requires_inventory      : true;
-  const showOperator  = selectedProcess ? !!selectedProcess.requires_operator       : false;
+  const requiresMachine = selectedProcess ? !!selectedProcess.requires_machine     : true;
+  const showInventory   = selectedProcess ? !!selectedProcess.requires_inventory     : true;
+  const showOperator    = selectedProcess ? !!selectedProcess.requires_operator      : false;
 
   // Phase 35: Enforce GROWTH / LASER overrides
   const showRuntime   = isGrowth || isLaser || (selectedProcess ? !!selectedProcess.requires_runtime : false);
@@ -465,7 +466,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
   const hasQtyError = qtyErrors.some(Boolean);
   const filledLots  = selectedLots.filter(sl => (parseFloat(sl.issuedQty) || 0) > 0);
 
-  const valid = !!machineId && !!processType && !hasQtyError && (
+  const valid = (requiresMachine ? !!machineId : true) && !!processType && !hasQtyError && (
     showInventory ? filledLots.length > 0 : true
   ) && (!reqRuntime || !!targetRuntime);
 
@@ -485,7 +486,7 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
     setSaving(true);
     try {
       const body = {
-        machine_id:   parseInt(machineId),
+        machine_id:   requiresMachine && machineId ? parseInt(machineId) : undefined,
         operator_id:  operatorId    ? parseInt(operatorId)       : undefined,
         process_type: processType,
         issue_date:   issueDate,
@@ -505,8 +506,9 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
 
       const res = await api.post('/api/lot-process-issues', body);
       const procName = selectedProcess?.process_name || processType;
+      const machMsg  = res.machine_code && res.machine_code !== 'N/A' ? ` on ${res.machine_code}` : '';
       toast.success(
-        `Process ${res.process_number} (${procName}) started on ${res.machine_code}` +
+        `Process ${res.process_number} (${procName}) started${machMsg}` +
         (res.issue_count > 0 ? ` — ${res.issue_count} lot${res.issue_count !== 1 ? 's' : ''} issued` : '')
       );
       // TASK 1: Clipboard is NOT cleared here — operator may want to use
@@ -945,44 +947,58 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
 
             {/* ── MACHINE ── */}
             <SectionHeader>Machine</SectionHeader>
-            <div style={{ marginBottom: 10 }}>
-              <label style={lbl}>
-                Machine *
-                {filteredMachines.length === 0 && !loading && (
-                  <span style={{ color: '#E65100', fontWeight: 400, marginLeft: 6 }}>— no active machines</span>
-                )}
-              </label>
-              <SelectDropdown style={inp} value={machineId} onChange={e => handleMachineChange(e.target.value)}>
-                <option value="">— select machine —</option>
-                {filteredMachines.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}{m.machine_status && m.machine_status !== 'idle' ? ` (${m.machine_status})` : ''}
-                  </option>
-                ))}
-              </SelectDropdown>
-            </div>
-
-            {/* Machine info card — shown only when a machine is selected */}
-            {selectedMachine && (
-              <div style={{
-                background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
-                padding: '10px 12px', marginBottom: 16,
-                display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 8,
-              }}>
-                {[
-                  { label: 'Code',       value: selectedMachine.code,            mono: true },
-                  { label: 'Department', value: selectedMachine.department_name || '—' },
-                  { label: 'Type',       value: selectedMachine.machine_type     || '—' },
-                ].map(({ label, value, mono }) => (
-                  <div key={label}>
-                    <div style={{ fontSize: 9, color: 'var(--g500)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>{label}</div>
-                    <div style={{ fontSize: mono ? 11 : 12, fontWeight: 600, color: 'var(--g800)', fontFamily: mono ? 'var(--mono)' : undefined }}>{value}</div>
-                  </div>
-                ))}
-                <div>
-                  <div style={{ fontSize: 9, color: 'var(--g500)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>Status</div>
-                  <MachineStatusBadge status={selectedMachine.machine_status} />
+            {requiresMachine ? (
+              <>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={lbl}>
+                    Machine *
+                    {filteredMachines.length === 0 && !loading && (
+                      <span style={{ color: '#E65100', fontWeight: 400, marginLeft: 6 }}>— no active machines</span>
+                    )}
+                  </label>
+                  <SelectDropdown style={inp} value={machineId} onChange={e => handleMachineChange(e.target.value)}>
+                    <option value="">— select machine —</option>
+                    {filteredMachines.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}{m.machine_status && m.machine_status !== 'idle' ? ` (${m.machine_status})` : ''}
+                      </option>
+                    ))}
+                  </SelectDropdown>
                 </div>
+
+                {/* Machine info card — shown only when a machine is selected */}
+                {selectedMachine && (
+                  <div style={{
+                    background: '#fff', border: '1px solid var(--g200)', borderRadius: 8,
+                    padding: '10px 12px', marginBottom: 16,
+                    display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 8,
+                  }}>
+                    {[
+                      { label: 'Code',       value: selectedMachine.code,            mono: true },
+                      { label: 'Department', value: selectedMachine.department_name || '—' },
+                      { label: 'Type',       value: selectedMachine.machine_type     || '—' },
+                    ].map(({ label, value, mono }) => (
+                      <div key={label}>
+                        <div style={{ fontSize: 9, color: 'var(--g500)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>{label}</div>
+                        <div style={{ fontSize: mono ? 11 : 12, fontWeight: 600, color: 'var(--g800)', fontFamily: mono ? 'var(--mono)' : undefined }}>{value}</div>
+                      </div>
+                    ))}
+                    <div>
+                      <div style={{ fontSize: 9, color: 'var(--g500)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 2 }}>Status</div>
+                      <MachineStatusBadge status={selectedMachine.machine_status} />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{
+                marginBottom: 14, padding: '8px 12px', borderRadius: 6,
+                background: 'var(--g100)', border: '1px solid var(--g200)',
+                fontSize: 11, color: 'var(--g600)', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <Info size={13} color="var(--g500)" />
+                Machine not required for this process
               </div>
             )}
 
@@ -1077,12 +1093,12 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
                 <AlertCircle size={12} /> Select a process type to continue
               </div>
             )}
-            {processType && !machineId && (
+            {processType && requiresMachine && !machineId && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#E65100', marginBottom: 8 }}>
                 <AlertCircle size={12} /> Select a machine to continue
               </div>
             )}
-            {machineId && showInventory && filledLots.length === 0 && (
+            {(requiresMachine ? !!machineId : true) && showInventory && filledLots.length === 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#E65100', marginBottom: 8 }}>
                 <AlertCircle size={12} /> Add at least one lot with a quantity
               </div>
@@ -1114,12 +1130,12 @@ export default function LotIssuePage({ initialLotId, onComplete, onCancel, isMod
               </button>
             </div>
 
-            {valid && selectedMachine && (
+            {valid && (
               <div style={{
                 fontSize: 10, color: 'var(--g500)', marginTop: 6,
                 textAlign: 'center', fontFamily: 'var(--mono)',
               }}>
-                {selectedMachine.code} · {selectedProcess?.process_name || processType}
+                {requiresMachine && selectedMachine ? `${selectedMachine.code} · ` : ''}{selectedProcess?.process_name || processType}
                 {showInventory && filledLots.length > 0
                   ? ` · ${filledLots.length} lot${filledLots.length !== 1 ? 's' : ''} · ${totalIssuedQty.toFixed(4)} units`
                   : ' · no inventory'}

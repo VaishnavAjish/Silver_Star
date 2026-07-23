@@ -438,8 +438,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     issue_date, expected_return, department, operator, remarks,
   } = req.body;
 
-  // ── Flow A: machine-linked ────────────────────────────────────────────────
-  if (machine_id) {
+  // ── Flow A: process issue engine ──────────────────────────────────────────
+  if (machine_id || process_type || (Array.isArray(lots) && lots.length > 0)) {
     const lotsArr = Array.isArray(lots) && lots.length > 0
       ? lots
       : (source_lot_id ? [{ source_lot_id, issued_qty }] : []);
@@ -458,6 +458,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       if (!pmRows.length)
         throw new Error(`Unknown or inactive process type: '${normalizedPType}'. Configure it in Management → Process Master.`);
       const processRules = pmRows[0];
+      const requiresMachine = !!processRules.requires_machine;
 
       // Growth Run state machine: is this a GROWTH-group process? Resolved
       // from stable Process Master data (canonical pr-01 included) — never a
@@ -482,16 +483,23 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       if (!processRules.requires_inventory && lotsArr.length > 0)
         throw new Error(`Process '${processRules.process_name}' does not accept inventory lots.`);
 
-      // 1. Lock and validate machine
-      // FOR UPDATE OF m only — cannot lock nullable side of LEFT JOIN
-      const { rows: machRows } = await client.query(
-        `SELECT m.*, d.name AS department_name
-         FROM machines m LEFT JOIN departments d ON d.id = m.department_id
-         WHERE m.id = $1 FOR UPDATE OF m`,
-        [parseInt(machine_id)]
-      );
-      if (!machRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Machine not found' }); }
-      const machine = machRows[0];
+      // 1. Lock and validate machine (only if process requires a machine)
+      let machine = { id: null, code: 'N/A', name: 'No Machine', department_id: null, status: 'idle' };
+      let effectiveMachineId = null;
+      if (requiresMachine) {
+        if (!machine_id) {
+          throw new Error(`Process '${processRules.process_name}' requires a machine.`);
+        }
+        effectiveMachineId = parseInt(machine_id);
+        const { rows: machRows } = await client.query(
+          `SELECT m.*, d.name AS department_name
+           FROM machines m LEFT JOIN departments d ON d.id = m.department_id
+           WHERE m.id = $1 FOR UPDATE OF m`,
+          [effectiveMachineId]
+        );
+        if (!machRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Machine not found' }); }
+        machine = machRows[0];
+      }
 
       // 2. Validate and lock all source lots (skipped when requires_inventory = false)
       const lockedLots = [];
@@ -605,7 +613,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
          VALUES ($1,$2,$3,$4,'running',$5,$6,$7,$8,$9)
          RETURNING *`,
         [
-          processNum, parseInt(machine_id),
+          processNum, effectiveMachineId,
           operator_id ? parseInt(operator_id) : null,
           normalizedPType,
           effectiveRuntime,
@@ -798,7 +806,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
             issueNum, lot.id, childLot.id, qty,
             issue_date || new Date().toISOString().split('T')[0],
             expected_return || null, remarks || null, req.user.id,
-            parseInt(machine_id),
+            effectiveMachineId,
             operator_id ? parseInt(operator_id) : null,
             machProc.id,
             normalizedPType,
@@ -842,11 +850,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         });
       }
 
-      // 5. Set machine to 'running' and log status change
-      const oldMachStatus = machine.status;
-      await client.query(`UPDATE machines SET status = 'running' WHERE id = $1`, [parseInt(machine_id)]);
-      await logMachineStatus(client, parseInt(machine_id), oldMachStatus, 'running', req.user.id,
-        `Process ${processNum} started via Issue to Process`);
+      // 5. Set machine to 'running' and log status change (only if machine-required)
+      if (requiresMachine && effectiveMachineId) {
+        const oldMachStatus = machine.status;
+        await client.query(`UPDATE machines SET status = 'running' WHERE id = $1`, [effectiveMachineId]);
+        await logMachineStatus(client, effectiveMachineId, oldMachStatus, 'running', req.user.id,
+          `Process ${processNum} started via Issue to Process`);
+      }
 
       // 6. Phase 34: create the Growth Run (biscuit) IMMEDIATELY at process start.
       //    createGrowthRun is gated to process_group='GROWTH' (returns null for
@@ -901,7 +911,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // Real-Time: process started (machine-linked flow)
       dispatchEvent('process.started', {
         process_number: processNum, machine_process_id: machProc.id,
-        process_type: normalizedPType, machine_id: parseInt(machine_id),
+        process_type: normalizedPType, machine_id: effectiveMachineId,
         issues_count: issues.length, created_by: req.user.id,
       });
 
@@ -2290,12 +2300,14 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
               if (mpUpd.rowCount !== 1) {
                 throw new Error(`Return aborted: expected to complete exactly one machine process (#${mp.id}), updated ${mpUpd.rowCount}.`);
               }
-              const macUpd = await client.query(`UPDATE machines SET status='idle' WHERE id=$1`, [mp.machine_id]);
-              if (macUpd.rowCount !== 1) {
-                throw new Error(`Return aborted: expected to release exactly one machine (#${mp.machine_id}), updated ${macUpd.rowCount}.`);
+              if (mp.machine_id) {
+                const macUpd = await client.query(`UPDATE machines SET status='idle' WHERE id=$1`, [mp.machine_id]);
+                if (macUpd.rowCount !== 1) {
+                  throw new Error(`Return aborted: expected to release exactly one machine (#${mp.machine_id}), updated ${macUpd.rowCount}.`);
+                }
+                await logMachineStatus(client, mp.machine_id, mp.status, 'idle', req.user.id,
+                  `All lots returned — process ${mp.process_number} auto-completed`);
               }
-              await logMachineStatus(client, mp.machine_id, mp.status, 'idle', req.user.id,
-                `All lots returned — process ${mp.process_number} auto-completed`);
 
               // Growth first cycle completed via Return: advance the single
               // biscuit IN PROCESS → IN STOCK (idempotent; no-op for non-growth

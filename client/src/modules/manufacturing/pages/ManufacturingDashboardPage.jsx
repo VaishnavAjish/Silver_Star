@@ -854,21 +854,23 @@ function StartProcessModal({ machines, operators, seedLots, processes, onSubmit,
   const [submitting, setSubmitting] = useState(false);
 
   // Show all machines; mark non-idle ones so user understands the risk
-  const allMachines = useMemo(() => machines, [machines]);
+  const allMachines = useMemo(() => machines || [], [machines]);
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const addLot = () => setLots(l => [...l, { inventory_lot_id: '', issued_qty: '', issued_weight: '' }]);
-  const removeLot = i => setLots(l => l.filter((_, idx) => idx !== i));
-  const setLot = (i, k, v) => setLots(l => l.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
+  const selectedProc = useMemo(
+    () => (processes || []).find(p => p.process_code === form.process_type) || null,
+    [processes, form.process_type]
+  );
+  const requiresMachine = selectedProc ? !!selectedProc.requires_machine : true;
 
   const handleSubmit = async () => {
-    if (!form.machine_id) { toast.error('Select a machine'); return; }
+    if (requiresMachine && !form.machine_id) { toast.error('Select a machine'); return; }
     if (!form.process_type) { toast.error('Select a process type'); return; }
     setSubmitting(true);
     try {
       await onSubmit({
         ...form,
-        machine_id: parseInt(form.machine_id),
+        machine_id: requiresMachine && form.machine_id ? parseInt(form.machine_id) : null,
         operator_id: form.operator_id ? parseInt(form.operator_id) : null,
         target_runtime_hours: form.target_runtime_hours ? parseFloat(form.target_runtime_hours) : null,
         expected_rough_qty: form.expected_rough_qty ? parseFloat(form.expected_rough_qty) : null,
@@ -905,24 +907,30 @@ function StartProcessModal({ machines, operators, seedLots, processes, onSubmit,
         <div className="modal-body" style={{ overflowY: 'auto', maxHeight: 'calc(85vh - 120px)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={lbl}>Machine *</label>
-              <SelectDropdown style={inp} value={form.machine_id} onChange={set('machine_id')}>
-                <option value="">— select machine —</option>
-                {allMachines.filter(m => m.derived_state === 'idle').length > 0 && (
-                  <optgroup label="Available (ready)">
-                    {allMachines.filter(m => m.derived_state === 'idle').map(m =>
-                      <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
-                    )}
-                  </optgroup>
-                )}
-                {allMachines.filter(m => m.derived_state !== 'idle').length > 0 && (
-                  <optgroup label="Other (not available)">
-                    {allMachines.filter(m => m.derived_state !== 'idle').map(m =>
-                      <option key={m.id} value={m.id}>{m.code} — {m.name} [{m.derived_state}]</option>
-                    )}
-                  </optgroup>
-                )}
-              </SelectDropdown>
+              <label style={lbl}>Machine {requiresMachine ? '*' : '(optional)'}</label>
+              {requiresMachine ? (
+                <SelectDropdown style={inp} value={form.machine_id} onChange={set('machine_id')}>
+                  <option value="">— select machine —</option>
+                  {allMachines.filter(m => m.derived_state === 'idle').length > 0 && (
+                    <optgroup label="Available (ready)">
+                      {allMachines.filter(m => m.derived_state === 'idle').map(m =>
+                        <option key={m.id} value={m.id}>{m.code} — {m.name}</option>
+                      )}
+                    </optgroup>
+                  )}
+                  {allMachines.filter(m => m.derived_state !== 'idle').length > 0 && (
+                    <optgroup label="Other (not available)">
+                      {allMachines.filter(m => m.derived_state !== 'idle').map(m =>
+                        <option key={m.id} value={m.id}>{m.code} — {m.name} [{m.derived_state}]</option>
+                      )}
+                    </optgroup>
+                  )}
+                </SelectDropdown>
+              ) : (
+                <div style={{ fontSize: 11, color: '#757575', padding: '8px 0' }}>
+                  Machine not required for this process
+                </div>
+              )}
             </div>
             <div>
               <label style={lbl}>Operator</label>
