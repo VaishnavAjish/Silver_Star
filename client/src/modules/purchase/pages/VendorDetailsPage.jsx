@@ -201,6 +201,12 @@ export default function VendorDetailsPage() {
   const ff = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   // ── Filtered left-panel list ──────────────────────────────────────────────
+  const filteredVendors = useMemo(() => {
+    return allVendors.filter(v =>
+      !panelSearch || v.name.toLowerCase().includes(panelSearch.toLowerCase())
+    );
+  }, [allVendors, panelSearch]);
+
   // ── Filtered transactions & filter-aware summary ──────────────────────────
   const filteredTxns = useMemo(() => {
     return txns.filter(t => {
