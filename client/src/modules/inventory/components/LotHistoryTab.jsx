@@ -104,7 +104,7 @@ export default function LotHistoryTab({ lotId }) {
 
   useEffect(() => {
     let mounted = true;
-    if (selectedRowId && selectedRow?.can_cancel) {
+    if (selectedRowId) {
       setEligibility({ loading: true, can_cancel: false, reason: null });
       api.get(`/api/inventory/history/eligibility?lot_id=${lotId}&canonical_transaction_key=${encodeURIComponent(selectedRowId)}`)
         .then(res => {
@@ -114,10 +114,10 @@ export default function LotHistoryTab({ lotId }) {
           if (mounted) setEligibility({ loading: false, can_cancel: false, reason: err.message });
         });
     } else {
-      setEligibility({ loading: false, can_cancel: false, reason: selectedRow ? 'Reversal not supported for this transaction type' : null });
+      setEligibility({ loading: false, can_cancel: false, reason: null });
     }
     return () => { mounted = false; };
-  }, [selectedRowId, selectedRow?.can_cancel, api]);
+  }, [selectedRowId, lotId, api]);
 
   // Reversal orchestration triggered by CancellationModal
   const handleConfirmReversal = async (row, reason) => {

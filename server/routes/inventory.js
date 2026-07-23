@@ -570,16 +570,16 @@ router.get('/:id/history', authenticate, async (req, res) => {
                -- Phase C: reversal eligibility is POLICY-driven, never mere
                -- pre_state presence — SEED_REMOVE snapshots carry
                -- reversal_supported:false and must never enable Cancel.
-               (pr.pre_state IS NOT NULL
+               (pr.id IS NOT NULL
+                AND pr.pre_state IS NOT NULL
                 AND COALESCE(pr.pre_state->>'reversal_supported', 'true') <> 'false'
-                AND COALESCE(pr.status, 'ACTIVE') <> 'REVERSED'
-                AND ol.operation = 'return_usable') AS reversible,
+                AND COALESCE(pr.status, 'ACTIVE') <> 'REVERSED') AS reversible,
                CASE
-                 WHEN ol.operation = 'return_usable' AND pr.id IS NOT NULL THEN 'lot_process_return'::text
+                 WHEN pr.id IS NOT NULL THEN 'lot_process_return'::text
                  ELSE 'lot_op_log'::text
                END AS source_type,
                CASE
-                 WHEN ol.operation = 'return_usable' AND pr.id IS NOT NULL THEN pr.id::int
+                 WHEN pr.id IS NOT NULL THEN pr.id::int
                  ELSE ol.id::int
                END AS source_id
         FROM lot_op_log ol
