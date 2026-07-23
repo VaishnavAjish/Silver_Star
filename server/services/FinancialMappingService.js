@@ -19,7 +19,34 @@ async function _resolveByRole(role, client = pool) {
     return cached.value;
   }
 
-  const r = await client.query('SELECT id, code, name FROM accounts WHERE account_role = $1', [role]);
+  let r = await client.query('SELECT id, code, name FROM accounts WHERE account_role = $1', [role]);
+
+  if (!r.rows.length) {
+    if (role === 'VENDOR_ADVANCE') {
+      r = await client.query(`
+        SELECT id, code, name FROM accounts
+        WHERE code IN ('1050', '1301') OR name ILIKE '%vendor advance%' OR name ILIKE '%advance vendor%' OR name ILIKE '%advance to supplier%'
+        ORDER BY (code = '1050') DESC, (code = '1301') DESC, id
+        LIMIT 1
+      `);
+      if (r.rows.length) {
+        const accId = r.rows[0].id;
+        await client.query("UPDATE accounts SET account_role = $1 WHERE id = $2 AND (account_role IS NULL OR account_role = '')", [role, accId]);
+      }
+    } else if (role === 'ACCOUNTS_PAYABLE') {
+      r = await client.query(`
+        SELECT id, code, name FROM accounts
+        WHERE code IN ('3001', '2001') OR name ILIKE '%accounts payable%' OR name ILIKE '%sundry creditors%'
+        ORDER BY (code = '3001') DESC, id
+        LIMIT 1
+      `);
+      if (r.rows.length) {
+        const accId = r.rows[0].id;
+        await client.query("UPDATE accounts SET account_role = $1 WHERE id = $2 AND (account_role IS NULL OR account_role = '')", [role, accId]);
+      }
+    }
+  }
+
   if (!r.rows.length) {
     throw new Error(`[FinancialMappingService] Required account mapping not found for role: "${role}"`);
   }

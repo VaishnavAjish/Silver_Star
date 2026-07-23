@@ -33,6 +33,28 @@ async function main() {
       CREATE INDEX IF NOT EXISTS idx_vaa_advance  ON vendor_advance_applications(advance_id);
       CREATE INDEX IF NOT EXISTS idx_vaa_pn       ON vendor_advance_applications(purchase_note_id);
       CREATE INDEX IF NOT EXISTS idx_vaa_vendor   ON vendor_advance_applications(vendor_id, status);
+
+      UPDATE accounts SET account_role = 'VENDOR_ADVANCE'
+      WHERE (account_role IS NULL OR account_role = '')
+        AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_role = 'VENDOR_ADVANCE')
+        AND id = (
+          SELECT id FROM accounts
+          WHERE (account_role IS NULL OR account_role = '')
+            AND (code IN ('1050','1301') OR name ILIKE '%vendor advance%' OR name ILIKE '%advance vendor%' OR name ILIKE '%advance to supplier%')
+          ORDER BY (code = '1050') DESC, (code = '1301') DESC, id
+          LIMIT 1
+        );
+
+      UPDATE accounts SET account_role = 'ACCOUNTS_PAYABLE'
+      WHERE (account_role IS NULL OR account_role = '')
+        AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_role = 'ACCOUNTS_PAYABLE')
+        AND id = (
+          SELECT id FROM accounts
+          WHERE (account_role IS NULL OR account_role = '')
+            AND (code IN ('3001','2001') OR name ILIKE '%accounts payable%' OR name ILIKE '%sundry creditors%')
+          ORDER BY (code = '3001') DESC, id
+          LIMIT 1
+        );
     `);
 
     // 1. Fetch Payment PAY-1004
