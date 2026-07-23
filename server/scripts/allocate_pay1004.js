@@ -1,4 +1,7 @@
+const path = require('path');
 require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const pool = require('../db/pool');
 const { getBillOutstanding } = require('../services/openDocumentService');
 const { applyAdvancesToBill } = require('../services/vendorAdvanceService');
