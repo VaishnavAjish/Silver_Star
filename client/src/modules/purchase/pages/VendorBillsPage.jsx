@@ -157,6 +157,7 @@ export const VendorBillForm = () => {
   const [costCenters, setCostCenters] = useState([]);
   const [loading, setLoading] = useState(false);
   const [detailData, setDetailData] = useState(null);
+  const [activeTds, setActiveTds] = useState(null);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [quickCreate, setQuickCreate] = useState(null);
 
@@ -202,6 +203,7 @@ export const VendorBillForm = () => {
 
         api.get(`/api/purchase-notes/${id}/tds`).then(res => {
           if (res?.withholding) {
+            setActiveTds(res.withholding);
             setTdsForm({
               apply_tds: true,
               tds_amount: String(res.withholding.tds_amount || ''),
@@ -209,8 +211,10 @@ export const VendorBillForm = () => {
               nature: res.withholding.nature || '',
               section_reference: res.withholding.section_reference || '',
             });
+          } else {
+            setActiveTds(null);
           }
-        }).catch(() => {});
+        }).catch(() => setActiveTds(null));
       }).catch(() => toast.error('Failed to load bill'));
     }
   }, [id, isEdit, api]);
@@ -275,6 +279,54 @@ export const VendorBillForm = () => {
     setLoading(false);
   };
 
+  const hasSettlements = isEdit && (
+    parseFloat(detailData?.amount_paid || 0) > 0 ||
+    (detailData?.grand_total !== undefined && detailData?.balance_due !== undefined && (parseFloat(detailData.grand_total) - parseFloat(detailData.balance_due) > 0.005))
+  );
+
+  const handleSaveTdsOnly = async () => {
+    const amount = tdsForm.apply_tds ? parseFloat(tdsForm.tds_amount) || 0 : 0;
+    setLoading(true);
+    try {
+      if (!activeTds && amount > 0) {
+        const res = await api.post(`/api/purchase-notes/${id}/tds`, {
+          vendor_id: form.vendor_id,
+          tds_amount: amount,
+          nature: tdsForm.nature,
+          section_reference: tdsForm.section_reference,
+          rate_percent: tdsForm.rate_percent,
+        });
+        toast.success('TDS withholding posted successfully.');
+        setActiveTds(res.withholding);
+      } else if (activeTds && amount > 0) {
+        const res = await api.put(`/api/purchase-notes/${id}/tds`, {
+          tds_amount: amount,
+          nature: tdsForm.nature,
+          section_reference: tdsForm.section_reference,
+          rate_percent: tdsForm.rate_percent,
+        });
+        toast.success('TDS withholding updated successfully.');
+        setActiveTds(res.withholding);
+      } else if (activeTds && (amount <= 0 || !tdsForm.apply_tds)) {
+        const res = await api.post(`/api/purchase-notes/${id}/tds/reverse`, {
+          withholding_id: activeTds.id,
+          reason: 'TDS withholding removed by accountant',
+        });
+        toast.success('TDS withholding reversed successfully.');
+        setActiveTds(null);
+        setTdsForm({ apply_tds: false, tds_amount: '', rate_percent: '', nature: '', section_reference: '' });
+      } else {
+        toast.info('No active TDS changes to save.');
+      }
+      const refreshed = await api.get(`/api/expense-bills/${id}`);
+      setDetailData(refreshed);
+    } catch (err) {
+      toast.error(err.message || 'Failed to save TDS withholding');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCancelBill = async () => {
     if (!window.confirm('Are you sure you want to cancel this bill?')) return;
     try {
@@ -319,21 +371,37 @@ export const VendorBillForm = () => {
             </span>
           ) : undefined}
           right={
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={() => handleSave('save')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
-                {loading ? 'Posting...' : 'Save'}
+            hasSettlements ? (
+              <button className="btn btn-primary" onClick={handleSaveTdsOnly} disabled={loading}>
+                <Save size={13} /> {loading ? 'Posting...' : 'Save TDS Withholding'}
               </button>
-              <button className="btn" onClick={() => handleSave('new')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
-                {loading ? 'Posting...' : 'Save & New'}
-              </button>
-              <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={loading}>
-                <Save size={13} /> {loading ? 'Posting...' : 'Save & Close'}
-              </button>
-            </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={() => handleSave('save')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                  {loading ? 'Posting...' : 'Save'}
+                </button>
+                <button className="btn" onClick={() => handleSave('new')} disabled={loading} style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}>
+                  {loading ? 'Posting...' : 'Save & New'}
+                </button>
+                <button className="btn btn-primary" onClick={() => handleSave('close')} disabled={loading}>
+                  <Save size={13} /> {loading ? 'Posting...' : 'Save & Close'}
+                </button>
+              </div>
+            )
           }
         />
       )}
     >
+      {hasSettlements && (
+        <div style={{
+          marginBottom: 16, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af',
+          padding: '12px 16px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10
+        }}>
+          <Info size={18} style={{ flexShrink: 0 }} />
+          <span>This Bill has settlements applied. Financial fields are locked, but TDS withholding may be added or updated separately.</span>
+        </div>
+      )}
+
       <FormSectionCard title="Payment Details" icon={<Receipt size={13} />}>
         <div className="form-row">
           <div className="fg w" style={{ minWidth: 240 }}>
@@ -347,7 +415,7 @@ export const VendorBillForm = () => {
                   setForm({ ...form, vendor_id: e.target.value });
                 }
               }}
-              disabled={isEdit && detailData?.status === 'cancelled'} 
+              disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
             >
               <option value="">- Select Vendor -</option>
               <option value="__create_new__" style={{ color: 'var(--brand)', fontWeight: 600 }}>+ Create New Vendor</option>
@@ -359,7 +427,7 @@ export const VendorBillForm = () => {
             <SelectDropdown 
               value={String(form.department_id || '')} 
               onChange={e => setForm({ ...form, department_id: e.target.value })} 
-              disabled={isEdit && detailData?.status === 'cancelled'} 
+              disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
             >
               <option value="">-- None --</option>
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -370,7 +438,7 @@ export const VendorBillForm = () => {
             <SelectDropdown 
               value={String(form.cost_center_id || '')} 
               onChange={e => setForm({ ...form, cost_center_id: e.target.value })} 
-              disabled={isEdit && detailData?.status === 'cancelled'} 
+              disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
             >
               <option value="">-- None --</option>
               {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -383,7 +451,7 @@ export const VendorBillForm = () => {
             <DatePicker 
               value={form.doc_date} 
               onChange={v => setForm({ ...form, doc_date: v })} 
-              disabled={isEdit && detailData?.status === 'cancelled'} 
+              disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
             />
           </div>
           <div className="fg" style={{ minWidth: 180 }}>
@@ -391,7 +459,7 @@ export const VendorBillForm = () => {
             <input 
               value={form.reference_no} 
               onChange={e => setForm({ ...form, reference_no: e.target.value })} 
-              disabled={isEdit && detailData?.status === 'cancelled'} 
+              disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
             />
           </div>
         </div>
@@ -402,7 +470,7 @@ export const VendorBillForm = () => {
         icon={<Receipt size={13} />}
         noPad
         actions={
-          (!isEdit || detailData?.status !== 'cancelled') && (
+          (!isEdit || (detailData?.status !== 'cancelled' && !hasSettlements)) && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {grandTotal > 0 && (
                 <span style={{ fontSize: 11, color: 'var(--g600)', fontFamily: 'var(--mono)' }}>
@@ -444,7 +512,7 @@ export const VendorBillForm = () => {
                         updateLine(idx, 'expense_account_id', e.target.value);
                       }
                     }} 
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   >
                     <option value="">- Select Category -</option>
                     <option value="__create_new__" style={{ color: 'var(--brand)', fontWeight: 600 }}>+ Add Category</option>
@@ -456,14 +524,14 @@ export const VendorBillForm = () => {
                     value={line.description} 
                     onChange={e => updateLine(idx, 'description', e.target.value)} 
                     placeholder="What is this for?"
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   />
                 </td>
                 <td>
                   <SelectDropdown 
                     value={String(line.department_id || '')} 
                     onChange={e => updateLine(idx, 'department_id', e.target.value)} 
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   >
                     <option value="">Default</option>
                     {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -473,7 +541,7 @@ export const VendorBillForm = () => {
                   <SelectDropdown 
                     value={String(line.cost_center_id || '')} 
                     onChange={e => updateLine(idx, 'cost_center_id', e.target.value)} 
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   >
                     <option value="">Default</option>
                     {costCenters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -488,7 +556,7 @@ export const VendorBillForm = () => {
                     min="0"
                     step="0.01"
                     style={{ textAlign: 'right' }} 
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   />
                 </td>
                 <td>
@@ -500,14 +568,14 @@ export const VendorBillForm = () => {
                     min="0"
                     step="0.01"
                     style={{ textAlign: 'right' }} 
-                    disabled={isEdit && detailData?.status === 'cancelled'} 
+                    disabled={isEdit && (detailData?.status === 'cancelled' || hasSettlements)}
                   />
                 </td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--g700)', verticalAlign: 'middle', paddingRight: 10 }}>
                   {fmt((parseFloat(line.amount) || 0) * ((parseFloat(line.tax_pct) || 0) / 100))}
                 </td>
                 <td>
-                  {(!isEdit || detailData?.status !== 'cancelled') && lines.length > 1 && (
+                  {(!isEdit || (detailData?.status !== 'cancelled' && !hasSettlements)) && lines.length > 1 && (
                     <button className="icon-btn" onClick={() => removeLine(idx)} title="Remove line">
                       <X size={12} />
                     </button>
@@ -585,7 +653,17 @@ export const VendorBillForm = () => {
         </table>
       </FormSectionCard>
 
-      <FormSectionCard title="TDS / Withholding" icon={<Receipt size={13} />}>
+      <FormSectionCard
+        title="TDS / Withholding"
+        icon={<Receipt size={13} />}
+        actions={
+          (!isEdit || detailData?.status !== 'cancelled') && (
+            <button className="btn btn-sm btn-primary" onClick={handleSaveTdsOnly} disabled={loading}>
+              <Save size={12} /> {loading ? 'Saving TDS...' : 'Save TDS Withholding'}
+            </button>
+          )
+        }
+      >
         <div className="form-row" style={{ alignItems: 'center', marginBottom: 12 }}>
           <div className="fg" style={{ minWidth: 150 }}>
             <label>Apply TDS</label>

@@ -1,7 +1,11 @@
 'use strict';
 
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const fs = require('fs');
+const dotenvPath = fs.existsSync(path.join(__dirname, '../.env'))
+  ? path.join(__dirname, '../.env')
+  : path.join(__dirname, '../../server/.env');
+require('dotenv').config({ path: dotenvPath });
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -160,6 +164,51 @@ describe('Manual Bill TDS Withholding & Settlement Engine Tests', () => {
     const pnCheck = await pool.primaryPool.query('SELECT balance_due, payment_status FROM purchase_notes WHERE id = $1', [testBillId2]);
     assert.equal(parseFloat(pnCheck.rows[0].balance_due), 0.00);
     assert.equal(pnCheck.rows[0].payment_status, 'PAID');
+  });
+
+  test('Exact Controlled Case: BILL-2287 Bansi & Mehta (CA) ₹4,13,000 / ₹3,78,000 / ₹35,000', async () => {
+    const { rows: bills } = await pool.primaryPool.query(`
+      SELECT pn.*, v.name AS vendor_name
+      FROM purchase_notes pn
+      JOIN vendors v ON v.id = pn.vendor_id
+      WHERE pn.doc_number = 'BILL-2287' OR pn.reference_no = 'G8/MBP/2026-27'
+    `);
+
+    if (bills.length > 0) {
+      const bill = bills[0];
+      assert.equal(bill.doc_number, 'BILL-2287');
+      assert.equal(bill.reference_no, 'G8/MBP/2026-27');
+      assert.equal(bill.vendor_name, 'Bansi & Mehta');
+      assert.equal(parseFloat(bill.grand_total), 413000.00);
+
+      const state = await openDocumentService.getBillOutstanding(bill.id);
+      assert.equal(parseFloat(state.payment_allocated), 378000.00, 'Payment allocated must be ₹3,78,000');
+
+      // Check if active TDS withholding already exists
+      const activeInitial = await billTdsService.getBillTdsWithholding(bill.id);
+      if (!activeInitial) {
+        const result = await billTdsService.createBillTdsWithholding({
+          purchaseNoteId: bill.id,
+          vendorId: bill.vendor_id,
+          tdsAmount: 35000.00,
+          nature: 'PROFESSIONAL FEE',
+          sectionReference: '194J',
+        });
+
+        assert.equal(result.withholding.status, 'POSTED');
+        assert.equal(parseFloat(result.withholding.tds_amount), 35000.00);
+
+        const updatedState = await openDocumentService.getBillOutstanding(bill.id);
+        assert.equal(parseFloat(updatedState.outstanding), 0.00, 'Bill outstanding must be 0');
+
+        const checkPn = await pool.primaryPool.query('SELECT balance_due, payment_status FROM purchase_notes WHERE id = $1', [bill.id]);
+        assert.equal(parseFloat(checkPn.rows[0].balance_due), 0.00);
+        assert.equal(checkPn.rows[0].payment_status, 'PAID', 'Bill status must be PAID');
+      } else {
+        assert.equal(activeInitial.status, 'POSTED');
+        assert.equal(parseFloat(activeInitial.tds_amount), 35000.00);
+      }
+    }
   });
 
   test('TDS Amount > Outstanding Balance is rejected', async () => {
