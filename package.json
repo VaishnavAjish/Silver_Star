@@ -8,7 +8,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "cd server && node --watch index.js",
     "dev:client": "cd client && npx vite --host",
-    "build": "cd client && npx vite build && cd .. && rm -rf server/public && cp -r client/dist server/public",
+    "build": "cd client && npx vite build && cd .. && rm -rf server/public && cp -r client/dist server/public && (test -d /var/www/silverstar && cp -r client/dist/* /var/www/silverstar/ || true)",
     "db:indexes": "cd server && npm run db:indexes",
     "db:refresh-mv": "psql -U postgres -d silverstar_grow -c \"SELECT refresh_materialized_views();\""
   },
