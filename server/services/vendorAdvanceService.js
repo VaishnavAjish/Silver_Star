@@ -209,12 +209,12 @@ async function applyAdvancesToBill({ purchaseNoteId, vendorId, mode = 'auto', al
     CREATE TABLE IF NOT EXISTS vendor_advance_applications (
       id               SERIAL PRIMARY KEY,
       advance_id       INTEGER NOT NULL,
-      purchase_note_id INTEGER NOT NULL REFERENCES purchase_notes(id),
-      vendor_id        INTEGER NOT NULL REFERENCES vendors(id),
+      purchase_note_id INTEGER NOT NULL,
+      vendor_id        INTEGER NOT NULL,
       amount           NUMERIC(15,2) NOT NULL CHECK (amount > 0),
-      je_id            INTEGER REFERENCES journal_entries(id),
+      je_id            INTEGER,
       status           VARCHAR(20) NOT NULL DEFAULT 'APPLIED',
-      created_by       INTEGER REFERENCES users(id),
+      created_by       INTEGER,
       created_at       TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_vaa_advance  ON vendor_advance_applications(advance_id);
