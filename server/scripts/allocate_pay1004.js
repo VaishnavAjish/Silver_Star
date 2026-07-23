@@ -17,6 +17,24 @@ async function main() {
   const client = await pool.primaryPool.connect();
 
   try {
+    // 0. Ensure DDL Schema for vendor_advance_applications (Idempotent)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_advance_applications (
+        id               SERIAL PRIMARY KEY,
+        advance_id       INTEGER NOT NULL REFERENCES vendor_advances(id),
+        purchase_note_id INTEGER NOT NULL REFERENCES purchase_notes(id),
+        vendor_id        INTEGER NOT NULL REFERENCES vendors(id),
+        amount           NUMERIC(15,2) NOT NULL CHECK (amount > 0),
+        je_id            INTEGER REFERENCES journal_entries(id),
+        status           VARCHAR(20) NOT NULL DEFAULT 'APPLIED',
+        created_by       INTEGER REFERENCES users(id),
+        created_at       TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_vaa_advance  ON vendor_advance_applications(advance_id);
+      CREATE INDEX IF NOT EXISTS idx_vaa_pn       ON vendor_advance_applications(purchase_note_id);
+      CREATE INDEX IF NOT EXISTS idx_vaa_vendor   ON vendor_advance_applications(vendor_id, status);
+    `);
+
     // 1. Fetch Payment PAY-1004
     const payR = await client.query(`
       SELECT p.*, v.name as vendor_name
