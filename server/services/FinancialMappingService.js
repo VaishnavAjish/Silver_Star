@@ -44,6 +44,17 @@ async function _resolveByRole(role, client = pool) {
         const accId = r.rows[0].id;
         await client.query("UPDATE accounts SET account_role = $1 WHERE id = $2 AND (account_role IS NULL OR account_role = '')", [role, accId]);
       }
+    } else if (role === 'TDS_PAYABLE') {
+      r = await client.query(`
+        SELECT id, code, name FROM accounts
+        WHERE code = '3004' OR name ILIKE '%tds payable%'
+        ORDER BY (code = '3004') DESC, id
+        LIMIT 1
+      `);
+      if (r.rows.length) {
+        const accId = r.rows[0].id;
+        await client.query("UPDATE accounts SET account_role = $1 WHERE id = $2 AND (account_role IS NULL OR account_role = '')", [role, accId]);
+      }
     }
   }
 
@@ -63,6 +74,7 @@ const FinancialMappingService = {
   
   // Tax
   resolveGST: (client) => _resolveByRole('GST_PAYABLE', client),
+  resolveTDSPayable: (client) => _resolveByRole('TDS_PAYABLE', client),
   
   // Revenue / COGS
   resolveRevenueAccount: (client) => _resolveByRole('SALES_REVENUE', client),

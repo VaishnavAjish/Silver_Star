@@ -147,17 +147,17 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     const pageNum = parseInt(page);
     const calculatedOffset = offset !== undefined ? parseInt(offset) : (pageNum - 1) * pageSize;
 
-    const [billsR, paysR, jeR, advR] = await Promise.all([
+    const [billsR, paysR, jeR, advR, tdsR] = await Promise.all([
       pool.query(`
         SELECT
           pn.id,
-          pn.doc_date                                                                                                                         AS date,
-          'Bill'                                                                                                                              AS type,
-          COALESCE(NULLIF(pn.reference_no, ''), pn.doc_number)                                                                                AS ref_no,
-          pn.item_type                                                                                                                        AS category,
-          pn.grand_total                                                                                                                      AS amount,
-          GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.je_allocated, 0) - COALESCE(vaa_agg.advance_allocated, 0), 0) AS balance,
-          COALESCE(pn.payment_status, 'UNPAID')                                                                                              AS status,
+          pn.doc_date                                                                                                                                                                           AS date,
+          'Bill'                                                                                                                                                                                AS type,
+          COALESCE(NULLIF(pn.reference_no, ''), pn.doc_number)                                                                                                                                  AS ref_no,
+          pn.item_type                                                                                                                                                                          AS category,
+          pn.grand_total                                                                                                                                                                        AS amount,
+          GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.je_allocated, 0) - COALESCE(vaa_agg.advance_allocated, 0) - COALESCE(btw_agg.tds_allocated, 0), 0) AS balance,
+          COALESCE(pn.payment_status, 'UNPAID')                                                                                                                                                AS status,
           pn.je_id,
           NULL::numeric AS net_effect
         FROM purchase_notes pn
@@ -176,6 +176,11 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
           FROM vendor_advance_applications
           WHERE status = 'APPLIED' AND purchase_note_id = pn.id
         ) vaa_agg ON true
+        LEFT JOIN LATERAL (
+          SELECT SUM(tds_amount) AS tds_allocated
+          FROM bill_tds_withholdings
+          WHERE status = 'POSTED' AND purchase_note_id = pn.id
+        ) btw_agg ON true
         WHERE pn.vendor_id = $1 AND pn.status != 'cancelled'
         ORDER BY pn.doc_date DESC, pn.id DESC
       `, [vendorId]),
@@ -229,9 +234,27 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
         FROM vendor_advances
         WHERE vendor_id = $1 AND status = 'OPEN'
       `, [vendorId]),
+
+      pool.query(`
+        SELECT
+          btw.id,
+          btw.created_at::date                                                               AS date,
+          'TDS Withheld'                                                                     AS type,
+          COALESCE(NULLIF(btw.section_reference, ''), 'TDS-' || btw.id::text)                 AS ref_no,
+          COALESCE(btw.nature, 'TDS Withholding')                                            AS category,
+          btw.tds_amount                                                                     AS amount,
+          0::numeric                                                                         AS balance,
+          btw.status,
+          btw.posting_je_id                                                                  AS je_id,
+          -btw.tds_amount                                                                    AS net_effect,
+          btw.purchase_note_id
+        FROM bill_tds_withholdings btw
+        WHERE btw.vendor_id = $1
+        ORDER BY btw.created_at DESC, btw.id DESC
+      `, [vendorId]),
     ]);
 
-    let all = [...billsR.rows, ...paysR.rows, ...jeR.rows].sort((a, b) => {
+    let all = [...billsR.rows, ...paysR.rows, ...jeR.rows, ...tdsR.rows].sort((a, b) => {
       const d = new Date(b.date) - new Date(a.date);
       return d !== 0 ? d : b.id - a.id;
     });
@@ -257,6 +280,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     const bills = all.filter(t => t.type === 'Bill');
     const payments = all.filter(t => t.type === 'Payment');
     const jes = all.filter(t => t.type === 'JE Adjustment');
+    const tdsRows = all.filter(t => t.type === 'TDS Withheld');
 
     const summary = {
       transaction_count: all.length,
@@ -266,6 +290,8 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
       payments_total: payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
       je_adjustment_count: jes.length,
       je_adjustments_absolute_total: jes.reduce((s, j) => s + parseFloat(j.amount || 0), 0),
+      tds_count: tdsRows.length,
+      tds_total: tdsRows.reduce((s, t) => s + parseFloat(t.amount || 0), 0),
       credit_note_count: 0,
       credit_notes_total: 0,
       unapplied_advance: parseFloat(advR.rows[0]?.unapplied_advance || 0),

@@ -10,6 +10,7 @@ const { logger } = require('../middleware/logger');
 const gstEngine = require('../services/gstEngine');
 const { buildPurchaseJournal } = require('../services/purchaseJournalBuilder');
 const FinancialMappingService = require('../services/FinancialMappingService');
+const billTdsService = require('../services/billTdsService');
 
 const router = express.Router();
 
@@ -390,6 +391,19 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     // Link JE to purchase note
     await client.query('UPDATE purchase_notes SET je_id = $1 WHERE id = $2', [je.id, pn.id]);
 
+    if (req.body.apply_tds || (parseFloat(req.body.tds_amount) > 0)) {
+      await billTdsService.createBillTdsWithholding({
+        purchaseNoteId: pn.id,
+        vendorId: pn.vendor_id,
+        tdsAmount: req.body.tds_amount,
+        nature: req.body.tds_nature || req.body.nature,
+        sectionReference: req.body.tds_section || req.body.section_reference,
+        ratePercent: req.body.tds_rate || req.body.rate_percent,
+        remarks: req.body.tds_remarks || req.body.remarks,
+        userId: req.user.id,
+      }, client);
+    }
+
     await client.query('COMMIT');
 
     // ── Real-Time Sync: fire events AFTER successful commit ──────────────────
@@ -642,6 +656,19 @@ router.put('/:id', authenticate, authorize('admin', 'super_admin'), async (req, 
     });
 
     await client.query('UPDATE purchase_notes SET je_id = $1 WHERE id = $2', [je.id, id]);
+
+    if (req.body.apply_tds !== undefined || req.body.tds_amount !== undefined || req.body.tds) {
+      await billTdsService.replaceBillTdsWithholding({
+        purchaseNoteId: id,
+        tdsAmount: req.body.apply_tds ? req.body.tds_amount : (req.body.tds_amount || 0),
+        nature: req.body.tds_nature || req.body.nature,
+        sectionReference: req.body.tds_section || req.body.section_reference,
+        ratePercent: req.body.tds_rate || req.body.rate_percent,
+        remarks: req.body.tds_remarks || req.body.remarks,
+        userId: req.user.id,
+      }, client);
+    }
+
     await client.query('COMMIT');
 
     res.status(200).json({

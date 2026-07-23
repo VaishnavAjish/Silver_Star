@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const journalEngine = require('../services/journalEngine');
+const billTdsService = require('../services/billTdsService');
 const { authenticate, authorize } = require('../middleware/auth');
 const { dispatchEvent } = require('../services/eventDispatcher');
 
@@ -180,6 +181,19 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
     await client.query('UPDATE purchase_notes SET je_id = $1 WHERE id = $2', [je.id, pn.id]);
 
+    if (req.body.apply_tds || (parseFloat(req.body.tds_amount) > 0)) {
+      await billTdsService.createBillTdsWithholding({
+        purchaseNoteId: pn.id,
+        vendorId: pn.vendor_id,
+        tdsAmount: req.body.tds_amount,
+        nature: req.body.tds_nature || req.body.nature,
+        sectionReference: req.body.tds_section || req.body.section_reference,
+        ratePercent: req.body.tds_rate || req.body.rate_percent,
+        remarks: req.body.tds_remarks || req.body.remarks,
+        userId: req.user.id,
+      }, client);
+    }
+
     await client.query('COMMIT');
 
     dispatchEvent('purchase.created', {
@@ -207,6 +221,16 @@ router.delete('/:id', authenticate, authorize('admin', 'operator'), async (req, 
     const pn = pnR.rows[0];
 
     if (parseFloat(pn.amount_paid) > 0) throw new Error('Cannot delete a bill with payments applied. Remove payments first.');
+
+    // 0. Reverse active TDS withholding prior to bill deletion
+    const activeTds = await billTdsService.getBillTdsWithholding(id, client);
+    if (activeTds) {
+      await billTdsService.reverseBillTdsWithholding({
+        withholdingId: activeTds.id,
+        reason: `Automatic reversal prior to Bill #${id} deletion`,
+        userId: req.user.id,
+      }, client);
+    }
 
     // 1. Delete lines
     await client.query('DELETE FROM purchase_note_lines WHERE purchase_note_id = $1', [id]);
@@ -335,6 +359,18 @@ router.put('/:id', authenticate, authorize('admin', 'operator'), async (req, res
     }, client);
 
     await client.query('UPDATE purchase_notes SET je_id = $1 WHERE id = $2', [je.id, id]);
+
+    if (req.body.apply_tds !== undefined || req.body.tds_amount !== undefined || req.body.tds) {
+      await billTdsService.replaceBillTdsWithholding({
+        purchaseNoteId: id,
+        tdsAmount: req.body.apply_tds ? req.body.tds_amount : (req.body.tds_amount || 0),
+        nature: req.body.tds_nature || req.body.nature,
+        sectionReference: req.body.tds_section || req.body.section_reference,
+        ratePercent: req.body.tds_rate || req.body.rate_percent,
+        remarks: req.body.tds_remarks || req.body.remarks,
+        userId: req.user.id,
+      }, client);
+    }
 
     await client.query('COMMIT');
     res.json({ success: true, lines: insertedLines, je_id: je.id });

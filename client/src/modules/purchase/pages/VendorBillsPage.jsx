@@ -148,6 +148,9 @@ export const VendorBillForm = () => {
     vendor_id: '', department_id: '', cost_center_id: '', reference_no: '', remark: ''
   });
   const [lines, setLines] = useState([newLine()]);
+  const [tdsForm, setTdsForm] = useState({
+    apply_tds: false, tds_amount: '', rate_percent: '', nature: '', section_reference: ''
+  });
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -196,6 +199,18 @@ export const VendorBillForm = () => {
         } else {
            setLines([]);
         }
+
+        api.get(`/api/purchase-notes/${id}/tds`).then(res => {
+          if (res?.withholding) {
+            setTdsForm({
+              apply_tds: true,
+              tds_amount: String(res.withholding.tds_amount || ''),
+              rate_percent: res.withholding.rate_percent ? String(res.withholding.rate_percent) : '',
+              nature: res.withholding.nature || '',
+              section_reference: res.withholding.section_reference || '',
+            });
+          }
+        }).catch(() => {});
       }).catch(() => toast.error('Failed to load bill'));
     }
   }, [id, isEdit, api]);
@@ -233,13 +248,22 @@ export const VendorBillForm = () => {
 
     setLoading(true);
     try {
+      const payload = {
+        ...form,
+        lines: validLines,
+        apply_tds: tdsForm.apply_tds,
+        tds_amount: tdsForm.apply_tds ? parseFloat(tdsForm.tds_amount) || 0 : 0,
+        tds_nature: tdsForm.nature,
+        tds_section: tdsForm.section_reference,
+        tds_rate: tdsForm.rate_percent,
+      };
       if (isEdit) {
-        await api.put(`/api/expense-bills/${id}`, { ...form, lines: validLines });
+        await api.put(`/api/expense-bills/${id}`, payload);
         toast.success('Bill updated');
         if (action === 'new') window.location.href = '/bills/new';
         else if (action === 'close') navigate('/bills');
       } else {
-        const res = await api.post('/api/expense-bills', { ...form, lines: validLines });
+        const res = await api.post('/api/expense-bills', payload);
         toast.success('Bill saved');
         if (action === 'new') window.location.href = '/bills/new';
         else if (action === 'close') navigate('/bills');
@@ -527,16 +551,106 @@ export const VendorBillForm = () => {
               )}
               <tr>
                 <td colSpan={7} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12 }}>
-                  Grand Total
+                  Gross Bill
                 </td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13 }}>
                   ₹{fmt(Math.round(subtotal + taxTotal))}
                 </td>
                 <td />
               </tr>
+              {tdsForm.apply_tds && (parseFloat(tdsForm.tds_amount) || 0) > 0 && (
+                <>
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'right', fontWeight: 600, paddingRight: 10, fontSize: 12, color: 'var(--red)' }}>
+                      TDS Withheld (-)
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, color: 'var(--red)' }}>
+                      -₹{fmt(parseFloat(tdsForm.tds_amount) || 0)}
+                    </td>
+                    <td />
+                  </tr>
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'right', fontWeight: 700, paddingRight: 10, fontSize: 12, color: 'var(--brand-dark)' }}>
+                      Net Vendor Payable
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13, color: 'var(--brand-dark)' }}>
+                      ₹{fmt(Math.max(0, Math.round(subtotal + taxTotal) - (parseFloat(tdsForm.tds_amount) || 0)))}
+                    </td>
+                    <td />
+                  </tr>
+                </>
+              )}
             </tfoot>
           )}
         </table>
+      </FormSectionCard>
+
+      <FormSectionCard title="TDS / Withholding" icon={<Receipt size={13} />}>
+        <div className="form-row" style={{ alignItems: 'center', marginBottom: 12 }}>
+          <div className="fg" style={{ minWidth: 150 }}>
+            <label>Apply TDS</label>
+            <SelectDropdown
+              value={tdsForm.apply_tds ? 'yes' : 'no'}
+              onChange={e => setTdsForm({ ...tdsForm, apply_tds: e.target.value === 'yes' })}
+              disabled={isEdit && detailData?.status === 'cancelled'}
+            >
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </SelectDropdown>
+          </div>
+          {tdsForm.apply_tds && (
+            <>
+              <div className="fg" style={{ minWidth: 180 }}>
+                <label>TDS Amount (₹) *</label>
+                <input
+                  type="number"
+                  value={tdsForm.tds_amount}
+                  onChange={e => setTdsForm({ ...tdsForm, tds_amount: e.target.value })}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  disabled={isEdit && detailData?.status === 'cancelled'}
+                />
+              </div>
+              <div className="fg" style={{ minWidth: 120 }}>
+                <label>Rate %</label>
+                <input
+                  type="number"
+                  value={tdsForm.rate_percent}
+                  onChange={e => setTdsForm({ ...tdsForm, rate_percent: e.target.value })}
+                  placeholder="e.g. 2.00"
+                  min="0"
+                  step="0.01"
+                  disabled={isEdit && detailData?.status === 'cancelled'}
+                />
+              </div>
+              <div className="fg" style={{ minWidth: 180 }}>
+                <label>Nature / Description</label>
+                <input
+                  value={tdsForm.nature}
+                  onChange={e => setTdsForm({ ...tdsForm, nature: e.target.value })}
+                  placeholder="e.g. 194C Contractor"
+                  disabled={isEdit && detailData?.status === 'cancelled'}
+                />
+              </div>
+              <div className="fg" style={{ minWidth: 160 }}>
+                <label>Section / Ref</label>
+                <input
+                  value={tdsForm.section_reference}
+                  onChange={e => setTdsForm({ ...tdsForm, section_reference: e.target.value })}
+                  placeholder="e.g. Sec 194C"
+                  disabled={isEdit && detailData?.status === 'cancelled'}
+                />
+              </div>
+            </>
+          )}
+        </div>
+        <div className="form-row">
+          <div className="fg" style={{ minWidth: 260 }}>
+            <label>TDS Payable Ledger (Read-Only)</label>
+            <input value="3004 — TDS Payable" disabled readOnly style={{ background: 'var(--g100)', color: 'var(--g700)', fontWeight: 600 }} />
+          </div>
+        </div>
       </FormSectionCard>
 
       <NotesAttachmentsPanel

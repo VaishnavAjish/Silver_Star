@@ -164,6 +164,7 @@ const journalRoutes = require('./routes/journalEntries');
 const dashboardRoutes = require('./routes/dashboard');
 const inventoryRoutes = require('./routes/inventory');
 const purchaseRoutes = require('./routes/purchaseNotes');
+const billTdsRoutes = require('./routes/billTdsRoutes');
 const salesRoutes = require('./routes/invoices');
 const vendorRoutes = require('./routes/vendors');
 const customerRoutes = require('./routes/customers');
@@ -307,6 +308,7 @@ app.use('/api/je-allocations', jeAllocationsRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/stock-transfer', stockTransferRoutes);
 app.use('/api/vendor-advances', require('./routes/vendorAdvances'));
+app.use('/api', billTdsRoutes);
 app.use('/api/inventory-templates', require('./routes/inventoryTemplates'));
 
 

@@ -30,13 +30,15 @@ async function getBillOutstanding(billId, client = pool) {
       COALESCE(pa.payment_allocated, 0)                                   AS payment_allocated,
       COALESCE(ja.je_allocated,      0)                                   AS je_allocated,
       COALESCE(vaa.advance_allocated, 0)                                 AS advance_allocated,
-      COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_allocated,
+      COALESCE(btw.tds_allocated,     0)                                 AS tds_allocated,
+      COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_allocated,
       GREATEST(
         0,
         pn.grand_total
           - COALESCE(pa.payment_allocated, 0)
           - COALESCE(ja.je_allocated,      0)
           - COALESCE(vaa.advance_allocated, 0)
+          - COALESCE(btw.tds_allocated,     0)
       )                                                                   AS outstanding
     FROM purchase_notes pn
     LEFT JOIN (
@@ -57,6 +59,12 @@ async function getBillOutstanding(billId, client = pool) {
       WHERE  status = 'APPLIED' AND purchase_note_id = $1
       GROUP  BY purchase_note_id
     ) vaa ON TRUE
+    LEFT JOIN (
+      SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+      FROM   bill_tds_withholdings
+      WHERE  status = 'POSTED' AND purchase_note_id = $1
+      GROUP  BY purchase_note_id
+    ) btw ON TRUE
     WHERE pn.id = $1
   `, [billId]);
   return r.rows[0] || null;
@@ -122,13 +130,15 @@ async function getVendorOpenBills(vendorId, client = pool, excludeJeId = null) {
       COALESCE(pa.payment_allocated, 0)                                   AS payment_allocated,
       COALESCE(ja.je_allocated,      0)                                   AS je_allocated,
       COALESCE(vaa.advance_allocated, 0)                                 AS advance_allocated,
-      COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_allocated,
+      COALESCE(btw.tds_allocated,     0)                                 AS tds_allocated,
+      COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_allocated,
       GREATEST(
         0,
         pn.grand_total
           - COALESCE(pa.payment_allocated, 0)
           - COALESCE(ja.je_allocated,      0)
           - COALESCE(vaa.advance_allocated, 0)
+          - COALESCE(btw.tds_allocated,     0)
       )                                                                   AS outstanding
     FROM purchase_notes pn
     LEFT JOIN (
@@ -148,9 +158,15 @@ async function getVendorOpenBills(vendorId, client = pool, excludeJeId = null) {
       WHERE  status = 'APPLIED'
       GROUP  BY purchase_note_id
     ) vaa ON vaa.purchase_note_id = pn.id
+    LEFT JOIN (
+      SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+      FROM   bill_tds_withholdings
+      WHERE  status = 'POSTED'
+      GROUP  BY purchase_note_id
+    ) btw ON btw.purchase_note_id = pn.id
     WHERE pn.vendor_id   = $1
       AND pn.status      != 'cancelled'
-      AND pn.grand_total  > COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0)
+      AND pn.grand_total  > COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0)
     ORDER BY pn.doc_date ASC
   `, params);
   return r.rows;
