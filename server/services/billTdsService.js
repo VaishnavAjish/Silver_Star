@@ -12,6 +12,16 @@ const openDocumentService = require('./openDocumentService');
  * Posts balanced journal: Dr Accounts Payable / Cr TDS Payable (Account 3004).
  */
 
+// Auto-ensure schema column effective_date and backfill on module load
+pool.primaryPool.query(`
+  ALTER TABLE bill_tds_withholdings ADD COLUMN IF NOT EXISTS effective_date DATE;
+  UPDATE bill_tds_withholdings btw
+  SET effective_date = pn.doc_date::date
+  FROM purchase_notes pn
+  WHERE pn.id = btw.purchase_note_id AND btw.effective_date IS NULL;
+  UPDATE bill_tds_withholdings SET effective_date = created_at::date WHERE effective_date IS NULL;
+`).catch(err => console.error('[billTdsService schema init error]', err.message));
+
 async function getBillTdsWithholding(purchaseNoteId, outerClient = null) {
   const client = outerClient || pool.primaryPool;
   const res = await client.query(
