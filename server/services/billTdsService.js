@@ -16,7 +16,8 @@ async function getBillTdsWithholding(purchaseNoteId, outerClient = null) {
   const client = outerClient || pool.primaryPool;
   const res = await client.query(
     `SELECT btw.*, acc.code AS tds_account_code, acc.name AS tds_account_name,
-            je_p.je_number AS posting_je_number, je_r.je_number AS reversal_je_number
+            je_p.je_number AS posting_je_number, je_p.date AS posting_je_date,
+            je_r.je_number AS reversal_je_number, je_r.date AS reversal_je_date
      FROM bill_tds_withholdings btw
      JOIN accounts acc ON acc.id = btw.tds_account_id
      LEFT JOIN journal_entries je_p ON je_p.id = btw.posting_je_id
@@ -126,11 +127,12 @@ async function createBillTdsWithholding({
     });
 
     // 6. Insert withholding record
+    const effectiveDate = pn.doc_date ? new Date(pn.doc_date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
     const { rows: [withholding] } = await client.query(
       `INSERT INTO bill_tds_withholdings
          (purchase_note_id, vendor_id, tds_account_id, nature, section_reference,
-          rate_percent, tds_amount, status, posting_je_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'POSTED', $8, $9)
+          rate_percent, tds_amount, status, posting_je_id, effective_date, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'POSTED', $8, $9, $10)
        RETURNING *`,
       [
         pn.id,
@@ -141,6 +143,7 @@ async function createBillTdsWithholding({
         ratePercent ? parseFloat(ratePercent) : null,
         amount,
         je.id,
+        effectiveDate,
         userId || null,
       ]
     );

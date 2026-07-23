@@ -243,7 +243,14 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
       pool.query(`
         SELECT
           btw.id,
-          btw.created_at::date                                                               AS date,
+          COALESCE(btw.effective_date, pn.doc_date::date, btw.created_at::date)                 AS date,
+          CASE
+            WHEN btw.effective_date IS NOT NULL THEN 'EFFECTIVE_DATE'
+            WHEN pn.doc_date IS NOT NULL THEN 'BILL_DATE_FALLBACK'
+            ELSE 'CREATED_AT_FALLBACK'
+          END                                                                                 AS date_source,
+          btw.effective_date,
+          btw.created_at,
           'TDS Withheld'                                                                     AS type,
           COALESCE(NULLIF(btw.section_reference, ''), 'TDS-' || btw.id::text)                 AS ref_no,
           COALESCE(btw.nature, 'TDS Withholding')                                            AS category,
@@ -254,8 +261,9 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
           -btw.tds_amount                                                                    AS net_effect,
           btw.purchase_note_id
         FROM bill_tds_withholdings btw
+        LEFT JOIN purchase_notes pn ON pn.id = btw.purchase_note_id
         WHERE btw.vendor_id = $1
-        ORDER BY btw.created_at DESC, btw.id DESC
+        ORDER BY COALESCE(btw.effective_date, pn.doc_date::date, btw.created_at::date) DESC, btw.id DESC
       `, [vendorId]),
     ]);
 

@@ -418,4 +418,53 @@ describe('Manual Bill TDS Withholding & Settlement Engine Tests', () => {
     const tdsJeRows = jeR.rows.filter(r => r.source_type === 'bill_tds_withholding');
     assert.equal(tdsJeRows.length, 0, 'Generic JE Adjustment dataset must exclude system TDS withholding journals');
   });
+
+  test('TDS Business Date contract: effective_date is populated from Bill doc_date and date_source is EFFECTIVE_DATE', async () => {
+    // 1. Create a Bill with historical date (e.g. May 15, 2026)
+    const pnR = await pool.primaryPool.query(
+      `INSERT INTO purchase_notes (doc_number, doc_date, vendor_id, item_type, grand_total, balance_due, payment_status, status)
+       VALUES ('TDS-BILL-HISTORICAL', '2026-05-15', $1, 'Expense Bill', 30000.00, 30000.00, 'UNPAID', 'posted') RETURNING id`,
+      [testVendorId]
+    );
+    const bId = pnR.rows[0].id;
+
+    // 2. Add TDS withholding (created today)
+    const created = await billTdsService.createBillTdsWithholding({
+      purchaseNoteId: bId,
+      vendorId: testVendorId,
+      tdsAmount: 3000.00,
+      nature: 'Professional Fees',
+    });
+
+    assert.ok(created.withholding.effective_date, 'effective_date must be populated');
+    const effDateStr = new Date(created.withholding.effective_date).toISOString().slice(0, 10);
+    assert.equal(effDateStr, '2026-05-15', 'effective_date must match Bill doc_date 2026-05-15');
+
+    // 3. Test metadata update preserves effective_date
+    const updated = await billTdsService.replaceBillTdsWithholding({
+      purchaseNoteId: bId,
+      tdsAmount: 3000.00,
+      nature: 'Updated Professional Fees',
+    });
+    const updatedEffDateStr = new Date(updated.withholding.effective_date).toISOString().slice(0, 10);
+    assert.equal(updatedEffDateStr, '2026-05-15', 'Metadata edit must preserve original effective_date');
+
+    // 4. Test query returns date as 2026-05-15 and date_source as EFFECTIVE_DATE
+    const tdsQueryR = await pool.primaryPool.query(`
+      SELECT
+        btw.id,
+        COALESCE(btw.effective_date, pn.doc_date::date, btw.created_at::date)::text AS date,
+        CASE
+          WHEN btw.effective_date IS NOT NULL THEN 'EFFECTIVE_DATE'
+          WHEN pn.doc_date IS NOT NULL THEN 'BILL_DATE_FALLBACK'
+          ELSE 'CREATED_AT_FALLBACK'
+        END AS date_source
+      FROM bill_tds_withholdings btw
+      LEFT JOIN purchase_notes pn ON pn.id = btw.purchase_note_id
+      WHERE btw.id = $1
+    `, [created.withholding.id]);
+
+    assert.equal(tdsQueryR.rows[0].date, '2026-05-15');
+    assert.equal(tdsQueryR.rows[0].date_source, 'EFFECTIVE_DATE');
+  });
 });
