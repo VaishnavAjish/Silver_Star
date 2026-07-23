@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -44,10 +44,13 @@ export default function VendorDetailsPage() {
   const [panelSearch, setPanelSearch] = useState('');
 
   // Main panel state
-  const [vendor,      setVendor]      = useState(null);
-  const [txns,        setTxns]        = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [tab,         setTab]         = useState('transactions');
+  const [vendor,        setVendor]        = useState(null);
+  const [txns,          setTxns]          = useState([]);
+  const [summaryData,   setSummaryData]   = useState(null);
+  const [txnSearch,     setTxnSearch]     = useState('');
+  const [txnTypeFilter, setTxnTypeFilter] = useState('all');
+  const [loading,       setLoading]       = useState(true);
+  const [tab,           setTab]           = useState('transactions');
 
   // Allocation state
   const [allocModal,   setAllocModal]   = useState(null);  // { je_id, amount, existing }
@@ -77,10 +80,11 @@ export default function VendorDetailsPage() {
     try {
       const [v, tx] = await Promise.all([
         get(`/api/vendors/${id}`),
-        get(`/api/vendors/${id}/transactions?limit=100`),
+        get(`/api/vendors/${id}/transactions?limit=500`),
       ]);
       setVendor(v);
-      setTxns(tx.data || []);
+      setTxns(tx.data || tx.transactions || []);
+      setSummaryData(tx.summary || null);
       // Load je_allocations for this vendor to show allocation badges
       try {
         const allocs = await get(`/api/je-allocations?entity_type=vendor&entity_id=${id}`);
@@ -197,11 +201,39 @@ export default function VendorDetailsPage() {
   const ff = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   // ── Filtered left-panel list ──────────────────────────────────────────────
-  const filteredVendors = allVendors.filter(v =>
-    !panelSearch || v.name.toLowerCase().includes(panelSearch.toLowerCase())
-  );
+  // ── Filtered transactions & filter-aware summary ──────────────────────────
+  const filteredTxns = useMemo(() => {
+    return txns.filter(t => {
+      if (txnTypeFilter !== 'all' && t.type !== txnTypeFilter) return false;
+      if (txnSearch) {
+        const q = txnSearch.toLowerCase();
+        const matchRef = (t.ref_no || '').toLowerCase().includes(q);
+        const matchCat = (t.category || '').toLowerCase().includes(q);
+        const matchStatus = (t.status || '').toLowerCase().includes(q);
+        if (!matchRef && !matchCat && !matchStatus) return false;
+      }
+      return true;
+    });
+  }, [txns, txnTypeFilter, txnSearch]);
 
-  const { page, setPage, paginatedItems, totalPages, pageSize } = usePagination(txns, []);
+  const { page, setPage, paginatedItems, totalPages, pageSize } = usePagination(filteredTxns, [txnSearch, txnTypeFilter]);
+
+  const txnSummary = useMemo(() => {
+    const bills = filteredTxns.filter(t => t.type === 'Bill');
+    const payments = filteredTxns.filter(t => t.type === 'Payment');
+    const jes = filteredTxns.filter(t => t.type === 'JE Adjustment');
+
+    return {
+      transaction_count: filteredTxns.length,
+      bill_count: bills.length,
+      bills_total: bills.reduce((s, b) => s + parseFloat(b.amount || 0), 0),
+      payment_count: payments.length,
+      payments_total: payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
+      je_adjustment_count: jes.length,
+      je_adjustments_absolute_total: jes.reduce((s, j) => s + Math.abs(parseFloat(j.net_effect !== undefined && j.net_effect !== null ? j.net_effect : j.amount || 0)), 0),
+      unapplied_advance: parseFloat(summaryData?.unapplied_advance ?? vendor?.vendor_advances ?? 0),
+    };
+  }, [filteredTxns, summaryData, vendor]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -491,7 +523,45 @@ export default function VendorDetailsPage() {
                       </div>
                     ) : (
                       <>
-                      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                      {/* Filter Bar */}
+                      <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ position: 'relative', width: 220 }}>
+                          <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--g400)', pointerEvents: 'none' }} />
+                          <input
+                            placeholder="Filter by ref, category..."
+                            value={txnSearch}
+                            onChange={e => setTxnSearch(e.target.value)}
+                            style={{
+                              paddingLeft: 28, fontSize: 12, height: 30, width: '100%',
+                              border: '1px solid var(--g300)', borderRadius: 6, outline: 'none', background: '#fff',
+                            }}
+                          />
+                        </div>
+                        <select
+                          value={txnTypeFilter}
+                          onChange={e => setTxnTypeFilter(e.target.value)}
+                          style={{
+                            fontSize: 12, height: 30, padding: '0 8px', border: '1px solid var(--g300)',
+                            borderRadius: 6, background: '#fff', outline: 'none', color: 'var(--g700)',
+                          }}
+                        >
+                          <option value="all">All Types</option>
+                          <option value="Bill">Bills</option>
+                          <option value="Payment">Payments</option>
+                          <option value="JE Adjustment">JE Adjustments</option>
+                        </select>
+                        {(txnSearch || txnTypeFilter !== 'all') && (
+                          <button
+                            className="btn btn-sm"
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={() => { setTxnSearch(''); setTxnTypeFilter('all'); }}
+                          >
+                            Reset Filters
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 350px)', borderRadius: 8, border: '1px solid var(--border)' }}>
                         <table className="dgrid" style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0, minWidth: 700 }}>
                           <thead>
                             <tr>
@@ -648,12 +718,41 @@ export default function VendorDetailsPage() {
                           </tbody>
                         </table>
                       </div>
-                      {txns.length > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', background: 'var(--g50)', borderTop: '1px solid var(--g200)', fontSize: 11, color: 'var(--g500)' }}>
-                          <span>Showing {txns.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, txns.length)} of {txns.length} records</span>
-                          <Paginator page={page} totalPages={totalPages} onPage={setPage} />
+
+                      {/* Filter-Aware Transaction Summary Footer Bar */}
+                      <div style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '12px 18px', background: 'var(--g50)', borderTop: '1px solid var(--g200)',
+                        fontSize: 12, flexWrap: 'wrap', gap: 12, borderRadius: '0 0 8px 8px', marginTop: 8
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--g700)', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--g800)' }}>
+                            {txnSummary.transaction_count} Transaction{txnSummary.transaction_count !== 1 ? 's' : ''}
+                          </span>
+                          <span style={{ color: 'var(--g300)' }}>|</span>
+                          <span>
+                            Bills: <strong>{txnSummary.bill_count}</strong> · <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{fmt(txnSummary.bills_total)}</span>
+                          </span>
+                          <span style={{ color: 'var(--g300)' }}>|</span>
+                          <span>
+                            Payments: <strong>{txnSummary.payment_count}</strong> · <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, color: '#2E7D32' }}>{fmt(txnSummary.payments_total)}</span>
+                          </span>
+                          {txnSummary.je_adjustment_count > 0 && (
+                            <>
+                              <span style={{ color: 'var(--g300)' }}>|</span>
+                              <span>
+                                JE Adjustments: <strong>{txnSummary.je_adjustment_count}</strong> · <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, color: '#7B1FA2' }}>{fmt(txnSummary.je_adjustments_absolute_total)}</span>
+                              </span>
+                            </>
+                          )}
+                          <span style={{ color: 'var(--g300)' }}>|</span>
+                          <span>
+                            Unapplied Advance: <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, color: txnSummary.unapplied_advance > 0 ? '#1976D2' : 'inherit' }}>{fmt(txnSummary.unapplied_advance)}</span>
+                          </span>
                         </div>
-                      )}
+
+                        <Paginator page={page} totalPages={totalPages} onPage={setPage} />
+                      </div>
                       </>)}
                     </>
                   )}

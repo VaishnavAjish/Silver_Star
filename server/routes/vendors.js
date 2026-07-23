@@ -139,7 +139,12 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     const vendorId = parseInt(req.params.id);
     if (!vendorId) return res.status(400).json({ error: 'Invalid vendor id' });
 
-    const [billsR, paysR, jeR] = await Promise.all([
+    const { type, search, from_date, to_date, page = 1, limit = 500, offset } = req.query;
+    const pageSize = parseInt(limit);
+    const pageNum = parseInt(page);
+    const calculatedOffset = offset !== undefined ? parseInt(offset) : (pageNum - 1) * pageSize;
+
+    const [billsR, paysR, jeR, advR] = await Promise.all([
       pool.query(`
         SELECT
           pn.id,
@@ -215,16 +220,66 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
           AND je.status    = 'posted'
         ORDER BY je.date DESC, je.id DESC
       `, [vendorId]),
+
+      pool.query(`
+        SELECT COALESCE(SUM(remaining_amount), 0) AS unapplied_advance
+        FROM vendor_advances
+        WHERE vendor_id = $1 AND status = 'OPEN'
+      `, [vendorId]),
     ]);
 
-    const all = [...billsR.rows, ...paysR.rows, ...jeR.rows].sort((a, b) => {
+    let all = [...billsR.rows, ...paysR.rows, ...jeR.rows].sort((a, b) => {
       const d = new Date(b.date) - new Date(a.date);
       return d !== 0 ? d : b.id - a.id;
     });
 
-    const { limit = 100, offset = 0 } = req.query;
-    const paginated = all.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-    res.json({ data: paginated, total: all.length });
+    if (type && type !== 'all') {
+      all = all.filter(t => t.type.toLowerCase() === type.toLowerCase());
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      all = all.filter(t =>
+        (t.ref_no && t.ref_no.toLowerCase().includes(q)) ||
+        (t.category && t.category.toLowerCase().includes(q)) ||
+        (t.status && t.status.toLowerCase().includes(q))
+      );
+    }
+    if (from_date) {
+      all = all.filter(t => new Date(t.date) >= new Date(from_date));
+    }
+    if (to_date) {
+      all = all.filter(t => new Date(t.date) <= new Date(to_date));
+    }
+
+    const bills = all.filter(t => t.type === 'Bill');
+    const payments = all.filter(t => t.type === 'Payment');
+    const jes = all.filter(t => t.type === 'JE Adjustment');
+
+    const summary = {
+      transaction_count: all.length,
+      bill_count: bills.length,
+      bills_total: bills.reduce((s, b) => s + parseFloat(b.amount || 0), 0),
+      payment_count: payments.length,
+      payments_total: payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
+      je_adjustment_count: jes.length,
+      je_adjustments_absolute_total: jes.reduce((s, j) => s + parseFloat(j.amount || 0), 0),
+      credit_note_count: 0,
+      credit_notes_total: 0,
+      unapplied_advance: parseFloat(advR.rows[0]?.unapplied_advance || 0),
+    };
+
+    const paginated = all.slice(calculatedOffset, calculatedOffset + pageSize);
+
+    res.json({
+      data: paginated,
+      transactions: paginated,
+      pagination: {
+        page: pageNum,
+        page_size: pageSize,
+        total: all.length,
+      },
+      summary,
+    });
   } catch (err) {
     logger.error('[vendors GET /:id/transactions]', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
