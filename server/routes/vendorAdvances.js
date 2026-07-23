@@ -17,6 +17,7 @@ const {
   getAvailableAdvanceTotal,
   getVendorPosition,
   applyAdvancesToBill,
+  reverseAdvanceApplication,
 } = require('../services/vendorAdvanceService');
 
 const router = express.Router();
@@ -76,6 +77,31 @@ router.post('/apply', async (req, res) => {
     });
     await client.query('COMMIT');
     res.json({ ok: true, ...result });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Reverse vendor advance application ────────────────────────────────────────
+router.post('/applications/:id/reverse', async (req, res) => {
+  const applicationId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(applicationId)) {
+    return res.status(400).json({ ok: false, error: 'Invalid application id' });
+  }
+
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await reverseAdvanceApplication({
+      applicationId,
+      userId: req.user && req.user.id,
+      client,
+    });
+    await client.query('COMMIT');
+    res.json(result);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ ok: false, error: err.message });

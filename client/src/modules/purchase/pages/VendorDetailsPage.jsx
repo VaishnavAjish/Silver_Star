@@ -619,6 +619,26 @@ export default function VendorDetailsPage() {
                                         </button>
                                       )}
                                     </div>
+                                  ) : t.type === 'Payment' ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                      {canEdit() && (
+                                        <button
+                                          className="btn btn-sm"
+                                          style={{
+                                            fontSize: 10, padding: '2px 6px',
+                                            display: 'flex', alignItems: 'center', gap: 3,
+                                          }}
+                                          onClick={() => setAllocModal({
+                                            sourceType: 'PAYMENT_ADVANCE',
+                                            paymentId: t.id,
+                                            amount: parseFloat(t.amount || 0),
+                                            availableAmount: parseFloat(t.amount || 0),
+                                          })}
+                                        >
+                                          <Link2 size={9} /> Allocate
+                                        </button>
+                                      )}
+                                    </div>
                                   ) : (
                                     <span style={{ fontSize: 11, color: 'var(--g400)' }}>—</span>
                                   )}

@@ -7,7 +7,8 @@ import DataGrid from '../../../shared/components/DataGrid';
 import ColumnSettings from '../../../shared/components/ColumnSettings';
 import ExportMenu from '../../../shared/components/ExportMenu';
 import FilterBar from '../../../shared/components/FilterBar';
-import { Plus, CreditCard, HandCoins, RefreshCw } from 'lucide-react';
+import AllocationModal from '../components/AllocationModal';
+import { Plus, CreditCard, HandCoins, RefreshCw, Link2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const STATUS_OPTIONS = [
@@ -59,6 +60,7 @@ export function PaymentsPage() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = usePersistedFilters('payments_filters', {});
   const [colMgr, setColMgr] = useState(null);
+  const [allocModal, setAllocModal] = useState(null);
   const debounceRef = useRef(null);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -119,15 +121,65 @@ export function PaymentsPage() {
     );
   };
 
+  const ALLOC_STATUS_BADGE = {
+    UNAPPLIED: 'b-pending',
+    PARTIALLY_APPLIED: 'b-process',
+    FULLY_APPLIED: 'b-completed',
+    REVERSED: 'b-cancelled',
+  };
+
   const columns = useMemo(() => [
     { key: 'doc_number',  label: 'Pay ID',   width: 90,  render: v => <span className="cell-link">{v}</span> },
     { key: 'date',        label: 'Date',     width: 90,  render: fmtDate },
     { key: 'vendor_name', label: 'Vendor' },
-    { key: 'amount',      label: 'Amount (₹)', width: 120, numeric: true, render: money },
+    { key: 'amount',      label: 'Amount (₹)', width: 110, numeric: true, render: money },
+    { key: 'applied_amount', label: 'Applied (₹)', width: 110, numeric: true, render: money },
+    { key: 'unapplied_amount', label: 'Unapplied (₹)', width: 110, numeric: true, render: money },
+    { key: 'allocation_status', label: 'Alloc. Status', width: 110, render: v => <span className={`badge ${ALLOC_STATUS_BADGE[v] || 'b-draft'}`}>{v || 'UNAPPLIED'}</span> },
     { key: 'payment_mode', label: 'Mode',    width: 100 },
-    { key: 'bank_name',   label: 'Account',  width: 120 },
     { key: 'reference_no', label: 'Reference', width: 110 },
-    { key: 'status',      label: 'Status',   width: 90,  render: v => <span className={`badge b-${(v || '').toLowerCase()}`}>{v}</span> },
+    { key: 'status',      label: 'Txn Status', width: 90,  render: v => <span className={`badge b-${(v || '').toLowerCase()}`}>{v}</span> },
+    {
+      key: 'action', label: 'Action', width: 110, render: (_, row) => {
+        const unapplied = parseFloat(row.unapplied_amount || 0);
+        const status = row.allocation_status || 'UNAPPLIED';
+        if (status === 'REVERSED') {
+          return <span style={{ fontSize: 11, color: 'var(--g400)' }}>Reversed</span>;
+        }
+        if (unapplied > 0.005) {
+          return (
+            <button
+              className="btn btn-sm"
+              style={{ fontSize: 10, padding: '2px 6px', display: 'flex', alignItems: 'center', gap: 3 }}
+              onClick={() => setAllocModal({
+                vendorId: row.vendor_id,
+                vendorName: row.vendor_name,
+                paymentId: row.id,
+                maxAmount: parseFloat(row.amount),
+                availableAmount: unapplied,
+              })}
+            >
+              <Link2 size={9} /> {status === 'PARTIALLY_APPLIED' ? 'Allocate Rem.' : 'Allocate'}
+            </button>
+          );
+        }
+        return (
+          <button
+            className="btn btn-sm"
+            style={{ fontSize: 10, padding: '2px 6px', display: 'flex', alignItems: 'center', gap: 3 }}
+            onClick={() => setAllocModal({
+              vendorId: row.vendor_id,
+              vendorName: row.vendor_name,
+              paymentId: row.id,
+              maxAmount: parseFloat(row.amount),
+              availableAmount: 0,
+            })}
+          >
+            <Link2 size={9} /> View Alloc.
+          </button>
+        );
+      }
+    }
   ], []);
 
   return (
@@ -187,6 +239,22 @@ export function PaymentsPage() {
         onPageChange={setPage}
         onRefresh={() => load(filters, page)}
       />
+
+      {allocModal && (
+        <AllocationModal
+          isOpen={true}
+          onClose={() => setAllocModal(null)}
+          onSave={() => load(filters, page)}
+          entityType="vendor"
+          entityId={allocModal.vendorId}
+          entityName={allocModal.vendorName}
+          maxAmount={allocModal.maxAmount}
+          availableAmount={allocModal.availableAmount}
+          sourceLabel="Payment Advance"
+          sourceType="PAYMENT_ADVANCE"
+          paymentId={allocModal.paymentId}
+        />
+      )}
     </div>
   );
 }

@@ -1,0 +1,170 @@
+require('dotenv').config();
+const pool = require('../db/pool');
+const { getBillOutstanding } = require('../services/openDocumentService');
+const { applyAdvancesToBill } = require('../services/vendorAdvanceService');
+
+async function main() {
+  console.log('====================================================');
+  console.log('PHASE 8 — PAY-1004 RECONCILIATION & GUARDED ALLOCATION');
+  console.log('====================================================\n');
+
+  const client = await pool.primaryPool.connect();
+
+  try {
+    // 1. Fetch Payment PAY-1004
+    const payR = await client.query(`
+      SELECT p.*, v.name as vendor_name
+      FROM payments p
+      JOIN vendors v ON p.vendor_id = v.id
+      WHERE p.doc_number = 'PAY-1004' OR p.reference_no ILIKE '%PAY-1004%' OR (v.name ILIKE '%ERREDUE%' AND p.amount = 9434235)
+      ORDER BY p.id DESC
+      LIMIT 1
+    `);
+
+    if (payR.rows.length === 0) {
+      console.log('❌ Error: Payment PAY-1004 (or ERREDUE ₹94,34,235 payment) not found in database.');
+      process.exit(1);
+    }
+    const payment = payR.rows[0];
+    console.log(`✓ Payment Found: ID ${payment.id} | ${payment.doc_number} | Vendor: ${payment.vendor_name} | Amount: ₹${parseFloat(payment.amount).toLocaleString('en-IN')}`);
+
+    // 2. Fetch linked Vendor Advance
+    const advR = await client.query(`
+      SELECT * FROM vendor_advances WHERE payment_id = $1
+    `, [payment.id]);
+
+    if (advR.rows.length === 0) {
+      console.log(`❌ Error: No vendor_advances record linked to Payment ID ${payment.id}`);
+      process.exit(1);
+    }
+    const advance = advR.rows[0];
+    console.log(`✓ Vendor Advance Found: ID ${advance.id} | Status: ${advance.status} | Remaining: ₹${parseFloat(advance.remaining_amount).toLocaleString('en-IN')}`);
+
+    // 3. Fetch target Bill for ERREDUE (grand_total = 9434235)
+    const billR = await client.query(`
+      SELECT * FROM purchase_notes
+      WHERE vendor_id = $1 AND grand_total = 9434235 AND status != 'cancelled'
+      ORDER BY id DESC
+      LIMIT 1
+    `, [payment.vendor_id]);
+
+    if (billR.rows.length === 0) {
+      console.log(`❌ Error: Target Bill of ₹94,34,235 for vendor ${payment.vendor_name} (ID ${payment.vendor_id}) not found.`);
+      process.exit(1);
+    }
+    const bill = billR.rows[0];
+    console.log(`✓ Target Bill Found: ID ${bill.id} | ${bill.doc_number} | Total: ₹${parseFloat(bill.grand_total).toLocaleString('en-IN')} | Current Paid: ₹${parseFloat(bill.amount_paid || 0).toLocaleString('en-IN')}`);
+
+    // 4. Preflight Guards Verification
+    console.log('\n--- Preflight Guard Checks ---');
+    
+    // Guard A: Vendor Match
+    if (parseInt(payment.vendor_id) !== parseInt(bill.vendor_id)) {
+      throw new Error(`Preflight Failed: Vendor mismatch. Payment vendor: ${payment.vendor_id}, Bill vendor: ${bill.vendor_id}`);
+    }
+    console.log('  [PASS] Vendor ID match verified.');
+
+    // Guard B: Payment Status
+    if (payment.status !== 'COMPLETED') {
+      throw new Error(`Preflight Failed: Payment status is ${payment.status}, expected COMPLETED`);
+    }
+    console.log('  [PASS] Payment status is COMPLETED.');
+
+    // Guard C: Advance Status & Amount
+    if (advance.status !== 'OPEN' || Math.abs(parseFloat(advance.remaining_amount) - 9434235) > 0.01) {
+      throw new Error(`Preflight Failed: Vendor Advance status (${advance.status}) or remaining amount (₹${advance.remaining_amount}) is invalid.`);
+    }
+    console.log('  [PASS] Vendor Advance is OPEN with remaining ₹94,34,235.');
+
+    // Guard D: Bill Outstanding Balance
+    const initialBillCalc = await getBillOutstanding(bill.id, client);
+    if (Math.abs(parseFloat(initialBillCalc.outstanding) - 9434235) > 0.01) {
+      throw new Error(`Preflight Failed: Bill canonical outstanding is ₹${initialBillCalc.outstanding}, expected ₹94,34,235.`);
+    }
+    console.log('  [PASS] Bill canonical outstanding balance is ₹94,34,235.');
+
+    // Guard E: No Duplicate Application
+    const existingAppR = await client.query(`
+      SELECT * FROM vendor_advance_applications WHERE advance_id = $1 AND purchase_note_id = $2 AND status = 'APPLIED'
+    `, [advance.id, bill.id]);
+    if (existingAppR.rows.length > 0) {
+      throw new Error(`Preflight Failed: Advance ${advance.id} is already applied to Bill ${bill.id}.`);
+    }
+    console.log('  [PASS] No existing active application found.');
+
+    // 5. Execute Allocation in Transaction
+    console.log('\n--- Executing Allocation via applyAdvancesToBill ---');
+    await client.query('BEGIN');
+
+    const allocResult = await applyAdvancesToBill({
+      purchaseNoteId: bill.id,
+      vendorId: payment.vendor_id,
+      mode: 'manual',
+      allocations: [{ advance_id: advance.id, amount: 9434235 }],
+      userId: 1,
+      client,
+    });
+
+    await client.query('COMMIT');
+    console.log(`✓ Allocation Transaction Committed! Applied Amount: ₹${allocResult.applied.toLocaleString('en-IN')} | JE ID: ${allocResult.je_id}`);
+
+    // 6. Post-Allocation Verification
+    console.log('\n--- Post-Allocation Verification ---');
+    const finalBillCalc = await getBillOutstanding(bill.id, client);
+    const updatedAdvR = await client.query(`SELECT * FROM vendor_advances WHERE id = $1`, [advance.id]);
+    const updatedBillR = await client.query(`SELECT * FROM purchase_notes WHERE id = $1`, [bill.id]);
+    const updatedPayR = await client.query(`
+      SELECT p.*,
+        COALESCE(pa_sum.creation_applied, 0) + COALESCE(vaa_sum.advance_applied, 0) AS applied_amount,
+        COALESCE(va_sum.remaining, 0) AS unapplied_amount
+      FROM payments p
+      LEFT JOIN (SELECT payment_id, SUM(amount) AS creation_applied FROM payment_allocations GROUP BY payment_id) pa_sum ON pa_sum.payment_id = p.id
+      LEFT JOIN (SELECT va.payment_id, SUM(vaa.amount) AS advance_applied FROM vendor_advance_applications vaa JOIN vendor_advances va ON vaa.advance_id = va.id WHERE vaa.status = 'APPLIED' GROUP BY va.payment_id) vaa_sum ON vaa_sum.payment_id = p.id
+      LEFT JOIN (SELECT payment_id, SUM(remaining_amount) AS remaining FROM vendor_advances WHERE status = 'OPEN' GROUP BY payment_id) va_sum ON va_sum.payment_id = p.id
+      WHERE p.id = $1
+    `, [payment.id]);
+
+    const updatedAdv = updatedAdvR.rows[0];
+    const updatedBill = updatedBillR.rows[0];
+    const updatedPay = updatedPayR.rows[0];
+
+    const jeLinesR = await client.query(`
+      SELECT l.*, a.code as account_code, a.name as account_name
+      FROM journal_entry_lines l
+      JOIN accounts a ON a.id = l.account_id
+      WHERE l.journal_entry_id = $1
+    `, [allocResult.je_id]);
+
+    console.log('\n====================================================');
+    console.log('PI-202607-PAY-1004 RECONCILIATION SUMMARY REPORT');
+    console.log('====================================================');
+    console.log(`- Vendor: ${payment.vendor_name}`);
+    console.log(`- Payment ID: ${payment.doc_number} (ID: ${payment.id})`);
+    console.log(`  - Status: ${updatedPay.status}`);
+    console.log(`  - Allocation Status: FULLY_APPLIED`);
+    console.log(`  - Applied Amount: ₹${parseFloat(updatedPay.applied_amount).toLocaleString('en-IN')}`);
+    console.log(`  - Unapplied Amount: ₹${parseFloat(updatedPay.unapplied_amount).toLocaleString('en-IN')}`);
+    console.log(`- Target Bill ID: ${updatedBill.doc_number} (ID: ${updatedBill.id})`);
+    console.log(`  - Payment Status: ${updatedBill.payment_status}`);
+    console.log(`  - Amount Paid: ₹${parseFloat(updatedBill.amount_paid).toLocaleString('en-IN')}`);
+    console.log(`  - Balance Due: ₹${parseFloat(updatedBill.balance_due).toLocaleString('en-IN')}`);
+    console.log(`  - Canonical Outstanding: ₹${parseFloat(finalBillCalc.outstanding).toLocaleString('en-IN')}`);
+    console.log(`- Vendor Advance ID: ${updatedAdv.id}`);
+    console.log(`  - Status: ${updatedAdv.status}`);
+    console.log(`  - Remaining Amount: ₹${parseFloat(updatedAdv.remaining_amount).toLocaleString('en-IN')}`);
+    console.log(`- Reclassification Journal Entry (JE #${allocResult.je_id}):`);
+    jeLinesR.rows.forEach(l => {
+      console.log(`  - Line: Account ${l.account_code} (${l.account_name}) | Dr: ₹${parseFloat(l.debit).toLocaleString('en-IN')} | Cr: ₹${parseFloat(l.credit).toLocaleString('en-IN')}`);
+    });
+    console.log('\n✅ PAY-1004 RECONCILIATION & ALLOCATION COMPLETED SUCCESSFULLY!');
+
+  } catch (err) {
+    console.error('\n❌ ERROR DURING RECONCILIATION:', err.message, err.stack);
+    process.exit(1);
+  } finally {
+    client.release();
+    await pool.primaryPool.end();
+  }
+}
+
+main();

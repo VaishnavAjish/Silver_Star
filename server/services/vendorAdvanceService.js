@@ -24,6 +24,7 @@
 const pool = require('../db/pool');
 const journalEngine = require('./journalEngine');
 const FinancialMappingService = require('./FinancialMappingService');
+const { syncBillStatus } = require('./openDocumentService');
 
 const EPS = 0.005;
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
@@ -252,21 +253,88 @@ async function applyAdvancesToBill({ purchaseNoteId, vendorId, mode = 'auto', al
     });
   }
 
-  // Settle the bill: increment amount_paid, recompute balance_due + status.
-  const newAmountPaid = round2(amountPaid + totalApplied);
-  const newBalance = round2(grandTotal - newAmountPaid);
-  const newStatus = newBalance <= EPS ? 'PAID' : 'PARTIAL';
-  await client.query(
-    `UPDATE purchase_notes
-        SET amount_paid    = $1,
-            balance_due    = $2,
-            payment_status = $3,
-            updated_at     = NOW()
-      WHERE id = $4`,
-    [newAmountPaid, newBalance, newStatus, pnId]
-  );
+  // Canonical bill status synchronization
+  await syncBillStatus(pnId, client);
+
+  const updatedPn = await client.query('SELECT balance_due FROM purchase_notes WHERE id = $1', [pnId]);
+  const newBalance = parseFloat(updatedPn.rows[0]?.balance_due || 0);
 
   return { applied: totalApplied, je_id: je.id, breakdown, bill_balance_after: newBalance };
+}
+
+/**
+ * Reverse a vendor advance application.
+ *
+ * @param {object} params
+ * @param {number} params.applicationId
+ * @param {number} [params.userId]
+ * @param {object} params.client  Active pg transaction client (REQUIRED)
+ */
+async function reverseAdvanceApplication({ applicationId, userId, client }) {
+  if (!client) throw new Error('reverseAdvanceApplication requires an active transaction client');
+  const appId = parseInt(applicationId, 10);
+
+  // 1. Lock application
+  const appR = await client.query(
+    `SELECT * FROM vendor_advance_applications WHERE id = $1 FOR UPDATE`,
+    [appId]
+  );
+  if (!appR.rows[0]) throw new Error('Advance application not found');
+  const app = appR.rows[0];
+  if (app.status === 'REVERSED') {
+    throw new Error('Application is already REVERSED');
+  }
+
+  // 2. Lock linked Bill & Advance
+  await client.query(`SELECT id FROM purchase_notes WHERE id = $1 FOR UPDATE`, [app.purchase_note_id]);
+  const advR = await client.query(`SELECT id, remaining_amount, amount FROM vendor_advances WHERE id = $1 FOR UPDATE`, [app.advance_id]);
+  if (!advR.rows[0]) throw new Error('Linked vendor advance not found');
+
+  const appAmount = round2(app.amount);
+
+  // 3. Resolve GL accounts
+  const payableAccId = await FinancialMappingService.resolveAP(client);
+  const advanceAccId = await FinancialMappingService.resolveVendorAdvance(client);
+
+  // 4. Post Reversing Journal Entry: Dr Vendor Advance / Cr Accounts Payable
+  const je = await journalEngine.createEntry({
+    date: new Date().toISOString().slice(0, 10),
+    description: `Reversal of vendor advance application #${appId}`,
+    sourceType: 'advance_application_reversal',
+    sourceId: app.purchase_note_id,
+    lines: [
+      { accountId: advanceAccId, debit: appAmount, credit: 0, narration: `Reversal of advance application #${appId}`, entityType: 'vendor', entityId: app.vendor_id },
+      { accountId: payableAccId, debit: 0, credit: appAmount, narration: `Reversal of payable adjustment #${appId}`, entityType: 'vendor', entityId: app.vendor_id },
+    ],
+    autoPost: true,
+    createdBy: userId,
+    client,
+  });
+
+  // 5. Restore vendor_advances remaining_amount and status
+  await client.query(
+    `UPDATE vendor_advances
+        SET remaining_amount = remaining_amount + $1,
+            status = 'OPEN',
+            updated_at = NOW()
+      WHERE id = $2`,
+    [appAmount, app.advance_id]
+  );
+
+  // 6. Update application status to REVERSED
+  await client.query(
+    `UPDATE vendor_advance_applications
+        SET status = 'REVERSED',
+            reversal_je_id = $1,
+            updated_at = NOW()
+      WHERE id = $2`,
+    [je.id, appId]
+  );
+
+  // 7. Canonical Bill status synchronization
+  await syncBillStatus(app.purchase_note_id, client);
+
+  return { ok: true, application_id: appId, status: 'REVERSED', reversal_je_id: je.id };
 }
 
 module.exports = {
@@ -274,4 +342,5 @@ module.exports = {
   getAvailableAdvanceTotal,
   getVendorPosition,
   applyAdvancesToBill,
+  reverseAdvanceApplication,
 };

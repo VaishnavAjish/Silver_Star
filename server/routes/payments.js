@@ -52,11 +52,45 @@ router.get('/', authenticate, async (req, res) => {
 
     params.push(limit, offset);
 
-    const joins = 'LEFT JOIN vendors v ON p.vendor_id = v.id LEFT JOIN accounts a ON p.bank_account_id = a.id';
+    const joins = `
+      LEFT JOIN vendors v ON p.vendor_id = v.id
+      LEFT JOIN accounts a ON p.bank_account_id = a.id
+      LEFT JOIN (
+        SELECT payment_id, SUM(amount) AS creation_applied
+        FROM payment_allocations GROUP BY payment_id
+      ) pa_sum ON pa_sum.payment_id = p.id
+      LEFT JOIN (
+        SELECT va.payment_id, SUM(vaa.amount) AS advance_applied
+        FROM vendor_advance_applications vaa
+        JOIN vendor_advances va ON vaa.advance_id = va.id
+        WHERE vaa.status = 'APPLIED'
+        GROUP BY va.payment_id
+      ) vaa_sum ON vaa_sum.payment_id = p.id
+      LEFT JOIN (
+        SELECT payment_id, SUM(remaining_amount) AS remaining
+        FROM vendor_advances
+        WHERE status = 'OPEN'
+        GROUP BY payment_id
+      ) va_sum ON va_sum.payment_id = p.id
+    `;
+
+    const selectCols = `
+      p.*, v.name as vendor_name, a.name as bank_name,
+      COALESCE(pa_sum.creation_applied, 0) AS creation_applied,
+      COALESCE(vaa_sum.advance_applied, 0) AS advance_applied,
+      COALESCE(pa_sum.creation_applied, 0) + COALESCE(vaa_sum.advance_applied, 0) AS applied_amount,
+      COALESCE(va_sum.remaining, 0) AS unapplied_amount,
+      CASE
+        WHEN p.status = 'CANCELLED' OR p.status = 'REVERSED' THEN 'REVERSED'
+        WHEN COALESCE(va_sum.remaining, 0) <= 0.005 THEN 'FULLY_APPLIED'
+        WHEN COALESCE(pa_sum.creation_applied, 0) + COALESCE(vaa_sum.advance_applied, 0) > 0.005 THEN 'PARTIALLY_APPLIED'
+        ELSE 'UNAPPLIED'
+      END AS allocation_status
+    `;
 
     const [dataR, countR] = await Promise.all([
       pool.query(
-        `SELECT p.*, v.name as vendor_name, a.name as bank_name
+        `SELECT ${selectCols}
          FROM payments p ${joins}
          ${where}
          ORDER BY p.date DESC, p.id DESC
@@ -71,6 +105,99 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) {
     logger.error('[payments GET]', { error: err.message, stack: err.stack });
     res.status(500).json({ error: 'Failed to load payments' });
+  }
+});
+
+// GET /api/payments/:id/allocation
+router.get('/:id/allocation', authenticate, async (req, res) => {
+  try {
+    const paymentId = parseInt(req.params.id, 10);
+    if (!paymentId || isNaN(paymentId)) {
+      return res.status(400).json({ error: 'Invalid payment id' });
+    }
+
+    const payR = await pool.query(`
+      SELECT p.*, v.name as vendor_name
+      FROM payments p
+      LEFT JOIN vendors v ON v.id = p.vendor_id
+      WHERE p.id = $1
+    `, [paymentId]);
+
+    if (!payR.rows[0]) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+    const payment = payR.rows[0];
+
+    // Creation-time allocations
+    const paR = await pool.query(`
+      SELECT pa.*, pn.doc_number as bill_doc_number, pn.doc_date as bill_doc_date, pn.grand_total as bill_grand_total
+      FROM payment_allocations pa
+      JOIN purchase_notes pn ON pn.id = pa.purchase_note_id
+      WHERE pa.payment_id = $1
+    `, [paymentId]);
+
+    // Vendor advance rows linked to this payment
+    const vaR = await pool.query(`
+      SELECT * FROM vendor_advances WHERE payment_id = $1
+    `, [paymentId]);
+
+    // Vendor advance applications linked to this payment's advances
+    const vaaR = await pool.query(`
+      SELECT vaa.*, pn.doc_number as bill_doc_number, pn.doc_date as bill_doc_date, pn.grand_total as bill_grand_total
+      FROM vendor_advance_applications vaa
+      JOIN vendor_advances va ON vaa.advance_id = va.id
+      JOIN purchase_notes pn ON pn.id = vaa.purchase_note_id
+      WHERE va.payment_id = $1
+      ORDER BY vaa.created_at ASC
+    `, [paymentId]);
+
+    const creationTimeApplied = paR.rows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+    const advanceApplied = vaaR.rows.filter(r => r.status === 'APPLIED').reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+    const totalApplied = creationTimeApplied + advanceApplied;
+
+    const unappliedAmount = vaR.rows.reduce((s, r) => s + parseFloat(r.remaining_amount || 0), 0);
+
+    let allocationStatus = 'UNAPPLIED';
+    if (payment.status === 'CANCELLED' || payment.status === 'REVERSED') {
+      allocationStatus = 'REVERSED';
+    } else if (unappliedAmount <= 0.005) {
+      allocationStatus = 'FULLY_APPLIED';
+    } else if (totalApplied > 0.005) {
+      allocationStatus = 'PARTIALLY_APPLIED';
+    }
+
+    const allocatedBills = [
+      ...paR.rows.map(r => ({ id: r.purchase_note_id, doc_number: r.bill_doc_number, doc_date: r.bill_doc_date, grand_total: parseFloat(r.bill_grand_total), amount: parseFloat(r.amount), source: 'creation' })),
+      ...vaaR.rows.filter(r => r.status === 'APPLIED').map(r => ({ id: r.purchase_note_id, doc_number: r.bill_doc_number, doc_date: r.bill_doc_date, grand_total: parseFloat(r.bill_grand_total), amount: parseFloat(r.amount), source: 'advance_application' })),
+    ];
+
+    res.json({
+      payment_id: payment.id,
+      doc_number: payment.doc_number,
+      payment_amount: parseFloat(payment.amount),
+      vendor_id: payment.vendor_id,
+      vendor_name: payment.vendor_name,
+      creation_time_applied_amount: creationTimeApplied,
+      vendor_advance_applied_amount: advanceApplied,
+      total_applied_amount: totalApplied,
+      unapplied_amount: unappliedAmount,
+      allocation_status: allocationStatus,
+      advance_ids: vaR.rows.map(r => r.id),
+      advance_application_summaries: vaaR.rows.map(r => ({
+        id: r.id,
+        advance_id: r.advance_id,
+        purchase_note_id: r.purchase_note_id,
+        bill_doc_number: r.bill_doc_number,
+        amount: parseFloat(r.amount),
+        status: r.status,
+        created_at: r.created_at,
+        je_id: r.je_id,
+      })),
+      allocated_bills: allocatedBills,
+    });
+  } catch (err) {
+    logger.error('[payments GET /:id/allocation]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Failed to fetch payment allocation details' });
   }
 });
 

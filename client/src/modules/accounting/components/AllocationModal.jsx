@@ -31,17 +31,23 @@ export default function AllocationModal({
   isOpen, onClose, onSave,
   entityType, entityId, entityName,
   maxAmount = 0,
+  availableAmount = null,
   existingAllocations = [],
   excludeJeId = null,
+  sourceLabel = 'JE Line Amount',
+  sourceType = 'JE',
+  paymentId = null,
 }) {
   const api = useApi();
   const [docs,    setDocs]    = useState([]);
   const [amounts, setAmounts] = useState({});   // { [doc_id]: string }
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
+  const [saving,  setSaving]  = useState(false);
 
-  const isVendor = entityType === 'vendor';
+  const isVendor = entityType === 'vendor' || sourceType === 'PAYMENT_ADVANCE';
   const docLabel = isVendor ? 'bill' : 'invoice';
+  const capAmount = availableAmount != null ? availableAmount : maxAmount;
 
   const getDocId = d => d.source_id || d.id;
   const getDocNum = d => d.voucher_no || d.doc_number;
@@ -51,22 +57,26 @@ export default function AllocationModal({
 
   // ── Load open documents ───────────────────────────────────────────────────
   const loadDocs = useCallback(async () => {
-    if (!entityId) return;
+    if (!entityId && !paymentId) return;
     setLoading(true);
     setError('');
     try {
-      // Correct endpoints: payments/receipts routes expose open docs via query params
-      const base = isVendor
-        ? `/api/payments/open?vendor_id=${entityId}`
-        : `/api/receipts/open?customer_id=${entityId}`;
-      const endpoint = excludeJeId ? `${base}&exclude_je_id=${excludeJeId}` : base;
+      let endpoint = '';
+      if (sourceType === 'PAYMENT_ADVANCE') {
+        endpoint = `/api/payments/open?vendor_id=${entityId}`;
+      } else {
+        const base = isVendor
+          ? `/api/payments/open?vendor_id=${entityId}`
+          : `/api/receipts/open?customer_id=${entityId}`;
+        endpoint = excludeJeId ? `${base}&exclude_je_id=${excludeJeId}` : base;
+      }
       const res = await api.get(endpoint);
       const loaded = res.data || [];
       setDocs(loaded);
 
       // Auto-prefill if opening allocation for the first time
       if ((!existingAllocations || existingAllocations.length === 0) && loaded.length > 0) {
-        let left = maxAmount;
+        let left = capAmount;
         const seed = {};
         for (const doc of loaded) {
           if (left <= 0.005) break;
@@ -85,7 +95,7 @@ export default function AllocationModal({
     } finally {
       setLoading(false);
     }
-  }, [api, entityId, isVendor, excludeJeId, maxAmount, existingAllocations]);
+  }, [api, entityId, isVendor, excludeJeId, capAmount, existingAllocations, sourceType, paymentId]);
 
   // Load on open; seed amounts from existingAllocations
   useEffect(() => {
@@ -102,8 +112,8 @@ export default function AllocationModal({
 
   // ── Derived values ────────────────────────────────────────────────────────
   const totalAllocated = Object.values(amounts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-  const remaining      = maxAmount - totalAllocated;
-  const isOverAllocated = totalAllocated > maxAmount + 0.005;
+  const remaining      = capAmount - totalAllocated;
+  const isOverAllocated = totalAllocated > capAmount + 0.005;
 
   // ── Quick-fill helpers ────────────────────────────────────────────────────
   const allocateFull = (doc) => {
@@ -113,7 +123,7 @@ export default function AllocationModal({
   };
 
   const allocateAll = () => {
-    let left = maxAmount;
+    let left = capAmount;
     const next = {};
     for (const doc of docs) {
       if (left <= 0.005) break;
@@ -127,7 +137,7 @@ export default function AllocationModal({
   const clearAll = () => setAmounts({});
 
   // ── Save ─────────────────────────────────────────────────────────────────
-  const handleSave = () => {
+  const handleSave = async () => {
     if (isOverAllocated) return;
 
     const result = docs
@@ -141,8 +151,27 @@ export default function AllocationModal({
         allocated_amount: parseFloat(amounts[getDocId(d)]),
       }));
 
-    onSave(result);
-    onClose();
+    if (sourceType === 'PAYMENT_ADVANCE') {
+      setSaving(true);
+      try {
+        for (const item of result) {
+          await api.post('/api/vendor-advances/apply', {
+            purchase_note_id: item.target_id,
+            vendor_id: entityId,
+            mode: 'auto',
+          });
+        }
+        if (onSave) onSave(result);
+        onClose();
+      } catch (err) {
+        setError(err.message || 'Failed to apply advance');
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      if (onSave) onSave(result);
+      onClose();
+    }
   };
 
   if (!isOpen) return null;
@@ -177,8 +206,8 @@ export default function AllocationModal({
           display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center',
         }}>
           <div style={{ fontSize: 12 }}>
-            <span style={{ color: 'var(--g500)', marginRight: 6 }}>JE Line Amount:</span>
-            <strong style={{ fontFamily: 'var(--mono)', color: 'var(--brand)' }}>{fmt(maxAmount)}</strong>
+            <span style={{ color: 'var(--g500)', marginRight: 6 }}>{sourceLabel}:</span>
+            <strong style={{ fontFamily: 'var(--mono)', color: 'var(--brand)' }}>{fmt(capAmount)}</strong>
           </div>
           <div style={{ fontSize: 12 }}>
             <span style={{ color: 'var(--g500)', marginRight: 6 }}>Allocated:</span>
@@ -302,17 +331,17 @@ export default function AllocationModal({
           {isOverAllocated && (
             <span style={{ fontSize: 12, color: '#C62828', display: 'flex', alignItems: 'center', gap: 5, marginRight: 'auto' }}>
               <AlertCircle size={13} />
-              Total allocation exceeds JE line amount by {fmt(totalAllocated - maxAmount)}
+              Total allocation exceeds {sourceLabel} by {fmt(totalAllocated - capAmount)}
             </span>
           )}
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
           <button
             className="btn btn-primary"
             onClick={handleSave}
-            disabled={isOverAllocated || totalAllocated <= 0}
+            disabled={isOverAllocated || totalAllocated <= 0 || saving}
           >
             <Check size={13} />
-            Save {Object.values(amounts).filter(v => parseFloat(v) > 0).length} Allocation(s)
+            {saving ? 'Saving...' : `Save ${Object.values(amounts).filter(v => parseFloat(v) > 0).length} Allocation(s)`}
           </button>
         </div>
       </div>

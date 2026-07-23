@@ -65,28 +65,65 @@ const DUE_DAYS_SQL = `
 
 // ─── IMPORTANT: static/compound routes BEFORE /:id ───────────────────────────
 
-// GET /api/vendors/summary — cached 30 s
+// GET /api/vendors/summary — cached 5 s
 router.get('/summary', authenticate, async (req, res) => {
   try {
-    const data = await cache.get('vendor_summary', 30, async () => {
+    const data = await cache.get('vendor_summary', 5, async () => {
       const r = await pool.query(`
+        WITH open_bills AS (
+          SELECT
+            pn.id,
+            pn.grand_total,
+            pn.doc_date,
+            pn.payment_term,
+            COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_allocated,
+            GREATEST(0, pn.grand_total - (COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0))) AS outstanding
+          FROM purchase_notes pn
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS payment_allocated
+            FROM payment_allocations GROUP BY purchase_note_id
+          ) pa ON pa.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT target_id, SUM(allocated_amount) AS je_allocated
+            FROM je_allocations WHERE target_type = 'bill' GROUP BY target_id
+          ) ja ON ja.target_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS advance_allocated
+            FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
+          ) vaa ON vaa.purchase_note_id = pn.id
+          WHERE pn.status != 'cancelled'
+        ),
+        advances AS (
+          SELECT COALESCE(SUM(remaining_amount), 0) AS available_advances
+          FROM vendor_advances WHERE status = 'OPEN'
+        ),
+        unallocated AS (
+          SELECT COUNT(DISTINCT payment_id) AS unallocated_payments_count
+          FROM vendor_advances WHERE status = 'OPEN' AND remaining_amount > 0
+        )
         SELECT
-          COALESCE(SUM(GREATEST(pn.grand_total - COALESCE(pn.amount_paid, 0), 0)), 0) AS total_payables,
+          COALESCE(SUM(b.outstanding), 0) AS gross_open_bills,
+          (SELECT available_advances FROM advances) AS available_advances,
+          GREATEST(0, COALESCE(SUM(b.outstanding), 0) - (SELECT available_advances FROM advances)) AS net_payable,
           COALESCE(SUM(
-            CASE WHEN (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
-                 THEN GREATEST(pn.grand_total - COALESCE(pn.amount_paid, 0), 0) ELSE 0 END
+            CASE WHEN (b.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE AND b.outstanding > 0.005
+                 THEN b.outstanding ELSE 0 END
           ), 0) AS overdue,
-          (SELECT COALESCE(SUM(amount), 0)
-             FROM payments
-            WHERE date >= CURRENT_DATE - INTERVAL '30 days') AS paid_last_30
-        FROM purchase_notes pn
-        WHERE pn.payment_status != 'PAID' AND pn.status != 'cancelled'
+          (SELECT unallocated_payments_count FROM unallocated) AS unallocated_payments,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE date >= CURRENT_DATE - INTERVAL '30 days') AS paid_last_30
+        FROM open_bills b
       `);
       const row = r.rows[0] || {};
+      const grossBills = parseFloat(row.gross_open_bills) || 0;
+      const availAdv = parseFloat(row.available_advances) || 0;
       return {
-        total_payables: parseFloat(row.total_payables) || 0,
-        overdue:        parseFloat(row.overdue)        || 0,
-        paid_last_30:   parseFloat(row.paid_last_30)   || 0,
+        gross_open_bills: grossBills,
+        total_payables: grossBills,
+        available_advances: availAdv,
+        net_payable: parseFloat(row.net_payable) || 0,
+        overdue: parseFloat(row.overdue) || 0,
+        unallocated_payments: parseInt(row.unallocated_payments) || 0,
+        paid_last_30: parseFloat(row.paid_last_30) || 0,
       };
     });
     res.json(data);
