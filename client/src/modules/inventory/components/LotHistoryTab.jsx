@@ -236,10 +236,10 @@ export default function LotHistoryTab({ lotId }) {
           </button>
           <button
             className="btn btn-sm"
-            disabled={!selectedRow || !eligibility.can_cancel || eligibility.loading}
-            title={selectedRow ? (eligibility.loading ? 'Checking eligibility...' : (eligibility.can_cancel ? '' : eligibility.reason || 'Reversal not supported')) : 'Select a row first'}
+            disabled={!selectedRow || eligibility.loading}
+            title={selectedRow ? (eligibility.loading ? 'Checking eligibility...' : (eligibility.can_cancel ? 'Cancel this transaction' : eligibility.reason || 'Reversal not supported for this transaction type')) : 'Select a row first'}
             onClick={() => setCancelModalOpen(true)}
-            style={selectedRow && eligibility.can_cancel ? { color: '#C62828', borderColor: '#C62828' } : {}}
+            style={selectedRow ? { color: '#C62828', borderColor: '#C62828' } : {}}
           >
             <XCircle size={11} /> Cancel Transaction
           </button>
@@ -377,6 +377,7 @@ export default function LotHistoryTab({ lotId }) {
         actionRow={selectedRow}
         onConfirm={handleConfirmReversal}
         isSubmitting={reversing}
+        eligibility={eligibility}
       />
     </div>
   );

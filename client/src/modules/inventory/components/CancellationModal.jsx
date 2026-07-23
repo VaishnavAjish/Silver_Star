@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import Modal from '../../../shared/components/Modal';
 
-export default function CancellationModal({ open, onClose, actionRow, onConfirm, isSubmitting }) {
+export default function CancellationModal({ open, onClose, actionRow, onConfirm, isSubmitting, eligibility }) {
   const [reason, setReason] = useState('');
   const [ack, setAck] = useState(false);
 
   if (!open || !actionRow) return null;
 
+  const canCancel = eligibility ? eligibility.can_cancel : true;
+  const reasonText = eligibility?.reason;
+
   const handleConfirm = () => {
+    if (!canCancel) return;
     if (!reason.trim() || reason.trim().length < 5) return;
     if (!ack) return;
     onConfirm(actionRow, reason.trim());
@@ -17,9 +21,15 @@ export default function CancellationModal({ open, onClose, actionRow, onConfirm,
     <Modal open={open} onClose={onClose} title="Cancel Transaction" width={600}>
       <div style={{ padding: '0 20px 20px 20px' }}>
 
-        <div style={{ padding: 12, background: '#FFEBEE', color: '#C62828', borderRadius: 8, marginBottom: 16 }}>
-          <strong>Warning:</strong> You are about to cancel this transaction. This will create a reversal record and restore the previous state. The original history is not deleted.
-        </div>
+        {canCancel ? (
+          <div style={{ padding: 12, background: '#FFEBEE', color: '#C62828', borderRadius: 8, marginBottom: 16 }}>
+            <strong>Warning:</strong> You are about to cancel this transaction. This will create a reversal record and restore the previous state. The original history is not deleted.
+          </div>
+        ) : (
+          <div style={{ padding: 12, background: '#FFF3E0', color: '#E65100', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+            <strong>Notice:</strong> {reasonText || 'Safe reversal for this transaction type is not yet available.'}
+          </div>
+        )}
 
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 16 }}>
           <tbody>
@@ -43,12 +53,13 @@ export default function CancellationModal({ open, onClose, actionRow, onConfirm,
             value={reason}
             onChange={e => setReason(e.target.value)}
             placeholder="Explain why this transaction is being reversed..."
+            disabled={!canCancel}
           />
         </div>
 
         <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--g800)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--g800)', cursor: canCancel ? 'pointer' : 'not-allowed' }}>
+            <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} disabled={!canCancel} />
             I understand that this creates a reversal and does not delete history.
           </label>
         </div>
@@ -58,8 +69,8 @@ export default function CancellationModal({ open, onClose, actionRow, onConfirm,
           <button
             className="btn btn-danger"
             onClick={handleConfirm}
-            disabled={!ack || reason.trim().length < 5 || isSubmitting}
-            style={{ background: '#C62828', color: '#fff', border: 'none' }}
+            disabled={!canCancel || !ack || reason.trim().length < 5 || isSubmitting}
+            style={{ background: canCancel ? '#C62828' : 'var(--g300)', color: '#fff', border: 'none' }}
           >
             {isSubmitting ? 'Reversing...' : 'Confirm Reversal'}
           </button>
