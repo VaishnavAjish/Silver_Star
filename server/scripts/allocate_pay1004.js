@@ -195,9 +195,9 @@ async function main() {
 
     const jeLinesR = await client.query(`
       SELECT l.*, a.code as account_code, a.name as account_name
-      FROM journal_entry_lines l
+      FROM je_lines l
       JOIN accounts a ON a.id = l.account_id
-      WHERE l.journal_entry_id = $1
+      WHERE l.je_id = $1
     `, [allocResult.je_id]);
 
     console.log('\n====================================================');
