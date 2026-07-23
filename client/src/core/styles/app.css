@@ -2020,6 +2020,8 @@ textarea:disabled {
   .txn-hdr-top,
   .txn-breadcrumb,
   .btn,
+  .je-th-alloc,
+  .je-td-alloc,
   .je-th-act,
   .je-td-act {
     display: none !important;
@@ -2399,8 +2401,14 @@ textarea:disabled {
   width: 90px;
 }
 
+.je-th-alloc {
+  width: 95px;
+  text-align: center;
+}
+
 .je-th-act {
-  width: 56px;
+  width: 68px;
+  text-align: center;
 }
 
 .je-td-num {
@@ -2414,8 +2422,14 @@ textarea:disabled {
   text-align: right;
 }
 
+.je-td-alloc {
+  text-align: center;
+  vertical-align: middle;
+}
+
 .je-td-act {
   text-align: center;
+  vertical-align: middle;
 }
 
 .je-ro-text {

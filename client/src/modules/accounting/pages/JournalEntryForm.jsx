@@ -864,6 +864,7 @@ export default function JournalEntryForm() {
                   <th className="je-th-amt">Credit</th>
                   <th className="je-th-cc">Cost Center</th>
                   <th className="je-th-ref">Line Ref</th>
+                  {isEdit && <th className="je-th-alloc">Allocation</th>}
                   {isEdit && <th className="je-th-act"></th>}
                 </tr>
               </thead>
@@ -1104,43 +1105,61 @@ function JELineRow({
         )}
       </td>
 
-      {/* Actions */}
+      {/* Allocation Column */}
+      {isEdit && (
+        <td className="je-td-alloc">
+          {canAllocate && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => onOpenAllocation(line._key)}
+              style={{
+                fontSize: 11,
+                padding: '3px 9px',
+                height: 26,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                color: allocCount > 0 ? '#2E7D32' : 'var(--brand)',
+                borderColor: allocCount > 0 ? '#81C784' : undefined,
+                background: allocCount > 0 ? '#E8F5E9' : undefined,
+                fontWeight: allocCount > 0 ? 700 : 600,
+                borderRadius: 5,
+                whiteSpace: 'nowrap',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+              }}
+            >
+              <Link2 size={11} />
+              {allocCount > 0 ? `${allocCount} Alloc.` : 'Allocate'}
+            </button>
+          )}
+        </td>
+      )}
+
+      {/* Row Actions Column (Copy/Duplicate & Delete/Remove) */}
       {isEdit && (
         <td className="je-td-act">
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {canAllocate && (
-              <button
-                className="btn btn-sm"
-                onClick={() => onOpenAllocation(line._key)}
-                style={{
-                  fontSize: 10, padding: '2px 7px', height: 24,
-                  display: 'flex', alignItems: 'center', gap: 3,
-                  color:       allocCount > 0 ? '#2E7D32'      : 'var(--brand)',
-                  borderColor: allocCount > 0 ? '#2E7D32'      : undefined,
-                  background:  allocCount > 0 ? '#E8F5E9'      : undefined,
-                  fontWeight:  allocCount > 0 ? 700            : 500,
-                }}
-              >
-                <Link2 size={9} />
-                {allocCount > 0 ? `${allocCount} Alloc.` : 'Allocate'}
-              </button>
-            )}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}>
             <button
+              type="button"
               className="icon-btn"
               title="Duplicate row"
               onClick={() => onDuplicate(line._key)}
-              style={{ width: 24, height: 24 }}
+              style={{ width: 26, height: 26 }}
             >
-              <Copy size={11} />
+              <Copy size={13} />
             </button>
             {canRemove && (
               <button
+                type="button"
                 className="icon-btn"
                 title="Remove row"
                 onClick={() => onRemove(line._key)}
-                style={{ width: 24, height: 24, color: 'var(--red)' }}
+                style={{ width: 26, height: 26, color: 'var(--red)' }}
               >
-                <Trash2 size={11} />
+                <Trash2 size={13} />
               </button>
             )}
           </div>
