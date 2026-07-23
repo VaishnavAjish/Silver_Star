@@ -6,7 +6,7 @@ BEGIN;
 -- 1. Create bill_tds_withholdings table
 CREATE TABLE IF NOT EXISTS bill_tds_withholdings (
     id SERIAL PRIMARY KEY,
-    purchase_note_id INT NOT NULL REFERENCES purchase_notes(id) ON DELETE CASCADE,
+    purchase_note_id INT NOT NULL,
     vendor_id INT NOT NULL REFERENCES vendors(id),
     tds_account_id INT NOT NULL REFERENCES accounts(id),
     nature TEXT,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS bill_tds_withholdings (
     status VARCHAR(20) NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'REVERSED')),
     posting_je_id INT REFERENCES journal_entries(id),
     reversal_je_id INT REFERENCES journal_entries(id),
-    created_by INT REFERENCES users(id),
+    created_by INT,
     reversal_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
