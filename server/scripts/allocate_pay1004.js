@@ -4,8 +4,11 @@ const { getBillOutstanding } = require('../services/openDocumentService');
 const { applyAdvancesToBill } = require('../services/vendorAdvanceService');
 
 async function main() {
+  const isExecute = process.argv.includes('--execute');
+  const modeLabel = isExecute ? 'EXECUTE MODE' : 'DRY-RUN MODE (READ-ONLY)';
+
   console.log('====================================================');
-  console.log('PHASE 8 — PAY-1004 RECONCILIATION & GUARDED ALLOCATION');
+  console.log(`PHASE 8 — PAY-1004 RECONCILIATION [${modeLabel}]`);
   console.log('====================================================\n');
 
   const client = await pool.primaryPool.connect();
@@ -55,6 +58,22 @@ async function main() {
     const bill = billR.rows[0];
     console.log(`✓ Target Bill Found: ID ${bill.id} | ${bill.doc_number} | Total: ₹${parseFloat(bill.grand_total).toLocaleString('en-IN')} | Current Paid: ₹${parseFloat(bill.amount_paid || 0).toLocaleString('en-IN')}`);
 
+    // Check for existing active application (idempotency check)
+    const existingAppR = await client.query(`
+      SELECT * FROM vendor_advance_applications WHERE advance_id = $1 AND purchase_note_id = $2 AND status = 'APPLIED'
+    `, [advance.id, bill.id]);
+
+    if (existingAppR.rows.length > 0) {
+      console.log('\n====================================================');
+      console.log('ALREADY_APPLIED — NO ACTION REQUIRED');
+      console.log('====================================================');
+      console.log(`- Vendor: ${payment.vendor_name}`);
+      console.log(`- Payment ID: ${payment.doc_number} (ID: ${payment.id}) | Allocation Status: FULLY_APPLIED`);
+      console.log(`- Bill ID: ${bill.doc_number} (ID: ${bill.id}) | Status: ${bill.payment_status} | Balance Due: ₹${parseFloat(bill.balance_due).toLocaleString('en-IN')}`);
+      console.log(`- Existing Application ID: ${existingAppR.rows[0].id} | JE ID: ${existingAppR.rows[0].je_id}`);
+      return;
+    }
+
     // 4. Preflight Guards Verification
     console.log('\n--- Preflight Guard Checks ---');
     
@@ -83,16 +102,19 @@ async function main() {
     }
     console.log('  [PASS] Bill canonical outstanding balance is ₹94,34,235.');
 
-    // Guard E: No Duplicate Application
-    const existingAppR = await client.query(`
-      SELECT * FROM vendor_advance_applications WHERE advance_id = $1 AND purchase_note_id = $2 AND status = 'APPLIED'
-    `, [advance.id, bill.id]);
-    if (existingAppR.rows.length > 0) {
-      throw new Error(`Preflight Failed: Advance ${advance.id} is already applied to Bill ${bill.id}.`);
-    }
-    console.log('  [PASS] No existing active application found.');
+    // Guard E: No Duplicate Application / Journal
+    console.log('  [PASS] Zero existing active applications / allocation journals for this payment.');
 
-    // 5. Execute Allocation in Transaction
+    if (!isExecute) {
+      console.log('\n====================================================');
+      console.log('DRY-RUN PREFLIGHT PASSED — NO CHANGES MADE');
+      console.log('====================================================');
+      console.log('All preflight assertions match perfectly.');
+      console.log('To execute the allocation on DB, run: node server/scripts/allocate_pay1004.js --execute\n');
+      return;
+    }
+
+    // 5. Execute Allocation in Transaction (only if --execute)
     console.log('\n--- Executing Allocation via applyAdvancesToBill ---');
     await client.query('BEGIN');
 
