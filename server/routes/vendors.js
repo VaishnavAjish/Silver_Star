@@ -143,13 +143,13 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
       pool.query(`
         SELECT
           pn.id,
-          pn.doc_date                                                                                     AS date,
-          'Bill'                                                                                          AS type,
-          COALESCE(NULLIF(pn.reference_no, ''), pn.doc_number)                                            AS ref_no,
-          pn.item_type                                                                                    AS category,
-          pn.grand_total                                                                                  AS amount,
-          GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.je_allocated, 0), 0) AS balance,
-          COALESCE(pn.payment_status, 'UNPAID')                                                          AS status,
+          pn.doc_date                                                                                                                         AS date,
+          'Bill'                                                                                                                              AS type,
+          COALESCE(NULLIF(pn.reference_no, ''), pn.doc_number)                                                                                AS ref_no,
+          pn.item_type                                                                                                                        AS category,
+          pn.grand_total                                                                                                                      AS amount,
+          GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.je_allocated, 0) - COALESCE(vaa_agg.advance_allocated, 0), 0) AS balance,
+          COALESCE(pn.payment_status, 'UNPAID')                                                                                              AS status,
           pn.je_id,
           NULL::numeric AS net_effect
         FROM purchase_notes pn
@@ -163,6 +163,11 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
           FROM je_allocations
           WHERE target_type = 'bill' AND target_id = pn.id
         ) ja_agg ON true
+        LEFT JOIN LATERAL (
+          SELECT SUM(amount) AS advance_allocated
+          FROM vendor_advance_applications
+          WHERE status = 'APPLIED' AND purchase_note_id = pn.id
+        ) vaa_agg ON true
         WHERE pn.vendor_id = $1 AND pn.status != 'cancelled'
         ORDER BY pn.doc_date DESC, pn.id DESC
       `, [vendorId]),
@@ -261,7 +266,7 @@ router.get('/', authenticate, async (req, res) => {
         ),
         vendor_pns AS (
           SELECT pn.id, pn.vendor_id, pn.grand_total, pn.doc_date, pn.payment_term,
-                 COALESCE(pn.balance_due, GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0)) AS balance_due
+                 GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) AS balance_due
           FROM purchase_notes pn
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS total_paid
@@ -274,6 +279,12 @@ router.get('/', authenticate, async (req, res) => {
             WHERE target_type = 'bill'
             GROUP BY target_id
           ) ja_agg ON ja_agg.target_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS total_advance
+            FROM vendor_advance_applications
+            WHERE status = 'APPLIED'
+            GROUP BY purchase_note_id
+          ) vaa_agg ON vaa_agg.purchase_note_id = pn.id
           WHERE pn.status != 'cancelled' AND pn.payment_status != 'PAID'
             AND pn.vendor_id IN (SELECT id FROM paginated_vendors)
         ),
@@ -350,10 +361,10 @@ router.get('/:id', authenticate, async (req, res) => {
         SELECT
           pn.vendor_id,
           SUM(CASE WHEN pn.payment_status != 'PAID'
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0) ELSE 0 END)    AS open_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) ELSE 0 END)    AS open_balance,
           SUM(CASE WHEN pn.payment_status != 'PAID'
                         AND (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0), 0) ELSE 0 END)    AS raw_overdue_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) ELSE 0 END)    AS raw_overdue_balance,
           (SELECT MAX(p.date) FROM payments p WHERE p.vendor_id = pn.vendor_id) AS last_payment_date
         FROM purchase_notes pn
         LEFT JOIN (
@@ -367,6 +378,12 @@ router.get('/:id', authenticate, async (req, res) => {
           WHERE target_type = 'bill'
           GROUP BY target_id
         ) ja_agg ON ja_agg.target_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS total_advance
+          FROM vendor_advance_applications
+          WHERE status = 'APPLIED'
+          GROUP BY purchase_note_id
+        ) vaa_agg ON vaa_agg.purchase_note_id = pn.id
         WHERE pn.status != 'cancelled' AND pn.vendor_id = $1 AND pn.payment_status != 'PAID'
         GROUP BY pn.vendor_id
       ) b ON b.vendor_id = v.id

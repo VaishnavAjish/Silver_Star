@@ -690,18 +690,31 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
     // AGGREGATE QUERY (To get exact total row count + grand totals for summary cards)
     const aggResult = await pool.query(`
       WITH pn_paid AS (
-        SELECT purchase_note_id, SUM(amount) AS total_paid
-        FROM payment_allocations
-        WHERE purchase_note_id IS NOT NULL
-        GROUP BY purchase_note_id
+        SELECT
+          pn.id AS purchase_note_id,
+          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_paid
+        FROM purchase_notes pn
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS payment_allocated
+          FROM payment_allocations GROUP BY purchase_note_id
+        ) pa ON pa.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT target_id, SUM(allocated_amount) AS je_allocated
+          FROM je_allocations WHERE target_type = 'bill' GROUP BY target_id
+        ) ja ON ja.target_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS advance_allocated
+          FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
+        ) vaa ON vaa.purchase_note_id = pn.id
       ),
       base_data AS (
         SELECT
           pn.grand_total AS bill_amount,
-          COALESCE(pn.amount_paid, 0) AS paid_amount,
-          GREATEST(0, pn.grand_total - COALESCE(pn.amount_paid, 0)) AS balance_amount,
+          COALESCE(pp.total_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date
         FROM purchase_notes pn
+        LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
         WHERE ${whereInner}
       )
       SELECT 
@@ -723,10 +736,22 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
     // ROW QUERY WITH PAGINATION
     const result = await pool.query(`
       WITH pn_paid AS (
-        SELECT purchase_note_id, SUM(amount) AS total_paid
-        FROM payment_allocations
-        WHERE purchase_note_id IS NOT NULL
-        GROUP BY purchase_note_id
+        SELECT
+          pn.id AS purchase_note_id,
+          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_paid
+        FROM purchase_notes pn
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS payment_allocated
+          FROM payment_allocations GROUP BY purchase_note_id
+        ) pa ON pa.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT target_id, SUM(allocated_amount) AS je_allocated
+          FROM je_allocations WHERE target_type = 'bill' GROUP BY target_id
+        ) ja ON ja.target_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(amount) AS advance_allocated
+          FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
+        ) vaa ON vaa.purchase_note_id = pn.id
       )
       SELECT * FROM (
         SELECT
@@ -735,13 +760,13 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           COALESCE(pn.payment_term, '') AS payment_term,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date,
           pn.grand_total AS bill_amount,
-          COALESCE(pn.amount_paid, 0) AS paid_amount,
-          GREATEST(0, pn.grand_total - COALESCE(pn.amount_paid, 0)) AS balance_amount,
+          COALESCE(pp.total_paid, 0) AS paid_amount,
+          GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
           CASE
-            WHEN pn.grand_total - COALESCE(pn.amount_paid, 0) <= 0 THEN 'Paid'
+            WHEN pn.grand_total - COALESCE(pp.total_paid, 0) <= 0 THEN 'Paid'
             WHEN (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date < CURRENT_DATE
-              AND pn.grand_total - COALESCE(pn.amount_paid, 0) > 0 THEN 'Overdue'
-            WHEN COALESCE(pn.amount_paid, 0) > 0 THEN 'Partial'
+              AND pn.grand_total - COALESCE(pp.total_paid, 0) > 0 THEN 'Overdue'
+            WHEN COALESCE(pp.total_paid, 0) > 0 THEN 'Partial'
             ELSE 'Unpaid'
           END AS pay_status,
           (CURRENT_DATE - pn.doc_date::date) AS ageing_days
