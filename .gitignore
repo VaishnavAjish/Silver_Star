@@ -36,6 +36,7 @@ Thumbs.db
 .idea/
 
 # ── Scratch / diagnostic files ─────────────────────────
+scratch/
 test.js
 test.py
 diag_*.js
