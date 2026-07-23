@@ -375,4 +375,47 @@ describe('Manual Bill TDS Withholding & Settlement Engine Tests', () => {
     });
     assert.equal(rev2.alreadyReversed, true, 'Second reversal must return alreadyReversed: true');
   });
+
+  test('Vendor Ledger deduplication: system-generated TDS journals are excluded from JE Adjustment dataset', async () => {
+    // 1. Create Bill & TDS withholding for testVendorId
+    const pnR = await pool.primaryPool.query(
+      `INSERT INTO purchase_notes (doc_number, doc_date, vendor_id, item_type, grand_total, balance_due, payment_status, status)
+       VALUES ('TDS-BILL-07', NOW(), $1, 'Expense Bill', 50000.00, 50000.00, 'UNPAID', 'posted') RETURNING id`,
+      [testVendorId]
+    );
+    const bId = pnR.rows[0].id;
+
+    await billTdsService.createBillTdsWithholding({
+      purchaseNoteId: bId,
+      vendorId: testVendorId,
+      tdsAmount: 5000.00,
+      nature: '194C Contractor',
+    });
+
+    // 2. Query vendor transactions via SQL (simulating GET /api/vendors/:id/transactions)
+    const [jeR, tdsR] = await Promise.all([
+      pool.primaryPool.query(`
+        SELECT jl.id, je.id AS je_id, je.source_type
+        FROM je_lines jl
+        JOIN journal_entries je ON je.id = jl.je_id
+        WHERE jl.entity_type = 'vendor'
+          AND jl.entity_id = $1
+          AND je.status = 'posted'
+          AND COALESCE(je.source_type, '') NOT IN ('bill_tds_withholding', 'bill_tds_reversal')
+          AND NOT EXISTS (
+            SELECT 1 FROM bill_tds_withholdings btw_check
+            WHERE btw_check.posting_je_id = je.id OR btw_check.reversal_je_id = je.id
+          )
+      `, [testVendorId]),
+      pool.primaryPool.query(`
+        SELECT btw.id, btw.tds_amount
+        FROM bill_tds_withholdings btw
+        WHERE btw.vendor_id = $1 AND btw.purchase_note_id = $2
+      `, [testVendorId, bId])
+    ]);
+
+    assert.equal(tdsR.rows.length, 1, 'Exactly one dedicated TDS business row must exist');
+    const tdsJeRows = jeR.rows.filter(r => r.source_type === 'bill_tds_withholding');
+    assert.equal(tdsJeRows.length, 0, 'Generic JE Adjustment dataset must exclude system TDS withholding journals');
+  });
 });

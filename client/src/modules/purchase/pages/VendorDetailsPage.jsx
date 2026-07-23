@@ -555,6 +555,7 @@ export default function VendorDetailsPage() {
                           <option value="Bill">Bills</option>
                           <option value="Payment">Payments</option>
                           <option value="JE Adjustment">JE Adjustments</option>
+                          <option value="TDS Withheld">TDS Withheld</option>
                         </select>
                         {(txnSearch || txnTypeFilter !== 'all') && (
                           <button
@@ -586,7 +587,7 @@ export default function VendorDetailsPage() {
                               <tr key={`${t.type}-${t.id}-${i}`}>
                                 <td>{fmtD(t.date)}</td>
                                 <td>
-                                  <span className={`badge ${TYPE_BADGE[t.status] || 'b-draft'}`}>
+                                  <span className={`badge ${TYPE_BADGE[t.type] || TYPE_BADGE[t.status] || 'b-draft'}`}>
                                     {t.type}
                                   </span>
                                 </td>
@@ -604,18 +605,22 @@ export default function VendorDetailsPage() {
                                   textAlign: 'right', fontFamily: 'var(--mono)',
                                   color: t.type === 'Payment'
                                     ? '#2E7D32'
-                                    : t.type === 'JE Adjustment'
-                                      ? (isReversedJe(t) || isReversalJe(t)
-                                          ? 'var(--g400)'
-                                          : parseFloat(t.net_effect) >= 0 ? '#7B1FA2' : '#2E7D32')
-                                      : 'inherit',
-                                  textDecoration: (t.type === 'JE Adjustment' && isReversedJe(t)) ? 'line-through' : 'none',
+                                    : t.type === 'TDS Withheld'
+                                      ? (t.status === 'REVERSED' ? 'var(--g400)' : '#7B1FA2')
+                                      : t.type === 'JE Adjustment'
+                                        ? (isReversedJe(t) || isReversalJe(t)
+                                            ? 'var(--g400)'
+                                            : parseFloat(t.net_effect) >= 0 ? '#7B1FA2' : '#2E7D32')
+                                        : 'inherit',
+                                  textDecoration: ((t.type === 'JE Adjustment' && isReversedJe(t)) || (t.type === 'TDS Withheld' && t.status === 'REVERSED')) ? 'line-through' : 'none',
                                 }}>
                                   {t.type === 'Payment'
                                     ? <>-{fmt(t.amount)}</>
                                     : t.type === 'JE Adjustment'
                                       ? <>{parseFloat(t.net_effect) >= 0 ? '+' : '-'}{fmt(Math.abs(parseFloat(t.net_effect)))}</>
-                                      : fmt(t.amount)
+                                      : t.type === 'TDS Withheld'
+                                        ? <>-{fmt(t.amount)}</>
+                                        : fmt(t.amount)
                                   }
                                 </td>
                                 <td style={{
@@ -693,6 +698,34 @@ export default function VendorDetailsPage() {
                                             ? `${jeAllocsMap[t.je_id].length} Alloc.`
                                             : 'Allocate'}
                                         </button>
+                                      )}
+                                    </div>
+                                  ) : t.type === 'TDS Withheld' ? (
+                                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                      {t.purchase_note_id && (
+                                        <span
+                                          className="btn btn-sm"
+                                          style={{ fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}
+                                          onClick={() => {
+                                            const path = `/purchase-notes/${t.purchase_note_id}`;
+                                            openTab({ id: path, name: `Bill #${t.purchase_note_id}`, path: path, closable: true });
+                                            navigate(path);
+                                          }}
+                                        >
+                                          View TDS
+                                        </span>
+                                      )}
+                                      {t.je_id && (
+                                        <span
+                                          className="btn btn-sm"
+                                          style={{ fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}
+                                          onClick={() => {
+                                            openTab({ id: `/journal-entries/${t.je_id}`, name: `JE #${t.je_id}`, path: `/journal-entries/${t.je_id}`, closable: true });
+                                            navigate(`/journal-entries/${t.je_id}`);
+                                          }}
+                                        >
+                                          View JE
+                                        </span>
                                       )}
                                     </div>
                                   ) : t.type === 'Payment' ? (

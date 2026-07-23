@@ -202,7 +202,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
         ORDER BY p.date DESC, p.id DESC
       `, [vendorId]),
 
-      // JE adjustments tagged to this vendor via je_lines.entity_type/entity_id
+      // JE adjustments tagged to this vendor via je_lines.entity_type/entity_id (excluding system-generated TDS journals)
       pool.query(`
         SELECT
           jl.id,
@@ -226,6 +226,11 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
         WHERE jl.entity_type = 'vendor'
           AND jl.entity_id = $1
           AND je.status    = 'posted'
+          AND COALESCE(je.source_type, '') NOT IN ('bill_tds_withholding', 'bill_tds_reversal')
+          AND NOT EXISTS (
+            SELECT 1 FROM bill_tds_withholdings btw_check
+            WHERE btw_check.posting_je_id = je.id OR btw_check.reversal_je_id = je.id
+          )
         ORDER BY je.date DESC, je.id DESC
       `, [vendorId]),
 
@@ -485,6 +490,11 @@ router.get('/:id', authenticate, async (req, res) => {
         WHERE  jl.entity_type = 'vendor'
           AND  jl.entity_id   = $1
           AND  je.status      = 'posted'
+          AND COALESCE(je.source_type, '') NOT IN ('bill_tds_withholding', 'bill_tds_reversal')
+          AND NOT EXISTS (
+            SELECT 1 FROM bill_tds_withholdings btw_check
+            WHERE btw_check.posting_je_id = je.id OR btw_check.reversal_je_id = je.id
+          )
       ) je_adj ON TRUE
       WHERE v.id = $1
     `, [req.params.id]);
