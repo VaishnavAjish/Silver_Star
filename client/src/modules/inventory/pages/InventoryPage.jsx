@@ -1302,13 +1302,17 @@ export default function InventoryPage() {
       />
 
       {/* ════ POPUP MODALS ════ */}
-      {activeModal && (
+      {activeModal && activeModal.type === 'edit_lot' && (
+        <EditLotModal lotId={activeModal.lotId} onComplete={() => { setActiveModal(null); load(); }} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal && activeModal.type !== 'edit_lot' && (
         <div className="modal-overlay" onClick={() => setActiveModal(null)} style={{ zIndex: 1000 }}>
           <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 1300, padding: 0, display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--brand-dark)' }}>
                 {activeModal.type === 'split' ? 'Split Lot' : 
-                 activeModal.type === 'return' ? 'Return from Process' : 'Issue to Process'}
+                 activeModal.type === 'return' ? 'Return from Process' : 
+                 activeModal.type === 'mix' ? 'Mix Lots' : 'Issue to Process'}
               </div>
               <button className="icon-btn" onClick={() => setActiveModal(null)}><X size={14} /></button>
             </div>
@@ -1317,7 +1321,6 @@ export default function InventoryPage() {
               {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'return' && <LotReturnPage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
-              {activeModal.type === 'edit_lot' && <EditLotModal lotId={activeModal.lotId} onComplete={() => { setActiveModal(null); load(); }} onClose={() => setActiveModal(null)} />}
             </div>
           </div>
         </div>
