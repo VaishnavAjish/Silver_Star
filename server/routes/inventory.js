@@ -12,6 +12,7 @@ const {
   buildDeptScopeClause,
   isLotInScope,
 } = require('../services/inventoryAuth');
+const { getUserPermissionBitmask, PERM_BITS } = require('../utils/permissions');
 
 const router = express.Router();
 
@@ -986,19 +987,19 @@ router.put('/edit/:id', authenticate, async (req, res) => {
     const { id } = req.params;
     const { qty, weight, dim_length, dim_depth, dim_height, dim_unit } = req.body;
 
-    // Must be super_admin or have inventory edit permission.
-    const isSuperAdmin = req.user.role === 'super_admin' || req.user.role === 'admin';
-    const canEdit = req.user.role === 'operator' || isSuperAdmin;
-    // Assuming standard inventory/edit permission check logic or reliance on requireInventoryView.
-    // For safety, let's strictly require super_admin or explicitly assigned inventory 'edit' via bitmask.
-    // However, the easiest and most robust check is req.user.role == 'super_admin' OR they are an admin.
-    // Actually, user wants super_admin or explicitly granted to admin/user.
-    // The auth middleware gives us req.user. But we can't easily parse bitmask here. Let's just check standard 'inventory' edit permission via the same mechanism if needed, but since we don't have a middleware for it here, we will just use basic role check.
-    // Wait, the client will hide the button if no permission, but the server should also guard.
-    // Let's do a basic guard: if not super_admin/admin, check if they have permission. 
-    // Given the complexity of RBAC on the server, we can rely on standard roles:
-    if (req.user.role !== 'super_admin' && req.user.role !== 'superadmin' && req.user.role !== 'admin' && req.user.role !== 'operator') {
-      return res.status(403).json({ error: 'Permission denied' });
+    // Must be super_admin or have explicit inventory edit permission in RBAC bitmask
+    const normRole = String(req.user.role || '').toLowerCase().trim();
+    const isSuperAdmin = ['super_admin', 'superadmin', 'super admin'].includes(normRole);
+
+    let canEdit = isSuperAdmin;
+    if (!canEdit) {
+      const maskAll = await getUserPermissionBitmask(req.user.id, 'inventory', 'all_inventory');
+      const maskMod = await getUserPermissionBitmask(req.user.id, 'inventory', '');
+      canEdit = ((maskAll & PERM_BITS.edit) === PERM_BITS.edit) || ((maskMod & PERM_BITS.edit) === PERM_BITS.edit);
+    }
+
+    if (!canEdit) {
+      return res.status(403).json({ error: 'Permission denied: edit lot requires inventory edit permission' });
     }
 
     await client.query('BEGIN');

@@ -833,8 +833,8 @@ export default function InventoryPage() {
     const isIP = row.status === 'IN PROCESS';
     const mixCked = mixSelected.has(row.id);
     const perms = getAllowedActions(row);
-    const isSuperAdmin = hasRole('super_admin', 'superadmin', 'super admin', 'admin', 'management', 'manager', 'owner', 'developer');
-    const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit');
+    const isSuperAdmin = hasRole('super_admin', 'superadmin', 'super admin');
+    const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit', 'all_inventory') || hasPermission('inventory', 'edit');
     
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },

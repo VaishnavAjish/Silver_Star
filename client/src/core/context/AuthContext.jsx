@@ -177,8 +177,8 @@ export function AuthProvider({ children }) {
   // Check permission — order: admin bypass → RBAC bitmask → legacy overrides → role defaults
   const hasPermission = (module, action, submodule = '') => {
     if (!user) return false;
-    const role = String(user.role || '').toLowerCase();
-    if (role === 'admin' || role === 'super_admin') return true;
+    const role = String(user.role || '').toLowerCase().trim();
+    if (role === 'super_admin' || role === 'superadmin' || role === 'super admin') return true;
 
     const bit = _PERM_BITS[action];
     if (bit === undefined) return false;
