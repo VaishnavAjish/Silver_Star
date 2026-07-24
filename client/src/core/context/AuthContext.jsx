@@ -187,17 +187,20 @@ export function AuthProvider({ children }) {
     const rbacPerms = user.rbac_permissions || [];
     if (rbacPerms.length > 0) {
       if (submodule) {
+        // Specific submodule requested → strict match only
         const sub = rbacPerms.find(p => p.module === module && p.submodule === submodule);
         if (sub != null) return (parseInt(sub.mask) & bit) === bit;
-        // Submodule specified but no matching submodule entry -> default to false for that submodule
         return false;
       }
+      // No submodule → check module-level entry first
       const mod = rbacPerms.find(p => p.module === module && p.submodule === '');
       if (mod != null) return (parseInt(mod.mask) & bit) === bit;
 
-      // If submodules exist for this module, return false unless explicit submodule match was requested
+      // No module-level entry → check if ANY submodule grants the action (for sidebar/general visibility)
       const modEntries = rbacPerms.filter(p => p.module === module);
-      if (modEntries.length > 0) return false;
+      if (modEntries.length > 0) {
+        return modEntries.some(p => (parseInt(p.mask) & bit) === bit);
+      }
     }
 
     // 2. Legacy per-user permission overrides
