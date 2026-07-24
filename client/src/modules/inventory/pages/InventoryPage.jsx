@@ -4,6 +4,7 @@ import SelectDropdown from '../../../shared/components/SelectDropdown';
 import Paginator from '../../../shared/components/Paginator';
 import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useAuth } from '../../../core/context/AuthContext';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useInventorySync } from '../../../shared/hooks/useModuleSync';
 import { useClipboard } from '../../../core/context/ClipboardContext';
@@ -14,7 +15,7 @@ import {
   Search, Package, RefreshCw, GitBranch, GitMerge,
   MoreVertical, X, Filter, ChevronLeft, ChevronRight,
   CheckSquare, Square, Share2, Download, Printer, Columns, Send, ChevronDown,
-  History, RotateCcw, CheckCircle
+  History, RotateCcw, CheckCircle, Edit
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 import StockTransferHistoryModal from '../../../shared/components/Modals/StockTransferHistoryModal';
@@ -22,6 +23,7 @@ import SplitLotPage from './SplitLotPage';
 import LotIssuePage from './LotIssuePage';
 import MixLotsPage from './MixLotsPage';
 import LotReturnPage from './LotReturnPage';
+import EditLotModal from './EditLotModal';
 import { getAllowedActions } from '../utils/actionMatrix';
 import {
   LOCATION_COL, DEPARTMENT_COL, SOURCE_COL,
@@ -108,6 +110,7 @@ export default function InventoryPage() {
   const api = useApi();
   const navigate = useNavigate();
   const [urlParams, setUrlParams] = useSearchParams();
+  const { hasRole, hasPermission } = useAuth();
 
   const [search, setSearch] = useState(urlParams.get('q') || '');
   const [searchInput, setSearchInput] = useState(urlParams.get('q') || '');
@@ -830,9 +833,12 @@ export default function InventoryPage() {
     const isIP = row.status === 'IN PROCESS';
     const mixCked = mixSelected.has(row.id);
     const perms = getAllowedActions(row);
+    const isSuperAdmin = hasRole('super_admin') || hasRole('superadmin') || hasRole('admin');
+    const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit');
     
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
+      canEditLot && { label: 'Edit Lot', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'edit_lot', lotId: row.id }), color: 'var(--brand)' },
       perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
@@ -1310,6 +1316,7 @@ export default function InventoryPage() {
               {activeModal.type === 'issue' && <LotIssuePage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'return' && <LotReturnPage initialLotId={activeModal.lotId} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
               {activeModal.type === 'mix' && <MixLotsPage initialLotIds={activeModal.lotIds} isModal onComplete={() => { setActiveModal(null); load(); }} onCancel={() => setActiveModal(null)} />}
+              {activeModal.type === 'edit_lot' && <EditLotModal lotId={activeModal.lotId} onComplete={() => { setActiveModal(null); load(); }} onClose={() => setActiveModal(null)} />}
             </div>
           </div>
         </div>
