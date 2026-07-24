@@ -833,7 +833,7 @@ export default function InventoryPage() {
     const isIP = row.status === 'IN PROCESS';
     const mixCked = mixSelected.has(row.id);
     const perms = getAllowedActions(row);
-    const isSuperAdmin = hasRole('super_admin') || hasRole('superadmin') || hasRole('admin');
+    const isSuperAdmin = hasRole('super_admin', 'superadmin', 'super admin', 'admin');
     const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit');
     
     return [

@@ -1,5 +1,5 @@
 const express = require('express');
-const pool    = require('../db/pool');
+const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { isSeedItem, nextSiblingCode, nextLotOpId, nextMfgProcessNumber } = require('../services/seedLotCodeService');
 const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowthCycle } = require('../services/growthRunService');
@@ -37,12 +37,12 @@ function effQty(lot) {
 async function genIssueNum(client) {
   const { rows } = await client.query("SELECT nextval('lot_issue_seq') as n");
   const d = new Date();
-  return `PI-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}-${String(rows[0].n).padStart(4,'0')}`;
+  return `PI-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(rows[0].n).padStart(4, '0')}`;
 }
 async function genReturnNum(client) {
   const { rows } = await client.query("SELECT nextval('lot_return_seq') as n");
   const d = new Date();
-  return `PR-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}-${String(rows[0].n).padStart(4,'0')}`;
+  return `PR-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(rows[0].n).padStart(4, '0')}`;
 }
 
 
@@ -80,7 +80,7 @@ router.get('/', authenticate, async (req, res) => {
       expected_return_from, // expected_return >= (returns register due-date range)
       expected_return_to,   // expected_return <=
       sort_by,          // completion_asc | completion_desc | default (created_at DESC)
-      limit  = 50,
+      limit = 50,
       offset = 0,
     } = req.query;
 
@@ -185,7 +185,7 @@ router.get('/', authenticate, async (req, res) => {
 
     // Dynamic ORDER BY
     let orderBy = 'pi.created_at DESC';
-    if (sort_by === 'completion_asc')  orderBy = 'completion_pct ASC,  pi.created_at DESC';
+    if (sort_by === 'completion_asc') orderBy = 'completion_pct ASC,  pi.created_at DESC';
     if (sort_by === 'completion_desc') orderBy = 'completion_pct DESC, pi.created_at DESC';
 
     const baseParams = [...params];
@@ -564,7 +564,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // through an UNRESOLVED process classification — the silent fallback to
       // generic handling is exactly how '-R1' child lots were minted.
       if (!growthCtx.isResolved &&
-          lockedLots.some(({ lot }) => isIdentityPreservingGrowthCarrier(lot, null))) {
+        lockedLots.some(({ lot }) => isIdentityPreservingGrowthCarrier(lot, null))) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: GROWTH_PROCESS_UNRESOLVED_MESSAGE });
       }
@@ -627,10 +627,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // 4. Process each lot
       const issues = [];
       for (const { lot, qty } of lockedLots) {
-        const issueNum  = await genIssueNum(client);
-        const isSeed    = isSeedItem(lot);
-        const rough     = usesWeight(lot);
-        const pqty      = effQty(lot);
+        const issueNum = await genIssueNum(client);
+        const isSeed = isSeedItem(lot);
+        const rough = usesWeight(lot);
+        const pqty = effQty(lot);
 
         // Phase 34 (FIX 2): a Growth Run (biscuit) issued to a LASER process is
         // NOT split, cloned, or given an -IP child. Laser ops (Edge Cut, Outer
@@ -654,7 +654,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // A genuine PARTIAL issue (some units stay in stock) still splits, since
         // two physical groups then hold different states — but that is a split,
         // not an "issue clone".
-        const isFullIssue  = qty >= pqty - 0.0001;
+        const isFullIssue = qty >= pqty - 0.0001;
         // A Growth carrier entering a GROWTH chamber always re-issues in place
         // (classifyGrowthIssueLots has already rejected partial growth_diamond
         // requests); a growth_run biscuit issues in place for ALL process types
@@ -664,11 +664,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         let childLot, childCode, childWeight;
 
         if (issueInPlace) {
-          childLot    = lot;                       // operate on the lot itself
-          childCode   = lot.lot_number;
+          childLot = lot;                       // operate on the lot itself
+          childCode = lot.lot_number;
           childWeight = parseFloat(lot.weight || 0);
         } else {
-          const parentCode  = (isSeed && lot.lot_code) ? lot.lot_code : lot.lot_number;
+          const parentCode = (isSeed && lot.lot_code) ? lot.lot_code : lot.lot_number;
           const parentLevel = isSeed ? (parseInt(lot.split_level) || 0) : 0;
 
           if (isSeed) {
@@ -690,15 +690,15 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
             childCode = uniqueCode;
           }
 
-          const childQty    = rough ? 1 : qty;
+          const childQty = rough ? 1 : qty;
           childWeight = rough
             ? qty
             : (parseFloat(lot.weight || 0) > 0
               ? Math.round((qty / (pqty || 1)) * parseFloat(lot.weight) * 10000) / 10000
               : 0);
-          const childValue  = Math.round(qty * parseFloat(lot.rate) * 100) / 100;
-          const seedLevel   = isSeed ? parentLevel + 1 : null;
-          const parentPath  = isSeed ? (lot.genealogy_path || parentCode) : null;
+          const childValue = Math.round(qty * parseFloat(lot.rate) * 100) / 100;
+          const seedLevel = isSeed ? parentLevel + 1 : null;
+          const parentPath = isSeed ? (lot.genealogy_path || parentCode) : null;
           const childGenPath = isSeed ? `${parentPath}/${childCode}` : null;
 
           const issueLotOpId = await nextLotOpId(client);
@@ -728,9 +728,9 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
               seedLevel, childGenPath,
               issueLotOpId,
               isSeed ? (lot.dim_length ?? null) : null,
-              isSeed ? (lot.dim_depth  ?? null) : null,
+              isSeed ? (lot.dim_depth ?? null) : null,
               isSeed ? (lot.dim_height ?? null) : null,
-              isSeed ? (lot.dim_unit   ?? null) : null,
+              isSeed ? (lot.dim_unit ?? null) : null,
             ]
           );
           childLot = inserted;
@@ -759,11 +759,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         // SAME row. Qty/weight/genealogy are untouched. It returns to IN STOCK on
         // Growth Run Return (growth) or process return (laser); it is consumed
         // only at Growth Output.
-        const remainQty  = issueInPlace ? pqty : Math.max(0, pqty - qty);
+        const remainQty = issueInPlace ? pqty : Math.max(0, pqty - qty);
         const newSrcStat = issueInPlace
           ? 'IN PROCESS'
           : (remainQty <= 0.0001 ? 'CONSUMED' : (lot.status === 'IN PROCESS' ? 'IN PROCESS' : 'IN STOCK'));
-        const remainVal  = Math.round(remainQty * parseFloat(lot.rate) * 100) / 100;
+        const remainVal = Math.round(remainQty * parseFloat(lot.rate) * 100) / 100;
         if (issueInPlace) {
           // RULE 1/6: the SAME inventory row enters the machine. Flip
           // IN STOCK → IN PROCESS and repoint machine_process_id to THIS process
@@ -828,8 +828,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           (isGrowthCarrier && isGrowthGroup)
             ? `Growth carrier ${lot.lot_number} re-issued to growth process ${processNum} (Growth Again → IN PROCESS, same identity)`
             : isGrowthRun
-            ? `Biscuit ${lot.lot_number} issued to ${normalizedPType} process ${processNum} → IN PROCESS (non-consuming)`
-            : (issueInPlace
+              ? `Biscuit ${lot.lot_number} issued to ${normalizedPType} process ${processNum} → IN PROCESS (non-consuming)`
+              : (issueInPlace
                 ? `${lot.lot_number} issued in place to ${normalizedPType} process ${processNum} → IN PROCESS (same lot, no clone)`
                 : `Issued ${qty.toFixed(4)} ${lot.unit} to machine process ${processNum} (partial split)`),
           req.user.id);
@@ -842,11 +842,11 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         }
 
         issues.push({
-          issue_number:         issueNum,
-          issue_id:             issue.id,
-          process_lot:          { id: childLot.id, lot_number: childCode, qty },
+          issue_number: issueNum,
+          issue_id: issue.id,
+          process_lot: { id: childLot.id, lot_number: childCode, qty },
           source_remaining_qty: remainQty,
-          source_new_status:    newSrcStat,
+          source_new_status: newSrcStat,
         });
       }
 
@@ -916,13 +916,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       });
 
       return res.status(201).json({
-        process_number:     processNum,
+        process_number: processNum,
         machine_process_id: machProc.id,
-        machine_code:       machine.code,
-        machine_name:       machine.name,
-        issue_count:        issues.length,
-        growth_run_number:  growthRun ? growthRun.lot_number : null,
-        growth_run_id:      growthRun ? growthRun.id : null,
+        machine_code: machine.code,
+        machine_name: machine.name,
+        issue_count: issues.length,
+        growth_run_number: growthRun ? growthRun.lot_number : null,
+        growth_run_id: growthRun ? growthRun.id : null,
         issues,
       });
     } catch (err) {
@@ -972,25 +972,25 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
     if (existingOpen.length) throw new Error('This lot already has an open process issue');
 
     const issueNum = await genIssueNum(client);
-    const isSeed   = isSeedItem(lot);
-    const rough    = usesWeight(lot);
+    const isSeed = isSeedItem(lot);
+    const rough = usesWeight(lot);
 
-    const parentCode  = (isSeed && lot.lot_code) ? lot.lot_code : lot.lot_number;
+    const parentCode = (isSeed && lot.lot_code) ? lot.lot_code : lot.lot_number;
     const parentLevel = isSeed ? (parseInt(lot.split_level) || 0) : 0;
 
     // RULE 1: issuing a lot into a process is NOT a split. When the FULL available
     // quantity goes into the machine the SAME inventory row enters the process —
     // status IN STOCK → IN PROCESS, no -A / -IP clone. A genuine PARTIAL issue
     // still splits (two physical groups, two states).
-    const isFullIssue  = qty >= pqty - 0.0001;
+    const isFullIssue = qty >= pqty - 0.0001;
     const issueInPlace = isFullIssue;
 
     let childLot, childCode, remainQty, newSrcStatus;
 
     if (issueInPlace) {
-      childLot     = lot;
-      childCode    = lot.lot_number;
-      remainQty    = pqty;
+      childLot = lot;
+      childCode = lot.lot_number;
+      remainQty = pqty;
       newSrcStatus = 'IN PROCESS';
       await client.query(
         `UPDATE inventory SET status='IN PROCESS', updated_at=NOW() WHERE id=$1`,
@@ -1007,13 +1007,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         childCode = `${lot.lot_number}-IP`;
       }
 
-      const childQty    = rough ? 1 : qty;
+      const childQty = rough ? 1 : qty;
       const childWeight = rough ? qty : (parseFloat(lot.weight || 0) > 0
         ? Math.round((qty / (pqty || 1)) * parseFloat(lot.weight) * 10000) / 10000
         : 0);
-      const childValue  = Math.round(qty * parseFloat(lot.rate) * 100) / 100;
-      const seedLevel   = isSeed ? parentLevel + 1 : null;
-      const parentPath  = isSeed ? (lot.genealogy_path || parentCode) : null;
+      const childValue = Math.round(qty * parseFloat(lot.rate) * 100) / 100;
+      const seedLevel = isSeed ? parentLevel + 1 : null;
+      const parentPath = isSeed ? (lot.genealogy_path || parentCode) : null;
       const childGenPath = isSeed ? `${parentPath}/${childCode}` : null;
 
       const issueLotOpId = await nextLotOpId(client);
@@ -1040,14 +1040,14 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           seedLevel, childGenPath,
           issueLotOpId,
           isSeed ? (lot.dim_length ?? null) : null,
-          isSeed ? (lot.dim_depth  ?? null) : null,
+          isSeed ? (lot.dim_depth ?? null) : null,
           isSeed ? (lot.dim_height ?? null) : null,
-          isSeed ? (lot.dim_unit   ?? null) : null,
+          isSeed ? (lot.dim_unit ?? null) : null,
         ]
       );
       childLot = inserted;
 
-      remainQty    = Math.max(0, pqty - qty);
+      remainQty = Math.max(0, pqty - qty);
       newSrcStatus = remainQty <= 0.0001 ? 'CONSUMED' : 'IN STOCK';
       const remainValue = Math.round(remainQty * parseFloat(lot.rate) * 100) / 100;
       if (rough) {
@@ -1069,8 +1069,8 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           issue_date, expected_return, department, operator, remarks, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [issueNum, lot.id, childLot.id, qty,
-       issue_date || new Date().toISOString().split('T')[0],
-       expected_return || null, department || null, operator || null, remarks || null, req.user.id]
+        issue_date || new Date().toISOString().split('T')[0],
+        expected_return || null, department || null, operator || null, remarks || null, req.user.id]
     );
 
     await logOp(client, lot.id, 'issue', 'lot_process_issue', issue.id,
@@ -1265,7 +1265,7 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
         // (null when missing/ambiguous → planner rejects the detach).
         inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
         refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
-        refValue:  seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+        refValue: seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
       };
     }
 
@@ -1398,7 +1398,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     if (!lotRows.length) throw new Error('Process/Source lot not found');
     const processLot = lotRows[0];
 
-    const isSeed     = processLot.category === 'seed';
+    const isSeed = processLot.category === 'seed';
     const carrierCategory = resolveCarrierCategory({ category: processLot.category, name: processLot.item_name });
     // Genealogy fix: a Growth Run (biscuit) is a SINGLE lifecycle record. When it
     // is returned from a downstream process (laser ops, etc.) the engine must NOT
@@ -1461,12 +1461,12 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       biscuit = bRows.length === 1 ? bRows[0] : null;
     }
 
-    const rough      = usesWeight(processLot);
-    const rate       = parseFloat(processLot.rate || 0);
+    const rough = usesWeight(processLot);
+    const rate = parseFloat(processLot.rate || 0);
     const parentCode = (isSeed && processLot.lot_code) ? processLot.lot_code : processLot.lot_number;
     const parentLevel = isSeed ? (parseInt(processLot.split_level) || 0) : 0;
-    const parentPath  = isSeed ? (processLot.genealogy_path || parentCode) : null;
-    const seedLevel   = isSeed ? parentLevel + 1 : null;
+    const parentPath = isSeed ? (processLot.genealogy_path || parentCode) : null;
+    const seedLevel = isSeed ? parentLevel + 1 : null;
 
     // ── Phase C: authoritative attached-Seed resolution (Seed Remove) ────────
     // Direct relational chain preferred: this biscuit's growth machine
@@ -1510,7 +1510,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
         inventoryId: attachedSeeds.length === 1 ? attachedSeeds[0].id : null,
         refWeight: attachedSeeds.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
-        refValue:  attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+        refValue: attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
       };
     }
     // Allocation cursor: plan.component_allocation is index-aligned with the
@@ -1560,10 +1560,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // two-pool carrying-value allocation. No fallback path exists here.
 
     // 3. Create lot_process_returns header (backward compat summary)
-    const returnNum   = await genReturnNum(client);
-    const isFinal     = remainingAfter <= 0.0001;
-    const aggUsable   = lines.filter(l => l.type === 'usable').reduce((s, l) => s + parseFloat(l.qty), 0);
-    const aggDamaged  = lines.filter(l => l.type === 'damaged').reduce((s, l) => s + parseFloat(l.qty), 0);
+    const returnNum = await genReturnNum(client);
+    const isFinal = remainingAfter <= 0.0001;
+    const aggUsable = lines.filter(l => l.type === 'usable').reduce((s, l) => s + parseFloat(l.qty), 0);
+    const aggDamaged = lines.filter(l => l.type === 'damaged').reduce((s, l) => s + parseFloat(l.qty), 0);
     const aggConsumed = lines.filter(l => l.type === 'consumed').reduce((s, l) => s + parseFloat(l.qty), 0);
 
     // Immutable pre-return snapshot (phase60) enabling the admin-only reversal
@@ -1672,9 +1672,11 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           remaining_in_process: issue.remaining_in_process,
         },
         machine_process_pre: mpSnap
-          ? { id: issue.machine_process_id, status: mpSnap.status,
-              total_paused_minutes: mpSnap.total_paused_minutes,
-              paused_at: mpSnap.paused_at, completed_at: mpSnap.completed_at }
+          ? {
+            id: issue.machine_process_id, status: mpSnap.status,
+            total_paused_minutes: mpSnap.total_paused_minutes,
+            paused_at: mpSnap.paused_at, completed_at: mpSnap.completed_at
+          }
           : null,
         weight_equation: {
           input: plan.input_weight,
@@ -1704,17 +1706,17 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // 4. Process each return line — create child inventory lots
     const outcomes = [];
     for (const line of lines) {
-      const qty        = parseFloat(line.qty);
+      const qty = parseFloat(line.qty);
       const outputRule = allowedOutputs.find(o => o.type === line.type);
-      const suffix     = outputRule.suffix;
-      const lotStatus  = outputRule.status;
+      const suffix = outputRule.suffix;
+      const lotStatus = outputRule.status;
 
       // Seed Remove in-place detach: record each family line against its EXISTING
       // target identity (carrier for diamond, attached Seed for seed) — never a
       // child lot. The actual in-place row transforms happen in the isFinal block.
       if (isDetachTransform) {
-        const isSeedFam  = outputRule.component === 'seed';
-        const targetId   = isSeedFam ? plan.attached_seed_inventory_id : plan.growth_carrier_inventory_id;
+        const isSeedFam = outputRule.component === 'seed';
+        const targetId = isSeedFam ? plan.attached_seed_inventory_id : plan.growth_carrier_inventory_id;
         const targetCode = isSeedFam
           ? (attachedSeeds[0] ? (attachedSeeds[0].lot_code || attachedSeeds[0].lot_number) : null)
           : (processLot.lot_code || processLot.lot_number);
@@ -1723,8 +1725,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
            VALUES ($1,$2,$3,$4,$5,$6)`,
           [ret.id, line.type, qty, targetId, targetCode, line.remarks || null]
         );
-        outcomes.push({ type: line.type, lot_id: targetId, lot_code: targetCode, qty,
-          weight: parseFloat(line.weight) || 0, status: outputRule.status, in_place: true });
+        outcomes.push({
+          type: line.type, lot_id: targetId, lot_code: targetCode, qty,
+          weight: parseFloat(line.weight) || 0, status: outputRule.status, in_place: true
+        });
         continue;
       }
 
@@ -1796,7 +1800,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
             roughItem.id,
             outputWeight,
             measurements && measurements.length != null && measurements.length !== '' ? parseFloat(measurements.length) : null,
-            measurements && measurements.width  != null && measurements.width  !== '' ? parseFloat(measurements.width)  : null,
+            measurements && measurements.width != null && measurements.width !== '' ? parseFloat(measurements.width) : null,
             measurements && measurements.height != null && measurements.height !== '' ? parseFloat(measurements.height) : null,
             measurements && measurements.dim_unit ? measurements.dim_unit : null,
             processLot.id,
@@ -1829,7 +1833,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       let outItemId = processLot.item_id;
       let outUnit = processLot.unit;
       let outRough = rough;
-      
+
       // Override from Output Rule config (e.g. 'growth_diamond')
       if (outputRule.item_category_override) {
         const { rows: ruleItemRows } = await client.query('SELECT * FROM items WHERE category = $1 ORDER BY id LIMIT 1', [outputRule.item_category_override]);
@@ -1857,7 +1861,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       // COMPONENT splits are the approved exception and are excluded; in-place
       // transforms and carrier returns have already `continue`d above.
       if (!isComponentReturn &&
-          resolveCarrierCategory({ category: processLot.category, name: processLot.item_name })) {
+        resolveCarrierCategory({ category: processLot.category, name: processLot.item_name })) {
         throw new Error('Identity-bearing Growth carrier cannot create a child Return lot.');
       }
       const childCode = await nextReturnLotCode(client, processLot.id, parentCode, suffix);
@@ -1871,9 +1875,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         : (parseFloat(processLot.weight || 0) > 0
           ? Math.round((qty / issuedQty) * parseFloat(processLot.weight) * 10000) / 10000
           : 0);
-      const childValue    = Math.round(qty * rate * 100) / 100;
-      const childGenPath  = isSeed ? `${parentPath}/${childCode}` : null;
-      const childLotOpId  = await nextLotOpId(client);
+      const childValue = Math.round(qty * rate * 100) / 100;
+      const childGenPath = isSeed ? `${parentPath}/${childCode}` : null;
+      const childLotOpId = await nextLotOpId(client);
 
       const { rows: [childLot] } = await client.query(
         `INSERT INTO inventory
@@ -1899,9 +1903,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           seedLevel, childGenPath,
           childLotOpId,
           isSeed ? (processLot.dim_length ?? null) : null,
-          isSeed ? (processLot.dim_depth  ?? null) : null,
+          isSeed ? (processLot.dim_depth ?? null) : null,
           isSeed ? (processLot.dim_height ?? null) : null,
-          isSeed ? (processLot.dim_unit   ?? null) : null,
+          isSeed ? (processLot.dim_unit ?? null) : null,
         ]
       );
 
@@ -1930,8 +1934,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
           ? plan.component_allocation[componentAllocCursor++]
           : null;
         const lineWeight = parseFloat(line.weight) || 0;
-        const lineValue  = alloc ? alloc.value : 0;
-        const lineRate   = qty > 0 ? Math.round((lineValue / qty) * 10000) / 10000 : 0;
+        const lineValue = alloc ? alloc.value : 0;
+        const lineRate = qty > 0 ? Math.round((lineValue / qty) * 10000) / 10000 : 0;
         if (outputRule.component === 'seed') {
           await client.query(
             `UPDATE inventory
@@ -2007,36 +2011,36 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       (measurements.weight != null && measurements.weight !== '') ||
       (measurements.height != null && measurements.height !== '') ||
       (measurements.length != null && measurements.length !== '') ||
-      (measurements.width  != null && measurements.width  !== '')
+      (measurements.width != null && measurements.width !== '')
     )) {
       const prevHeight = measureTarget.dim_height;
       const prevWeight = measureTarget.weight;
       const updated = await applyMeasurements(client, measureTarget.id, {
-        weight:     measurements.weight  != null && measurements.weight  !== '' ? parseFloat(measurements.weight)  : undefined,
-        dim_height: measurements.height  != null && measurements.height  !== '' ? parseFloat(measurements.height)  : undefined,
-        dim_length: measurements.length  != null && measurements.length  !== '' ? parseFloat(measurements.length)  : undefined,
-        dim_depth:  measurements.width   != null && measurements.width    !== '' ? parseFloat(measurements.width)   : undefined,
-        dim_unit:   measurements.dim_unit || measureTarget.dim_unit || 'mm',
-        remarks:    measurements.remarks || undefined,
+        weight: measurements.weight != null && measurements.weight !== '' ? parseFloat(measurements.weight) : undefined,
+        dim_height: measurements.height != null && measurements.height !== '' ? parseFloat(measurements.height) : undefined,
+        dim_length: measurements.length != null && measurements.length !== '' ? parseFloat(measurements.length) : undefined,
+        dim_depth: measurements.width != null && measurements.width !== '' ? parseFloat(measurements.width) : undefined,
+        dim_unit: measurements.dim_unit || measureTarget.dim_unit || 'mm',
+        remarks: measurements.remarks || undefined,
       });
       await recordGrowthCycle(client, {
-        growthRunId:      measureTarget.id,
+        growthRunId: measureTarget.id,
         machineProcessId: issue.machine_process_id || null,
-        processType:      issue.process_type || null,
+        processType: issue.process_type || null,
         prevHeight,
-        newHeight:        updated.dim_height,
+        newHeight: updated.dim_height,
         prevWeight,
-        newWeight:        updated.weight,
-        dimLength:        updated.dim_length,
-        dimWidth:         updated.dim_depth,
-        dimUnit:          updated.dim_unit || 'mm',
-        remarks:          measurements.remarks || null,
-        performedBy:      req.user.id,
+        newWeight: updated.weight,
+        dimLength: updated.dim_length,
+        dimWidth: updated.dim_depth,
+        dimUnit: updated.dim_unit || 'mm',
+        remarks: measurements.remarks || null,
+        performedBy: req.user.id,
       });
       await logOp(client, measureTarget.id, 'growth_run_measured', 'lot_process_return', ret.id,
         0, measureTarget.status,
         `Growth Run ${measureTarget.lot_number} measured after ${issue.process_type || 'laser'}: ` +
-          `Weight ${prevWeight ?? '—'} → ${updated.weight}; Height ${prevHeight ?? '—'} → ${updated.dim_height}${updated.dim_unit || 'mm'}`,
+        `Weight ${prevWeight ?? '—'} → ${updated.weight}; Height ${prevHeight ?? '—'} → ${updated.dim_height}${updated.dim_unit || 'mm'}`,
         req.user.id);
     }
 
@@ -2098,7 +2102,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         // (keeps its own growth pool); qty is the ACTUAL returned Growth qty
         // (never forced to 1); unit stays the carrier's canonical PCS unit.
         const carrierValue = parseFloat(processLot.total_value) || 0;
-        const carrierRate  = ct.qty > 0 ? Math.round((carrierValue / ct.qty) * 10000) / 10000 : parseFloat(processLot.rate || 0);
+        const carrierRate = ct.qty > 0 ? Math.round((carrierValue / ct.qty) * 10000) / 10000 : parseFloat(processLot.rate || 0);
         await client.query(
           `UPDATE inventory
              SET item_id = $1, status = $2, qty = $3, weight = $4,
@@ -2110,8 +2114,8 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
                  manufacturing_state = 'AVAILABLE', updated_at = NOW()
            WHERE id = $11`,
           [gdItem[0].id, ct.status, ct.qty, ct.weight,
-           ct.dim_length, ct.dim_depth, ct.dim_height, ct.dim_unit,
-           carrierRate, carrierValue, processLot.id]
+          ct.dim_length, ct.dim_depth, ct.dim_height, ct.dim_unit,
+            carrierRate, carrierValue, processLot.id]
         );
         await logOp(client, processLot.id, 'seed_remove_carrier_transform', 'lot_process_return', ret.id,
           0, ct.status,
@@ -2122,7 +2126,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         // Attached Seed: SAME row released back to stock (never consumed).
         // Root lineage and lot name preserved; dims retained from the row.
         const seedValue = parseFloat(seedRow.total_value) || 0;
-        const seedRate  = st.qty > 0 ? Math.round((seedValue / st.qty) * 10000) / 10000 : parseFloat(seedRow.rate || 0);
+        const seedRate = st.qty > 0 ? Math.round((seedValue / st.qty) * 10000) / 10000 : parseFloat(seedRow.rate || 0);
         await client.query(
           `UPDATE inventory
              SET status = $1, qty = $2, weight = $3, rate = $4, total_value = $5,
@@ -2344,10 +2348,10 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
 
     await client.query('COMMIT');
     return res.status(201).json({
-      return_number:   returnNum,
-      return_id:       ret.id,
-      issue_id:        issueId,
-      is_final:        isFinal,
+      return_number: returnNum,
+      return_id: ret.id,
+      issue_id: issueId,
+      is_final: isFinal,
       remaining_after: remainingAfter,
       outcomes,
     });
