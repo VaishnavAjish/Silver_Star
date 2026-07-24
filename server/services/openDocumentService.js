@@ -14,6 +14,7 @@
  */
 
 const pool = require('../db/pool');
+const { getBillSettlement } = require('./settlementService');
 
 // ── Bill outstanding (purchase_notes) ────────────────────────────────────────
 
@@ -32,6 +33,7 @@ async function getBillOutstanding(billId, client = pool) {
       COALESCE(vaa.advance_allocated, 0)                                 AS advance_allocated,
       COALESCE(btw.tds_allocated,     0)                                 AS tds_allocated,
       COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_allocated,
+      (pn.grand_total - (COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0))) AS raw_balance,
       GREATEST(
         0,
         pn.grand_total
@@ -221,22 +223,14 @@ async function getCustomerOpenInvoices(customerId, client = pool, excludeJeId = 
 // Called within a transaction (pass the client).
 
 async function syncBillStatus(billId, client) {
-  const row = await getBillOutstanding(billId, client);
-  if (!row) return;
-
-  const outstanding = parseFloat(row.outstanding);
-  const grandTotal  = parseFloat(row.grand_total);
-  const totalPaid   = grandTotal - outstanding;
-
-  const pStatus = outstanding <= 0.005 ? 'PAID'
-    : totalPaid > 0.005 ? 'PARTIAL'
-    : 'UNPAID';
+  const s = await getBillSettlement(billId, client);
+  if (!s) return;
 
   await client.query(
     `UPDATE purchase_notes
      SET amount_paid = $1, balance_due = $2, payment_status = $3
      WHERE id = $4`,
-    [totalPaid, Math.max(0, outstanding), pStatus, billId]
+    [s.total_settled, s.balance_due, s.payment_status, billId]
   );
 }
 

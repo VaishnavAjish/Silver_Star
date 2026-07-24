@@ -656,13 +656,6 @@ export const VendorBillForm = () => {
       <FormSectionCard
         title="TDS / Withholding"
         icon={<Receipt size={13} />}
-        actions={
-          (!isEdit || detailData?.status !== 'cancelled') && (
-            <button className="btn btn-sm btn-primary" onClick={handleSaveTdsOnly} disabled={loading}>
-              <Save size={12} /> {loading ? 'Saving TDS...' : 'Save TDS Withholding'}
-            </button>
-          )
-        }
       >
         <div className="form-row" style={{ alignItems: 'center', marginBottom: 12 }}>
           <div className="fg" style={{ minWidth: 150 }}>

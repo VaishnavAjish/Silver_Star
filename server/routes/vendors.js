@@ -21,6 +21,7 @@ const { reserveCode } = require('../services/codeGeneratorService');
 const { getVendorPosition } = require('../services/vendorAdvanceService');
 const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const { getBillSettlements } = require('../services/settlementService');
 
 const router = express.Router();
 
@@ -315,6 +316,30 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     };
 
     const paginated = all.slice(calculatedOffset, calculatedOffset + pageSize);
+
+    // Enrich Bill transactions with canonical settlement breakdown
+    const billIdsToEnrich = paginated.filter(t => t.type === 'Bill').map(t => t.id);
+    if (billIdsToEnrich.length > 0) {
+      const settlementMap = await getBillSettlements(billIdsToEnrich);
+      for (const item of paginated) {
+        if (item.type === 'Bill') {
+          const s = settlementMap.get(item.id);
+          if (s) {
+            item.cash_paid           = s.cash_paid;
+            item.je_settled          = s.je_settled;
+            item.advance_applied     = s.advance_applied;
+            item.tds_withheld        = s.tds_withheld;
+            item.total_settled       = s.total_settled;
+            item.raw_balance         = s.raw_balance;
+            item.balance             = s.balance_due;
+            item.balance_due         = s.balance_due;
+            item.over_settled_amount = s.over_settled_amount;
+            item.is_over_settled     = s.is_over_settled;
+            item.status              = s.payment_status;
+          }
+        }
+      }
+    }
 
     res.json({
       data: paginated,

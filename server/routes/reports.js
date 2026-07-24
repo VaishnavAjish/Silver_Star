@@ -6,6 +6,7 @@ const { logger } = require('../middleware/logger');
 const { buildTrialBalanceHierarchy, buildAccountHierarchy } = require('../services/glQueryService');
 const { getFundMovementSummary, getDrillDownData } = require('../services/fundMovementService');
 const reportingCurrencyService = require('../services/reportingCurrencyService');
+const { getBillSettlements } = require('../services/settlementService');
 
 const router = express.Router();
 
@@ -715,7 +716,9 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
         SELECT
           pn.grand_total AS bill_amount,
           COALESCE(pp.total_paid, 0) AS paid_amount,
+          (pn.grand_total - COALESCE(pp.total_paid, 0)) AS raw_balance,
           GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          GREATEST(0, COALESCE(pp.total_paid, 0) - pn.grand_total) AS over_settled_amount,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date
         FROM purchase_notes pn
         LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
@@ -725,7 +728,8 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
         COUNT(*)::int AS total_count,
         COALESCE(SUM(bill_amount), 0) AS total_bill,
         COALESCE(SUM(paid_amount), 0) AS total_paid,
-        COALESCE(SUM(balance_amount), 0) AS total_balance
+        COALESCE(SUM(balance_amount), 0) AS total_balance,
+        COALESCE(SUM(over_settled_amount), 0) AS total_over_settled
       FROM base_data
       WHERE ${whereOuter}
     `, params.slice(0, -2));
@@ -734,7 +738,9 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
     const totals = {
       bill_amount: parseFloat(aggResult.rows[0]?.total_bill || 0),
       paid_amount: parseFloat(aggResult.rows[0]?.total_paid || 0),
-      balance_amount: parseFloat(aggResult.rows[0]?.total_balance || 0)
+      balance_amount: parseFloat(aggResult.rows[0]?.total_balance || 0),
+      gross_open_payable: parseFloat(aggResult.rows[0]?.total_balance || 0),
+      over_settled_amount: parseFloat(aggResult.rows[0]?.total_over_settled || 0),
     };
 
     // ROW QUERY WITH PAGINATION
@@ -774,7 +780,9 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           COALESCE(pp.tds_withheld, 0) AS tds_withheld,
           COALESCE(pp.total_paid, 0) AS total_settled,
           COALESCE(pp.total_paid, 0) AS paid_amount,
+          (pn.grand_total - COALESCE(pp.total_paid, 0)) AS raw_balance,
           GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
+          GREATEST(0, COALESCE(pp.total_paid, 0) - pn.grand_total) AS over_settled_amount,
           CASE
             WHEN pn.grand_total - COALESCE(pp.total_paid, 0) <= 0 THEN 'Paid'
             WHEN (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date < CURRENT_DATE
@@ -818,18 +826,29 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
       LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `, params);
 
-    const rows = result.rows.map(r => ({
-      ...r,
-      bill_amount:     parseFloat(r.bill_amount)     || 0,
-      cash_paid:       parseFloat(r.cash_paid)       || 0,
-      je_settled:      parseFloat(r.je_settled)      || 0,
-      advance_applied: parseFloat(r.advance_applied) || 0,
-      tds_withheld:    parseFloat(r.tds_withheld)    || 0,
-      total_settled:   parseFloat(r.total_settled)   || 0,
-      paid_amount:     parseFloat(r.paid_amount)     || 0,
-      balance_amount:  parseFloat(r.balance_amount)  || 0,
-      ageing_days:     parseInt(r.ageing_days)        || 0,
-    }));
+    const billIds = result.rows.map(r => r.id);
+    const settlementsMap = await getBillSettlements(billIds);
+
+    const rows = result.rows.map(r => {
+      const s = settlementsMap.get(r.id);
+      return {
+        ...r,
+        bill_amount:         s ? s.gross_total : (parseFloat(r.bill_amount) || 0),
+        cash_paid:           s ? s.cash_paid : (parseFloat(r.cash_paid) || 0),
+        je_settled:          s ? s.je_settled : (parseFloat(r.je_settled) || 0),
+        advance_applied:     s ? s.advance_applied : (parseFloat(r.advance_applied) || 0),
+        tds_withheld:        s ? s.tds_withheld : (parseFloat(r.tds_withheld) || 0),
+        total_settled:       s ? s.total_settled : (parseFloat(r.total_settled) || 0),
+        paid_amount:         s ? s.total_settled : (parseFloat(r.paid_amount) || 0),
+        raw_balance:         s ? s.raw_balance : (parseFloat(r.raw_balance) || 0),
+        balance_amount:      s ? s.balance_due : (parseFloat(r.balance_amount) || 0),
+        balance_due:         s ? s.balance_due : (parseFloat(r.balance_amount) || 0),
+        over_settled_amount: s ? s.over_settled_amount : (parseFloat(r.over_settled_amount) || 0),
+        is_over_settled:     s ? s.is_over_settled : false,
+        pay_status:          s ? (s.is_over_settled ? 'Paid (Over-settled)' : (s.payment_status.charAt(0) + s.payment_status.slice(1).toLowerCase())) : r.pay_status,
+        ageing_days:         parseInt(r.ageing_days) || 0,
+      };
+    });
 
     res.json({ data: rows, total: totalCount, totals });
   } catch (err) {
