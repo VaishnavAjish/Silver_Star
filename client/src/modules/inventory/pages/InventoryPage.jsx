@@ -110,7 +110,7 @@ export default function InventoryPage() {
   const api = useApi();
   const navigate = useNavigate();
   const [urlParams, setUrlParams] = useSearchParams();
-  const { user, hasRole, hasPermission } = useAuth();
+  const { hasRole, hasPermission } = useAuth();
 
   const [search, setSearch] = useState(urlParams.get('q') || '');
   const [searchInput, setSearchInput] = useState(urlParams.get('q') || '');
@@ -833,8 +833,7 @@ export default function InventoryPage() {
     const isIP = row.status === 'IN PROCESS';
     const mixCked = mixSelected.has(row.id);
     const perms = getAllowedActions(row);
-    const roleString = String(user?.role || '').toLowerCase().trim();
-    const isSuperAdmin = !['operator', 'user', 'employee', 'guest', 'viewer'].includes(roleString);
+    const isSuperAdmin = hasRole('super_admin', 'superadmin', 'super admin', 'admin', 'management', 'manager', 'owner', 'developer');
     const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit');
     
     return [
