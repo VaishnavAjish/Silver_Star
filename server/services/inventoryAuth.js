@@ -47,11 +47,16 @@ const FINANCIAL_FIELDS = Object.freeze([
 ]);
 
 // ── Roles that always see financial fields ────────────────────────────────────
-const FINANCIAL_BYPASS_ROLES = Object.freeze(['super_admin', 'admin']);
+// ── Roles that always see financial fields and full bypass ────────────────────
+const FINANCIAL_BYPASS_ROLES = Object.freeze([
+  'super_admin', 'superadmin', 'super admin', 'admin', 'administrator',
+  'management', 'manager', 'owner', 'developer'
+]);
 
 // ── canViewFinancial: does user have VIEW on 'inventory' / 'inventory_financial'?
 async function resolveCanViewFinancial(userId, userRole) {
-  if (FINANCIAL_BYPASS_ROLES.includes(userRole)) return true;
+  const normRole = String(userRole || '').toLowerCase().trim();
+  if (FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(userRole)) return true;
   // Check submodule-level financial permission
   const mask = await getUserPermissionBitmask(userId, 'inventory', 'inventory_financial');
   if ((mask & PERM_BITS.view) === PERM_BITS.view) return true;
@@ -60,13 +65,14 @@ async function resolveCanViewFinancial(userId, userRole) {
 
 // ── Load full authorization context for one request ──────────────────────────
 async function loadInventoryAuthContext(userId, userRole) {
-  // 1. Module-level permission bitmask
+  const normRole = String(userRole || '').toLowerCase().trim();
+  const isBypass = FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(userRole);
+
+  // 1. Module-level permission bitmask: All authenticated users can view inventory by default
   const invMask = await getUserPermissionBitmask(userId, 'inventory', '');
 
-  const canViewInventory = FINANCIAL_BYPASS_ROLES.includes(userRole) ||
-                           (invMask & PERM_BITS.view) === PERM_BITS.view;
-  const canExport        = FINANCIAL_BYPASS_ROLES.includes(userRole) ||
-                           (invMask & PERM_BITS.export) === PERM_BITS.export;
+  const canViewInventory = true; // All authenticated users are allowed to view inventory
+  const canExport        = isBypass || (invMask & PERM_BITS.export) === PERM_BITS.export;
 
   // 2. Financial field access
   const canViewFinancial = await resolveCanViewFinancial(userId, userRole);
@@ -114,8 +120,11 @@ async function loadInventoryAuthContext(userId, userRole) {
 async function requireInventoryView(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
 
-  // super_admin: full bypass — no DB queries needed
-  if (req.user.role === 'super_admin') {
+  const normRole = String(req.user.role || '').toLowerCase().trim();
+  const isSuperAdmin = FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(req.user.role);
+
+  // super_admin / admin bypass — full access
+  if (isSuperAdmin) {
     req.inventoryAuth = {
       canViewInventory:  true,
       canExport:         true,
@@ -130,10 +139,6 @@ async function requireInventoryView(req, res, next) {
   try {
     const ctx = await loadInventoryAuthContext(req.user.id, req.user.role);
     req.inventoryAuth = ctx;
-
-    if (!ctx.canViewInventory) {
-      return res.status(403).json({ error: 'Permission denied: inventory.view' });
-    }
     next();
   } catch (err) {
     res.status(500).json({ error: 'Authorization error' });
