@@ -6,13 +6,19 @@ const { getInventoryValuationLines, round2 } = require('../services/inventoryAcc
 const reversalOrchestrator = require('../services/reversalOrchestrator');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+const {
+  requireInventoryView,
+  stripFinancial,
+  buildDeptScopeClause,
+  isLotInScope,
+} = require('../services/inventoryAuth');
 
 const router = express.Router();
 
 
 
 // GET /api/inventory
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, requireInventoryView, async (req, res) => {
   try {
     const {
       status, category, search, type_filter, stock_filter, sort_by,
@@ -183,6 +189,10 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
       ? requestedFields.map(f => allFields[f] ? `${allFields[f]} AS ${f}` : null).filter(Boolean).join(', ')
       : Object.entries(allFields).map(([alias, col]) => `${col} AS ${alias}`).join(', ');
 
+    // Department scope enforcement — append clause to WHERE and params
+    const { clause: deptClause, params: scopedParams } = buildDeptScopeClause(req.inventoryAuth, params);
+    const scopedWhere = where + deptClause;
+
     const baseFrom = `FROM inventory inv JOIN items i ON inv.item_id = i.id
              LEFT JOIN locations l ON inv.location_id = l.id
              LEFT JOIN vendors v ON inv.vendor_id = v.id
@@ -198,31 +208,35 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
              LEFT JOIN process_master pm ON pm.process_code = mp.process_type
              LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = inv.id AND lpi.status = 'OPEN'
              LEFT JOIN process_master pm2 ON pm2.process_code = lpi.process_type
-             ${where}`;
+             ${scopedWhere}`;
 
-    const dataParams = [...params, parseInt(limit), parseInt(offset)];
+    const dataParams = [...scopedParams, parseInt(limit), parseInt(offset)];
 
     const q = `SELECT ${selectFields} ${baseFrom} ORDER BY ${orderBy}
             LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
 
+    const canViewFinancial = req.inventoryAuth.canViewFinancial;
+
     const [result, countR, totalsR] = await Promise.all([
       pool.query(q, dataParams),
-      pool.query(`SELECT COUNT(*) ${baseFrom}`, params),
+      pool.query(`SELECT COUNT(*) ${baseFrom}`, scopedParams),
       pool.query(
         `SELECT COALESCE(SUM(inv.qty),0) AS total_qty,
                 COALESCE(SUM(inv.total_value),0) AS total_value
-         ${baseFrom}`, params
+         ${baseFrom}`, scopedParams
       ),
     ]);
 
-    res.json({
-      data:   result.rows,
+    const responseData = {
+      data:   stripFinancial(result.rows, canViewFinancial),
       total:  parseInt(countR.rows[0].count),
-      totals: {
-        qty:   parseFloat(totalsR.rows[0].total_qty),
-        value: parseFloat(totalsR.rows[0].total_value),
-      },
-    });
+      totals: { qty: parseFloat(totalsR.rows[0].total_qty) },
+    };
+    // Only include value totals when caller has financial visibility
+    if (canViewFinancial) {
+      responseData.totals.value = parseFloat(totalsR.rows[0].total_value);
+    }
+    res.json(responseData);
   } catch (err) {
     logger.error('[inventory] GET / error:', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message });
@@ -230,7 +244,7 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
 });
 
 // GET /api/inventory/filters/active
-router.get('/filters/active', authenticate, async (req, res) => {
+router.get('/filters/active', authenticate, requireInventoryView, async (req, res) => {
   try {
     const [locationsResult, accountBasesResult, vendorsResult, processesResult] = await Promise.all([
       pool.query(`
@@ -268,7 +282,7 @@ router.get('/filters/active', authenticate, async (req, res) => {
 });
 
 // GET /api/inventory/opening/list
-router.get('/opening/list', authenticate, async (req, res) => {
+router.get('/opening/list', authenticate, requireInventoryView, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT io.*, i.code AS item_code, i.name AS item_name, i.category
@@ -276,15 +290,13 @@ router.get('/opening/list', authenticate, async (req, res) => {
        JOIN items i ON i.id = io.item_id
        ORDER BY io.as_of_date DESC, i.code`
     );
-    res.json({
-      data: result.rows.map(r => ({
-        ...r,
-        quantity: Number(r.quantity) || 0,
-        rate: Number(r.rate) || 0,
-        value: Number(r.value) || 0,
-      })),
-      total: result.rows.length,
-    });
+    const canViewFinancial = req.inventoryAuth.canViewFinancial;
+    const rows = result.rows.map(r => ({
+      ...r,
+      quantity: Number(r.quantity) || 0,
+      ...(canViewFinancial ? { rate: Number(r.rate) || 0, value: Number(r.value) || 0 } : {}),
+    }));
+    res.json({ data: rows, total: rows.length });
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
@@ -343,7 +355,7 @@ router.post('/opening', authenticate, authorize('admin', 'operator'), async (req
 });
 
 // GET /api/inventory/opening (backward-friendly alias via query routing)
-router.get('/opening', authenticate, async (req, res) => {
+router.get('/opening', authenticate, requireInventoryView, async (req, res) => {
   try {
     const page = parseInt(req.query.page || '1', 10);
     const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
@@ -366,17 +378,27 @@ router.get('/opening', authenticate, async (req, res) => {
     const totalCount = parseInt(countR.rows[0].count);
     const totalPages = Math.ceil(totalCount / pageSize);
 
-    res.json({ data: result.rows, totalCount, page, pageSize, totalPages });
+    res.json({
+      data: stripFinancial(result.rows, req.inventoryAuth.canViewFinancial),
+      totalCount, page, pageSize, totalPages,
+    });
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/closing
-router.get('/closing', authenticate, async (req, res) => {
+router.get('/closing', authenticate, requireInventoryView, async (req, res) => {
   try {
     const { as_of_date = new Date().toISOString().split('T')[0] } = req.query;
     const page = parseInt(req.query.page || '1', 10);
     const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
-    res.json(await getInventoryValuationLines(as_of_date, page, pageSize));
+    const closingData = await getInventoryValuationLines(as_of_date, page, pageSize);
+    if (Array.isArray(closingData)) {
+      res.json(stripFinancial(closingData, req.inventoryAuth.canViewFinancial));
+    } else if (closingData && Array.isArray(closingData.data)) {
+      res.json({ ...closingData, data: stripFinancial(closingData.data, req.inventoryAuth.canViewFinancial) });
+    } else {
+      res.json(closingData);
+    }
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
@@ -417,21 +439,24 @@ router.post('/closing', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // GET /api/inventory/by-category/:category
-router.get('/by-category/:category', authenticate, async (req, res) => {
+router.get('/by-category/:category', authenticate, requireInventoryView, async (req, res) => {
   try {
+    const { clause: deptClause, params: deptParams } = buildDeptScopeClause(
+      req.inventoryAuth, [req.params.category]
+    );
     const result = await pool.query(
       `SELECT inv.*, i.name as item_name, i.code as item_code
        FROM inventory inv JOIN items i ON inv.item_id = i.id
-       WHERE i.category = $1 AND inv.status != 'CONSUMED'
+       WHERE i.category = $1 AND inv.status != 'CONSUMED'${deptClause}
        ORDER BY inv.lot_number`,
-      [req.params.category]
+      deptParams
     );
-    res.json(result.rows);
+    res.json(stripFinancial(result.rows, req.inventoryAuth.canViewFinancial));
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/:id/movement-ledger
-router.get('/:id/movement-ledger', authenticate, async (req, res) => {
+router.get('/:id/movement-ledger', authenticate, requireInventoryView, async (req, res) => {
   const lotId = parseInt(req.params.id);
   try {
     // Single batch query replacing N+1
@@ -495,7 +520,14 @@ router.get('/:id/movement-ledger', authenticate, async (req, res) => {
       ORDER BY ts ASC
     `, [lotId]);
 
-    res.json({ lot: lot[0], events });
+    // Dept scope check on the lot itself
+    if (!isLotInScope(req.inventoryAuth, lot[0])) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    res.json({
+      lot: stripFinancial(lot[0], req.inventoryAuth.canViewFinancial),
+      events,
+    });
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
@@ -506,7 +538,7 @@ router.get('/:id/movement-ledger', authenticate, async (req, res) => {
 // mirror op_log for splits, so they are excluded from the running sum to avoid
 // double counting). P2 stores authoritative balances at write time.
 // txn_status is 'ACTIVE' for every row until the P2 reversal engine lands.
-router.get('/:id/history', authenticate, async (req, res) => {
+router.get('/:id/history', authenticate, requireInventoryView, async (req, res) => {
   const lotId = parseInt(req.params.id);
   const { date_from, date_to, source } = req.query;
   const limit  = Math.min(parseInt(req.query.limit)  || 50, 10000);
@@ -745,7 +777,7 @@ router.get('/:id/history', authenticate, async (req, res) => {
 });
 
 // P2: Server-Authoritative Eligibility Check
-router.get('/history/eligibility', authenticate, async (req, res) => {
+router.get('/history/eligibility', authenticate, requireInventoryView, async (req, res) => {
   try {
     const { canonical_transaction_key, lot_id } = req.query;
     if (!canonical_transaction_key || !lot_id) {
@@ -760,7 +792,7 @@ router.get('/history/eligibility', authenticate, async (req, res) => {
 });
 
 // P2: View Union (Exact Backend Resolver)
-router.get('/history/union', authenticate, async (req, res) => {
+router.get('/history/union', authenticate, requireInventoryView, async (req, res) => {
   try {
     const { canonical_transaction_key, lot_id } = req.query;
     if (!canonical_transaction_key || !lot_id) {
@@ -861,7 +893,7 @@ router.post('/history/reverse', authenticate, async (req, res) => {
 });
 
 // GET /api/inventory/summary
-router.get('/summary', authenticate, async (req, res) => {
+router.get('/summary', authenticate, requireInventoryView, async (req, res) => {
   try {
     const summaryR = await pool.query(`
       SELECT
@@ -871,12 +903,15 @@ router.get('/summary', authenticate, async (req, res) => {
       FROM inventory
       WHERE qty > 0
     `);
-    res.json(summaryR.rows[0]);
+    const row = summaryR.rows[0];
+    const out = { total_items: row.total_items, total_qty: row.total_qty };
+    if (req.inventoryAuth.canViewFinancial) out.total_value = row.total_value;
+    res.json(out);
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/inventory/:id
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, requireInventoryView, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT inv.*, i.name as item_name, i.code as item_code, i.category,
@@ -906,7 +941,11 @@ router.get('/:id', authenticate, async (req, res) => {
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(result.rows[0]);
+    // Dept scope check — return 404 to avoid exposing existence of out-of-scope lots
+    if (!isLotInScope(req.inventoryAuth, result.rows[0])) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    res.json(stripFinancial(result.rows[0], req.inventoryAuth.canViewFinancial));
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 

@@ -8,6 +8,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
 const { validatePreferences } = require('../services/navPreferences');
+const { loadInventoryAuthContext } = require('../services/inventoryAuth');
 
 const router = express.Router();
 const SELF_KEYS = ['nav.shortcuts', 'nav.collapsed', 'nav.compact'];
@@ -45,6 +46,28 @@ router.put('/preferences', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   } finally {
     client.release();
+  }
+});
+
+// GET /api/me/access — effective authorization contract for the caller.
+// Informational only — frontend must not skip API calls based on this;
+// the backend enforces independently on every request.
+router.get('/access', authenticate, async (req, res) => {
+  try {
+    const ctx = await loadInventoryAuthContext(req.user.id, req.user.role);
+    res.json({
+      inventory: {
+        can_view:           ctx.canViewInventory,
+        can_export:         ctx.canExport,
+        can_view_financial: ctx.canViewFinancial,
+        scope_mode:         ctx.scopeMode,
+        // allowed_dept_ids only populated for SELECTED mode
+        allowed_dept_ids:   ctx.scopeMode === 'SELECTED' ? ctx.allowedDeptIds : [],
+        include_unassigned: ctx.includeUnassigned,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

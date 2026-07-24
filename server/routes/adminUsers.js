@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { auditLog } = require('./roles');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+const { loadInventoryAuthContext } = require('../services/inventoryAuth');
 
 const router = express.Router();
 const adminOnly = [authenticate, authorize('admin')];
@@ -166,6 +167,127 @@ router.post('/users/:id/reset-password', ...adminOnly, async (req, res) => {
     await auditLog(pool, req.user.id, 'reset_password', 'user', parseInt(id), { message: 'Password manually reset' }, req);
     res.json({ success: true });
   } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── INVENTORY SCOPE MANAGEMENT ───────────────────────────────────────────────
+
+// GET /api/admin/users/:id/inventory-scope
+// Read a user's current inventory dept-scope configuration.
+router.get('/users/:id/inventory-scope', ...adminOnly, async (req, res) => {
+  const userId = Number(req.params.id);
+  try {
+    const [scopeRow, deptRows] = await Promise.all([
+      pool.query(
+        'SELECT scope_mode, include_unassigned FROM user_inventory_scopes WHERE user_id = $1',
+        [userId]
+      ),
+      pool.query(
+        `SELECT uisd.department_id, d.name
+         FROM user_inventory_scope_depts uisd
+         JOIN departments d ON d.id = uisd.department_id
+         WHERE uisd.user_id = $1
+         ORDER BY d.name`,
+        [userId]
+      ),
+    ]);
+
+    res.json({
+      scope_mode:         scopeRow.rows[0]?.scope_mode ?? 'ALL',
+      include_unassigned: scopeRow.rows[0]?.include_unassigned ?? false,
+      departments:        deptRows.rows,
+    });
+  } catch (err) {
+    logger.error('GET inventory-scope error:', { error: err.message });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /api/admin/users/:id/inventory-scope
+// Upsert a user's inventory dept-scope. Replaces existing dept list atomically.
+router.put('/users/:id/inventory-scope', ...adminOnly, async (req, res) => {
+  const userId = Number(req.params.id);
+  const { scope_mode, include_unassigned = false, department_ids = [] } = req.body;
+
+  const VALID_MODES = ['ALL', 'SELECTED', 'NONE'];
+  if (!VALID_MODES.includes(scope_mode)) {
+    return res.status(400).json({ error: `scope_mode must be one of: ${VALID_MODES.join(', ')}` });
+  }
+  if (scope_mode === 'SELECTED' && (!Array.isArray(department_ids) || department_ids.length === 0)) {
+    return res.status(400).json({ error: 'department_ids must be a non-empty array when scope_mode is SELECTED' });
+  }
+
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Upsert scope row
+    await client.query(
+      `INSERT INTO user_inventory_scopes
+         (user_id, scope_mode, include_unassigned, updated_by, updated_at, created_by)
+       VALUES ($1, $2, $3, $4, NOW(), $4)
+       ON CONFLICT (user_id) DO UPDATE
+         SET scope_mode = EXCLUDED.scope_mode,
+             include_unassigned = EXCLUDED.include_unassigned,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+      [userId, scope_mode, Boolean(include_unassigned), req.user.id]
+    );
+
+    // Replace dept whitelist atomically
+    await client.query(
+      'DELETE FROM user_inventory_scope_depts WHERE user_id = $1',
+      [userId]
+    );
+
+    if (scope_mode === 'SELECTED' && department_ids.length > 0) {
+      const validIds = department_ids.map(Number).filter(n => !isNaN(n));
+      for (const deptId of validIds) {
+        await client.query(
+          'INSERT INTO user_inventory_scope_depts (user_id, department_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [userId, deptId]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await auditLog(pool, req.user.id, 'update_inventory_scope', 'user', userId,
+      { scope_mode, include_unassigned, department_ids }, req);
+
+    res.json({ ok: true, user_id: userId, scope_mode, include_unassigned, department_ids });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') return res.status(400).json({ error: 'One or more department IDs do not exist' });
+    logger.error('PUT inventory-scope error:', { error: err.message });
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/admin/users/:id/effective-access
+// Returns the resolved authorization context for any user (admin use).
+router.get('/users/:id/effective-access', ...adminOnly, async (req, res) => {
+  const userId = Number(req.params.id);
+  try {
+    const userRow = await pool.query('SELECT role FROM users WHERE id = $1 AND is_active = true', [userId]);
+    if (!userRow.rows.length) return res.status(404).json({ error: 'User not found' });
+
+    const ctx = await loadInventoryAuthContext(userId, userRow.rows[0].role);
+    res.json({
+      inventory: {
+        can_view:           ctx.canViewInventory,
+        can_export:         ctx.canExport,
+        can_view_financial: ctx.canViewFinancial,
+        scope_mode:         ctx.scopeMode,
+        allowed_dept_ids:   ctx.scopeMode === 'SELECTED' ? ctx.allowedDeptIds : [],
+        include_unassigned: ctx.includeUnassigned,
+      },
+    });
+  } catch (err) {
+    logger.error('GET effective-access error:', { error: err.message });
     res.status(500).json({ error: 'Server error' });
   }
 });
