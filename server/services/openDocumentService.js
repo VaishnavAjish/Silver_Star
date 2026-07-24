@@ -277,8 +277,7 @@ async function autoAllocateJE(jeId, client = pool) {
   if (!jeCheck.rows.length) return;
   const { source_type, is_tds_linked } = jeCheck.rows[0];
   if (['bill_tds_withholding', 'bill_tds_reversal'].includes(source_type) || is_tds_linked) {
-    // Purge any legacy/accidental je_allocations created for TDS JEs
-    await client.query('DELETE FROM je_allocations WHERE je_id = $1', [jeId]);
+    // TDS posting and reversal JEs must never create or hold je_allocations
     return;
   }
 
@@ -344,32 +343,8 @@ async function autoAllocateJE(jeId, client = pool) {
   }
 }
 
-async function cleanupLegacyTdsAllocations(client = pool) {
-  try {
-    const deleted = await client.query(`
-      DELETE FROM je_allocations
-      WHERE je_id IN (
-        SELECT je.id FROM journal_entries je
-        LEFT JOIN bill_tds_withholdings btw ON btw.posting_je_id = je.id OR btw.reversal_je_id = je.id
-        WHERE je.source_type IN ('bill_tds_withholding', 'bill_tds_reversal')
-           OR btw.id IS NOT NULL
-      )
-      RETURNING target_id
-    `);
-    if (deleted.rows.length > 0) {
-      const billIds = [...new Set(deleted.rows.map(r => r.target_id).filter(Boolean))];
-      for (const billId of billIds) {
-        await syncBillStatus(billId, client);
-      }
-    }
-  } catch (err) {
-    console.error('[cleanupLegacyTdsAllocations] error:', err.message);
-  }
-}
-
 async function autoAllocateAllUnallocatedJEs(client = pool) {
   try {
-    await cleanupLegacyTdsAllocations(client);
     const unallocated = await client.query(`
       SELECT DISTINCT je.id
       FROM journal_entries je

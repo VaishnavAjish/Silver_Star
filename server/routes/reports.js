@@ -768,6 +768,11 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           COALESCE(pn.payment_term, '') AS payment_term,
           (pn.doc_date + INTERVAL '1 day' * (${dueDaysExpr}))::date AS due_date,
           pn.grand_total AS bill_amount,
+          COALESCE(pp.cash_paid, 0) AS cash_paid,
+          COALESCE(pp.je_settled, 0) AS je_settled,
+          COALESCE(pp.advance_applied, 0) AS advance_applied,
+          COALESCE(pp.tds_withheld, 0) AS tds_withheld,
+          COALESCE(pp.total_paid, 0) AS total_settled,
           COALESCE(pp.total_paid, 0) AS paid_amount,
           GREATEST(0, pn.grand_total - COALESCE(pp.total_paid, 0)) AS balance_amount,
           CASE
@@ -780,7 +785,32 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           (CURRENT_DATE - pn.doc_date::date) AS ageing_days
         FROM purchase_notes pn
         LEFT JOIN vendors v ON pn.vendor_id = v.id
-        LEFT JOIN pn_paid pp ON pp.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT
+            pn.id AS purchase_note_id,
+            COALESCE(pa.payment_allocated, 0) AS cash_paid,
+            COALESCE(ja.je_allocated, 0) AS je_settled,
+            COALESCE(vaa.advance_allocated, 0) AS advance_applied,
+            COALESCE(btw.tds_allocated, 0) AS tds_withheld,
+            COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_paid
+          FROM purchase_notes pn
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS payment_allocated
+            FROM payment_allocations GROUP BY purchase_note_id
+          ) pa ON pa.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT target_id, SUM(allocated_amount) AS je_allocated
+            FROM je_allocations WHERE target_type = 'bill' GROUP BY target_id
+          ) ja ON ja.target_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(amount) AS advance_allocated
+            FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
+          ) vaa ON vaa.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+            FROM bill_tds_withholdings WHERE status = 'POSTED' GROUP BY purchase_note_id
+          ) btw ON btw.purchase_note_id = pn.id
+        ) pp ON pp.purchase_note_id = pn.id
         WHERE ${whereInner}
       ) sub
       WHERE ${whereOuter}
@@ -790,10 +820,15 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
 
     const rows = result.rows.map(r => ({
       ...r,
-      bill_amount:    parseFloat(r.bill_amount)    || 0,
-      paid_amount:    parseFloat(r.paid_amount)    || 0,
-      balance_amount: parseFloat(r.balance_amount) || 0,
-      ageing_days:    parseInt(r.ageing_days)       || 0,
+      bill_amount:     parseFloat(r.bill_amount)     || 0,
+      cash_paid:       parseFloat(r.cash_paid)       || 0,
+      je_settled:      parseFloat(r.je_settled)      || 0,
+      advance_applied: parseFloat(r.advance_applied) || 0,
+      tds_withheld:    parseFloat(r.tds_withheld)    || 0,
+      total_settled:   parseFloat(r.total_settled)   || 0,
+      paid_amount:     parseFloat(r.paid_amount)     || 0,
+      balance_amount:  parseFloat(r.balance_amount)  || 0,
+      ageing_days:     parseInt(r.ageing_days)        || 0,
     }));
 
     res.json({ data: rows, total: totalCount, totals });
