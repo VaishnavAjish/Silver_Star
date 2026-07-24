@@ -151,6 +151,7 @@ export default function UserDrawer({ user, onClose, onSaved }) {
   const [selectedTemplateToShare, setSelectedTemplateToShare] = useState('');
   const [sharingTemplate, setSharingTemplate] = useState(false);
   const [inventoryScope, setInventoryScope] = useState({ scope_mode: 'ALL', department_ids: [] });
+  const [deptSearch, setDeptSearch] = useState('');
 
   // Submodule permission matrix (effective from roles, editable)
   const [effectivePerms, setEffectivePerms] = useState({}); // { 'module:submodule': bitmask }
@@ -169,6 +170,7 @@ export default function UserDrawer({ user, onClose, onSaved }) {
     setPw({ password: '', confirm: '' });
     setExpanded({});
     setPermsDirty(false);
+    setDeptSearch('');
     setBasic({ username: user.username, email: user.email || '', full_name: user.full_name, role: user.role, department_id: user.department_id || '' });
     setFetching(true);
 
@@ -177,7 +179,7 @@ export default function UserDrawer({ user, onClose, onSaved }) {
       apiRef.current.get('/api/departments', { limit: 500, offset: 0 }).then(r => Array.isArray(r) ? r : (r?.data || [])).catch(() => []),
       apiRef.current.get('/api/roles').then(r => (r?.data || [])).catch(() => []),
       apiRef.current.get('/api/inventory-templates').catch(() => []),
-      user.role === 'operator_restricted' ? apiRef.current.get(`/api/admin/users/${user.id}/inventory-scope`).catch(() => ({})) : Promise.resolve({ scope_mode: 'ALL', department_ids: [] })
+      apiRef.current.get(`/api/admin/users/${user.id}/inventory-scope`).catch(() => (null))
     ]).then(async ([prefRows, deptData, rolesData, myTmplData, invScopeData]) => {
       setDepartments(deptData || []);
       setAllRoles(rolesData || []);
@@ -185,8 +187,12 @@ export default function UserDrawer({ user, onClose, onSaved }) {
       if (invScopeData) {
         setInventoryScope({
           scope_mode: invScopeData.scope_mode || 'ALL',
-          department_ids: invScopeData.department_ids || []
+          department_ids: Array.isArray(invScopeData.departments) 
+            ? invScopeData.departments.map(d => d.department_id)
+            : []
         });
+      } else {
+        setInventoryScope({ scope_mode: 'ALL', department_ids: [] });
       }
       const p = { ...PREF_DEFAULTS };
       prefRows.forEach(r => { p[r.pref_key] = r.pref_value; });
@@ -270,14 +276,13 @@ export default function UserDrawer({ user, onClose, onSaved }) {
         apiRef.current.put(`/api/roles/users/${user.id}/roles`, { role_ids: assignedRoleIds }),
       ];
 
-      if (basic.role === 'operator_restricted') {
-        saves.push(
-          apiRef.current.put(`/api/admin/users/${user.id}/inventory`, {
-            scope_mode: inventoryScope.scope_mode,
-            department_ids: inventoryScope.department_ids,
-          })
-        );
-      }
+      saves.push(
+        apiRef.current.put(`/api/admin/users/${user.id}/inventory-scope`, {
+          scope_mode: inventoryScope.scope_mode,
+          include_unassigned: false,
+          department_ids: inventoryScope.department_ids,
+        })
+      );
 
       // Save role permissions if admin edited them
       if (permsDirty && assignedRoleIds.length === 1) {
@@ -455,11 +460,14 @@ export default function UserDrawer({ user, onClose, onSaved }) {
                   </div>
                   <div className="form-row">
                     <div className="fg w">
-                      <label>Department</label>
+                      <label>Primary Department</label>
                       <SelectDropdown value={basic.department_id} onChange={e => setBasic(b => ({ ...b, department_id: e.target.value }))}>
                         <option value="">— None —</option>
                         {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                       </SelectDropdown>
+                      <span style={{ fontSize: 11, color: 'var(--g500)', marginTop: 4 }}>
+                        Organizational department only. Inventory visibility is configured under Data Visibility.
+                      </span>
                     </div>
                   </div>
                   
@@ -648,53 +656,100 @@ export default function UserDrawer({ user, onClose, onSaved }) {
                     ))}
                   </div>
 
-                  {basic.role === 'operator_restricted' && (
-                    <div style={{ marginTop: 24, padding: '16px', background: 'var(--g50)', border: '1px solid var(--g200)', borderRadius: 6 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--g800)', marginBottom: 8 }}>Department Inventory Access</div>
-                      <p style={{ fontSize: 12, color: 'var(--g500)', marginBottom: 12 }}>
-                        Restrict the inventory this operator can view or interact with to specific departments.
-                      </p>
-                      
-                      <div style={{ marginBottom: 16 }}>
-                        <select
-                          className="app-input"
-                          value={inventoryScope.scope_mode}
-                          onChange={e => setInventoryScope(s => ({ ...s, scope_mode: e.target.value }))}
-                          style={{ width: '100%', maxWidth: 200 }}
-                        >
-                          <option value="NONE">None</option>
-                          <option value="SELECTED">Selected Departments</option>
-                          <option value="ALL">All Departments</option>
-                        </select>
+                  <div style={{ marginTop: 24, padding: '16px', background: 'var(--g50)', border: '1px solid var(--g200)', borderRadius: 6 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--g800)', marginBottom: 8 }}>Inventory Department Access</div>
+                    
+                    {basic.role === 'super_admin' ? (
+                      <div style={{ fontSize: 12, color: 'var(--g600)', padding: '8px 12px', background: '#fff', border: '1px solid var(--g200)', borderRadius: 4 }}>
+                        <Shield size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 6, color: 'var(--brand)' }} />
+                        Full Inventory Access — system enforced
                       </div>
-
-                      {inventoryScope.scope_mode === 'SELECTED' && (
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--g700)', marginBottom: 6 }}>Allowed Departments</div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 150, overflowY: 'auto', border: '1px solid var(--g200)', padding: 8, borderRadius: 4, background: '#fff' }}>
-                            {departments.map(d => (
-                              <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={inventoryScope.department_ids.includes(d.id)}
-                                  onChange={e => {
-                                    const checked = e.target.checked;
-                                    setInventoryScope(s => ({
-                                      ...s,
-                                      department_ids: checked 
-                                        ? [...s.department_ids, d.id] 
-                                        : s.department_ids.filter(id => id !== d.id)
-                                    }));
-                                  }}
-                                />
-                                {d.name}
-                              </label>
-                            ))}
-                          </div>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: 12, color: 'var(--g500)', marginBottom: 12 }}>
+                          Restrict the inventory this user can view or interact with to specific departments.
+                        </p>
+                        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                          {['NONE', 'SELECTED', 'ALL'].map(mode => (
+                            <label key={mode} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name="scope_mode"
+                                value={mode}
+                                checked={inventoryScope.scope_mode === mode}
+                                onChange={() => {
+                                  setInventoryScope(s => ({
+                                    scope_mode: mode,
+                                    department_ids: mode === 'SELECTED' ? s.department_ids : []
+                                  }));
+                                }}
+                              />
+                              {mode === 'NONE' ? 'No Access' : mode === 'SELECTED' ? 'Selected Departments' : 'All Departments'}
+                            </label>
+                          ))}
                         </div>
-                      )}
-                    </div>
-                  )}
+
+                        {inventoryScope.scope_mode === 'SELECTED' && (() => {
+                          const visibleDepts = departments.filter(d => d.name.toLowerCase().includes(deptSearch.toLowerCase()));
+                          
+                          return (
+                            <div style={{ border: '1px solid var(--g200)', background: '#fff', borderRadius: 6, overflow: 'hidden' }}>
+                              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--g200)', background: 'var(--g50)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--g700)' }}>Allowed Inventory Departments</div>
+                                <div style={{ flex: 1 }} />
+                                <div style={{ fontSize: 11, color: 'var(--brand)', fontWeight: 600 }}>
+                                  {inventoryScope.department_ids.length} Departments selected
+                                </div>
+                              </div>
+                              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--g200)' }}>
+                                <input
+                                  type="text"
+                                  placeholder="Search departments..."
+                                  value={deptSearch}
+                                  onChange={e => setDeptSearch(e.target.value)}
+                                  className="app-input"
+                                  style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+                                />
+                                <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11 }}>
+                                  <button type="button" onClick={() => {
+                                    const visibleIds = visibleDepts.map(d => d.id);
+                                    setInventoryScope(s => ({ ...s, department_ids: Array.from(new Set([...s.department_ids, ...visibleIds])) }));
+                                  }} style={{ color: 'var(--brand)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Select All Visible</button>
+                                  <button type="button" onClick={() => {
+                                    setInventoryScope(s => ({ ...s, department_ids: [] }));
+                                  }} style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Clear All</button>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 180, overflowY: 'auto', padding: 8 }}>
+                                {visibleDepts.length === 0 ? (
+                                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--g400)', fontSize: 12 }}>No departments found</div>
+                                ) : (
+                                  visibleDepts.map(d => (
+                                    <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={inventoryScope.department_ids.includes(d.id)}
+                                        onChange={e => {
+                                          const checked = e.target.checked;
+                                          setInventoryScope(s => ({
+                                            ...s,
+                                            department_ids: checked 
+                                              ? [...s.department_ids, d.id] 
+                                              : s.department_ids.filter(id => id !== d.id)
+                                          }));
+                                        }}
+                                      />
+                                      {d.name}
+                                    </label>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
