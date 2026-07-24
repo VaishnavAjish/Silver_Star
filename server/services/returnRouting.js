@@ -522,7 +522,10 @@ function buildReturnPlan({
   // Carrier-input returns (the process lot IS the growth identity — growth
   // again / laser ops) use the dedicated in-place branch; the growth-identity
   // route must not re-evaluate (or reject) them.
-  const growthRoute = isGrowthCarrier
+  // Seed lots on a growth process also skip the biscuit-identity enforcement —
+  // they return as normal child lots and never reference the Growth Run.
+  const isSeedLot = processLot.category === 'seed';
+  const growthRoute = isGrowthCarrier || isSeedLot
     ? { route: 'CHILD' }
     : resolveGrowthReturnRoute({
         isGrowthGroupIssue, isComponentMode, biscuit,

@@ -2347,8 +2347,6 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       outcomes,
     });
   } catch (err) {
-    console.error('RETURN POST ERROR', err);
-    require('fs').appendFileSync('return_error.log', new Date().toISOString() + ' - ' + err.message + '\\n' + err.stack + '\\n');
     await client.query('ROLLBACK');
     return res.status(400).json({ error: err.message });
   } finally { client.release(); }
