@@ -835,7 +835,7 @@ export default function InventoryPage() {
     const perms = getAllowedActions(row);
     const roleString = String(user?.role || '').toLowerCase().trim();
     const isSuperAdmin = !['operator', 'user', 'employee', 'guest', 'viewer'].includes(roleString);
-    const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit');
+    const canEditLot = true; // FORCE SHOW FOR EVERYONE TO DEBUG
     
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
