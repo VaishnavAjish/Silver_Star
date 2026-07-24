@@ -183,7 +183,7 @@ export function AuthProvider({ children }) {
     const bit = _PERM_BITS[action];
     if (bit === undefined) return false;
 
-    // 1. New RBAC bitmask from assigned roles (loaded by /me)
+    // 1. RBAC bitmask from assigned roles (loaded by /me)
     const rbacPerms = user.rbac_permissions || [];
     if (rbacPerms.length > 0) {
       if (submodule) {
@@ -192,6 +192,12 @@ export function AuthProvider({ children }) {
       }
       const mod = rbacPerms.find(p => p.module === module && p.submodule === '');
       if (mod != null) return (parseInt(mod.mask) & bit) === bit;
+
+      // If submodules exist for this module, evaluate authoritatively across module submodules
+      const modEntries = rbacPerms.filter(p => p.module === module);
+      if (modEntries.length > 0) {
+        return modEntries.some(p => (parseInt(p.mask) & bit) === bit);
+      }
     }
 
     // 2. Legacy per-user permission overrides
@@ -200,7 +206,8 @@ export function AuthProvider({ children }) {
     );
     if (override !== undefined) return Boolean(override.allowed);
 
-    // 3. Legacy ROLE_DEFAULTS fallback
+    // 3. Legacy ROLE_DEFAULTS fallback ONLY if no RBAC entries exist for this user
+    if (rbacPerms.length > 0) return false;
     return ROLE_DEFAULTS[user.role]?.[module]?.includes(action) ?? false;
   };
 
