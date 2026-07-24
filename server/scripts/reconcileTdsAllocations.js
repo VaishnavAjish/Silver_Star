@@ -11,6 +11,13 @@
 
 'use strict';
 
+const path = require('path');
+const fs = require('fs');
+const dotenvPath = fs.existsSync(path.join(__dirname, '../.env'))
+  ? path.join(__dirname, '../.env')
+  : path.join(__dirname, '../../server/.env');
+require('dotenv').config({ path: dotenvPath });
+
 const pool = require('../db/pool');
 const { syncBillStatus } = require('../services/openDocumentService');
 
