@@ -246,6 +246,8 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
 // GET /api/inventory/filters/active
 router.get('/filters/active', authenticate, requireInventoryView, async (req, res) => {
   try {
+    const { clause: deptClause, params: deptParams } = buildDeptScopeClause(req.inventoryAuth, [], 'd');
+    
     const [locationsResult, accountBasesResult, vendorsResult, processesResult] = await Promise.all([
       pool.query(`
         SELECT id::text, name FROM locations
@@ -255,9 +257,9 @@ router.get('/filters/active', authenticate, requireInventoryView, async (req, re
         SELECT DISTINCT dl.id::text as id, dl.name
         FROM departments d
         JOIN locations dl ON d.location_id = dl.id
-        WHERE dl.name IS NOT NULL
+        WHERE dl.name IS NOT NULL ${deptClause}
         ORDER BY dl.name
-      `),
+      `, deptParams),
       pool.query(`
         SELECT id::text, name
         FROM vendors
@@ -284,6 +286,9 @@ router.get('/filters/active', authenticate, requireInventoryView, async (req, re
 // GET /api/inventory/opening/list
 router.get('/opening/list', authenticate, requireInventoryView, async (req, res) => {
   try {
+    if (req.inventoryAuth.scopeMode !== 'ALL') {
+      return res.json([]);
+    }
     const result = await pool.query(
       `SELECT io.*, i.code AS item_code, i.name AS item_name, i.category
        FROM inventory_opening io
@@ -361,6 +366,10 @@ router.get('/opening', authenticate, requireInventoryView, async (req, res) => {
     const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
     const offset = (page - 1) * pageSize;
 
+    if (req.inventoryAuth.scopeMode !== 'ALL') {
+      return res.json({ data: [], totalCount: 0, page, pageSize, totalPages: 0 });
+    }
+
     const query = `
       SELECT io.*, i.code AS item_code, i.name AS item_name, i.category
       FROM inventory_opening io
@@ -368,7 +377,7 @@ router.get('/opening', authenticate, requireInventoryView, async (req, res) => {
       ORDER BY io.as_of_date DESC, i.code
       LIMIT $1 OFFSET $2
     `;
-    const countQuery = `SELECT COUNT(*) FROM inventory_opening`;
+    const countQuery = `SELECT COUNT(*) FROM inventory_opening io`;
 
     const [result, countR] = await Promise.all([
       pool.query(query, [pageSize, offset]),
@@ -389,6 +398,9 @@ router.get('/opening', authenticate, requireInventoryView, async (req, res) => {
 router.get('/closing', authenticate, requireInventoryView, async (req, res) => {
   try {
     const { as_of_date = new Date().toISOString().split('T')[0] } = req.query;
+    if (req.inventoryAuth.scopeMode !== 'ALL') {
+      return res.json({ data: [], mode: 'system', as_of_date: as_of_date, total_value: 0 });
+    }
     const page = parseInt(req.query.page || '1', 10);
     const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
     const closingData = await getInventoryValuationLines(as_of_date, page, pageSize);
@@ -544,6 +556,11 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
   const limit  = Math.min(parseInt(req.query.limit)  || 50, 10000);
   const offset = parseInt(req.query.offset) || 0;
   try {
+    const invCheck = await pool.query('SELECT department_id FROM inventory WHERE id = $1', [lotId]);
+    if (invCheck.rows.length === 0 || !isLotInScope(req.inventoryAuth, invCheck.rows[0])) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
     const { rows } = await pool.query(`
       WITH all_events AS (
         -- Creation/intake event
@@ -783,6 +800,10 @@ router.get('/history/eligibility', authenticate, requireInventoryView, async (re
     if (!canonical_transaction_key || !lot_id) {
       return res.status(400).json({ error: 'Missing canonical_transaction_key or lot_id.' });
     }
+    const invCheck = await pool.query('SELECT department_id FROM inventory WHERE id = $1', [parseInt(lot_id, 10)]);
+    if (invCheck.rows.length === 0 || !isLotInScope(req.inventoryAuth, invCheck.rows[0])) {
+      return res.status(404).json({ error: 'Lot not found' });
+    }
     const eligibility = await reversalOrchestrator.getReversalEligibility(canonical_transaction_key, parseInt(lot_id, 10));
     res.json(eligibility);
   } catch (err) {
@@ -797,6 +818,10 @@ router.get('/history/union', authenticate, requireInventoryView, async (req, res
     const { canonical_transaction_key, lot_id } = req.query;
     if (!canonical_transaction_key || !lot_id) {
       return res.status(400).json({ error: 'Missing canonical_transaction_key or lot_id.' });
+    }
+    const invCheck = await pool.query('SELECT department_id FROM inventory WHERE id = $1', [parseInt(lot_id, 10)]);
+    if (invCheck.rows.length === 0 || !isLotInScope(req.inventoryAuth, invCheck.rows[0])) {
+      return res.status(404).json({ error: 'Lot not found' });
     }
     const parts = canonical_transaction_key.split(':');
     if (parts.length < 2) return res.status(400).json({ error: 'Invalid canonical key format.' });
@@ -873,11 +898,15 @@ router.get('/history/union', authenticate, requireInventoryView, async (req, res
 });
 
 // P2: Unified Reversal Endpoint
-router.post('/history/reverse', authenticate, async (req, res) => {
+router.post('/history/reverse', authenticate, requireInventoryView, async (req, res) => {
   try {
     const { canonical_transaction_key, reason, lot_id } = req.body;
     if (!canonical_transaction_key || !reason || !lot_id) {
       return res.status(400).json({ error: 'Missing required reversal fields.' });
+    }
+    const invCheck = await pool.query('SELECT department_id FROM inventory WHERE id = $1', [parseInt(lot_id, 10)]);
+    if (invCheck.rows.length === 0 || !isLotInScope(req.inventoryAuth, invCheck.rows[0])) {
+      return res.status(404).json({ error: 'Lot not found' });
     }
     const result = await reversalOrchestrator.reverseTransaction({
       canonical_transaction_key,
@@ -895,14 +924,15 @@ router.post('/history/reverse', authenticate, async (req, res) => {
 // GET /api/inventory/summary
 router.get('/summary', authenticate, requireInventoryView, async (req, res) => {
   try {
+    const { clause, params } = buildDeptScopeClause(req.inventoryAuth, []);
     const summaryR = await pool.query(`
       SELECT
-        COUNT(DISTINCT item_id) AS total_items,
-        SUM(qty) AS total_qty,
-        SUM(amount) AS total_value
-      FROM inventory
-      WHERE qty > 0
-    `);
+        COUNT(DISTINCT inv.item_id) AS total_items,
+        SUM(inv.qty) AS total_qty,
+        SUM(inv.amount) AS total_value
+      FROM inventory inv
+      WHERE inv.qty > 0 ${clause}
+    `, params);
     const row = summaryR.rows[0];
     const out = { total_items: row.total_items, total_qty: row.total_qty };
     if (req.inventoryAuth.canViewFinancial) out.total_value = row.total_value;

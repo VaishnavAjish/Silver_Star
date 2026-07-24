@@ -72,7 +72,8 @@ async function loadInventoryAuthContext(userId, userRole) {
   const canViewFinancial = await resolveCanViewFinancial(userId, userRole);
 
   // 3. Department scope
-  let scopeMode         = 'ALL';
+  const defaultScopeMode = userRole === 'operator_restricted' ? 'NONE' : 'ALL';
+  let scopeMode         = defaultScopeMode;
   let includeUnassigned = false;
   let allowedDeptIds    = [];
 
@@ -94,9 +95,9 @@ async function loadInventoryAuthContext(userId, userRole) {
       allowedDeptIds = deptRows.rows.map(r => r.department_id);
     }
   } catch (err) {
-    // Tables may not exist on first deploy before migration — degrade to ALL
+    // Tables may not exist on first deploy before migration — degrade to default
     if (err.code !== '42P01') throw err;
-    scopeMode = 'ALL';
+    scopeMode = defaultScopeMode;
   }
 
   return {
@@ -158,9 +159,8 @@ function stripFinancial(rowOrArray, canViewFinancial) {
 // Returns { clause: string, params: [] } where params is a copy of the input
 // params array with any new param appended.
 //
-// The generated clause uses inv.department_id — callers must alias the
-// inventory table as 'inv' (as the existing inventory.js routes do).
-function buildDeptScopeClause(ctx, params) {
+// The generated clause uses the provided alias (default 'inv').
+function buildDeptScopeClause(ctx, params, alias = 'inv') {
   const { scopeMode, allowedDeptIds, includeUnassigned } = ctx;
 
   if (scopeMode === 'ALL') {
@@ -181,9 +181,9 @@ function buildDeptScopeClause(ctx, params) {
   newParams.push(allowedDeptIds);
   const pIdx = newParams.length;
 
-  let clause = ` AND (inv.department_id = ANY($${pIdx}::int[])`;
+  let clause = ` AND (${alias}.department_id = ANY($${pIdx}::int[])`;
   if (includeUnassigned) {
-    clause += ' OR inv.department_id IS NULL';
+    clause += ` OR ${alias}.department_id IS NULL`;
   }
   clause += ')';
 
