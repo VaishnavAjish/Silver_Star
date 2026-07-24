@@ -2276,19 +2276,24 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
             } else {
               // Return-engine completion: complete the process AND release the
               // machine in THIS transaction — or roll the whole Return back.
-              // Linkage guards first (pure, tested in machineReleaseGuard):
-              // right machine, active process, exactly one active process.
-              const { rows: [{ active_cnt }] } = await client.query(
-                `SELECT COUNT(*) AS active_cnt FROM machine_processes
-                 WHERE machine_id = $1 AND status IN ('running','hold')`,
-                [mp.machine_id]
-              );
-              const release = assessMachineRelease({
-                issueMachineId: issue.machine_id,
-                machineProcess: mp,
-                activeProcessCount: parseInt(active_cnt),
-              });
-              if (!release.ok) throw new Error(release.reason);
+              // If the machine_process has no machine_id (orphaned or machine-
+              // less process), skip the machine release guard — there is no
+              // machine to release. Just complete the process.
+              if (mp.machine_id) {
+                // Linkage guards first (pure, tested in machineReleaseGuard):
+                // right machine, active process, exactly one active process.
+                const { rows: [{ active_cnt }] } = await client.query(
+                  `SELECT COUNT(*) AS active_cnt FROM machine_processes
+                   WHERE machine_id = $1 AND status IN ('running','hold')`,
+                  [mp.machine_id]
+                );
+                const release = assessMachineRelease({
+                  issueMachineId: issue.machine_id,
+                  machineProcess: mp,
+                  activeProcessCount: parseInt(active_cnt),
+                });
+                if (!release.ok) throw new Error(release.reason);
+              }
 
               const mpUpd = await client.query(
                 `UPDATE machine_processes
