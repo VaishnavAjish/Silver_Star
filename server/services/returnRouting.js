@@ -253,8 +253,9 @@ function buildReturnPlan({
   // in place (no child lot, never consumed, never routed to a separate
   // biscuit). Outside GROWTH (laser ops, Final Block transform_in_place)
   // growth_diamond keeps its legacy routes untouched.
+  const carrierCategory = resolveCarrierCategory({ category: processLot.category, name: processLot.item_name });
   const isGrowthCarrier =
-    isGrowthRun || (processLot.category === 'growth_diamond' && isGrowthGroupIssue);
+    isGrowthRun || carrierCategory === 'growth_diamond' || processLot.category === 'growth_diamond';
   const isComponentMode = outputs.some(o => o.component);
   const weightBalanceMode = resolveWeightBalanceMode(outputs);
 

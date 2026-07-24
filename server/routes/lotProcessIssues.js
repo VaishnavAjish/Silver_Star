@@ -1426,7 +1426,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // non-Growth processes (laser ops, Final Block transform) growth_diamond
     // keeps its configured process-specific routes.
     const isGrowthCarrier =
-      isGrowthRun || (carrierCategory === 'growth_diamond' && returnCtx.isGrowthProcess);
+      isGrowthRun || carrierCategory === 'growth_diamond' || processLot.category === 'growth_diamond';
 
     // Phase C: COMPONENT mode (Seed Remove) legitimately posts multiple lines
     // against a biscuit input — the single-disposition rule is QUANTITY-only.
