@@ -15,15 +15,25 @@ async function runGuardedRename() {
   try {
     await client.query('BEGIN');
 
+    // Inspect inventory table columns dynamically
+    const invColsR = await client.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'inventory'`
+    );
+    const invCols = invColsR.rows.map(r => r.column_name);
+
+    // Build dynamic identity query for inventory text columns
+    const textFields = ['lot_name', 'lot_number', 'lot_code'].filter(c => invCols.includes(c));
+    const whereOldClause = textFields.map((c) => `${c} = $1`).join(' OR ');
+
     // 1. Check existing carrier matching old name
     const { rows: existingOld } = await client.query(
-      `SELECT * FROM inventory WHERE lot_name = $1 OR growth_number = $1 OR lot_id = $1 FOR UPDATE`,
+      `SELECT * FROM inventory WHERE ${whereOldClause} FOR UPDATE`,
       [oldName]
     );
 
     // 2. Check collision matching new name
     const { rows: existingNew } = await client.query(
-      `SELECT * FROM inventory WHERE lot_name = $1 OR growth_number = $1 OR lot_id = $1`,
+      `SELECT * FROM inventory WHERE ${whereOldClause}`,
       [newName]
     );
 
@@ -38,7 +48,7 @@ async function runGuardedRename() {
     }
 
     if (existingOld.length === 0 && existingNew.length === 0) {
-      throw new Error(`Carrier with lot_name/growth_number '${oldName}' not found in inventory.`);
+      throw new Error(`Carrier with lot_name/lot_number '${oldName}' not found in inventory.`);
     }
 
     if (existingNew.length > 0 && existingOld.length > 0) {
@@ -57,31 +67,26 @@ async function runGuardedRename() {
     const carrier = existingOld[0];
     console.log('\n--- Target Carrier Pre-Update ---');
     console.log(`Inventory ID: ${carrier.id}`);
-    console.log(`Lot ID: ${carrier.lot_id}`);
-    console.log(`Lot Name: ${carrier.lot_name}`);
-    console.log(`Growth Number: ${carrier.growth_number}`);
-    console.log(`Item ID: ${carrier.item_id}`);
-    console.log(`Qty Pcs: ${carrier.qty_pcs}`);
-    console.log(`Weight Carats: ${carrier.weight_carats}`);
-    console.log(`Dimensions: ${carrier.dimensions}`);
+    console.log(`Lot Name: ${carrier.lot_name || carrier.lot_number}`);
     console.log(`Status: ${carrier.status}`);
-    console.log(`Cost Per Unit: ${carrier.cost_per_unit}`);
-    console.log(`Total Value: ${carrier.total_value}`);
-    console.log(`Root Lot ID: ${carrier.root_lot_id}`);
-    console.log(`Growth Run ID: ${carrier.growth_run_id}`);
     console.log(`Created At: ${carrier.created_at}`);
 
-    // 3. Perform guarded atomic update on inventory carrier
-    const updateInvR = await client.query(
-      `UPDATE inventory
-       SET lot_name = $1,
-           growth_number = CASE WHEN growth_number = $2 THEN $1 ELSE growth_number END,
-           lot_id = CASE WHEN lot_id = $2 THEN $1 ELSE lot_id END,
-           updated_at = NOW()
-       WHERE id = $3 AND (lot_name = $2 OR growth_number = $2 OR lot_id = $2)
-       RETURNING *`,
-      [newName, oldName, carrier.id]
-    );
+    // Build update set clause for existing matching columns
+    const setParts = [];
+
+    if (invCols.includes('lot_name')) {
+      setParts.push(`lot_name = $1`);
+    }
+    if (invCols.includes('lot_number')) {
+      setParts.push(`lot_number = CASE WHEN lot_number = $2 THEN $1 ELSE lot_number END`);
+    }
+    if (invCols.includes('lot_code')) {
+      setParts.push(`lot_code = CASE WHEN lot_code = $2 THEN $1 ELSE lot_code END`);
+    }
+    setParts.push(`updated_at = NOW()`);
+
+    const updateSql = `UPDATE inventory SET ${setParts.join(', ')} WHERE id = $3 RETURNING *`;
+    const updateInvR = await client.query(updateSql, [newName, oldName, carrier.id]);
 
     if (updateInvR.rowCount !== 1) {
       throw new Error(`Failed to update inventory row for ID=${carrier.id}. Row count mismatch.`);
@@ -90,29 +95,30 @@ async function runGuardedRename() {
     const updatedCarrier = updateInvR.rows[0];
 
     // 4. Update active denormalized identity fields in related active workflow tables if present
-    // process_issues (lot_number)
-    const piColR = await client.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = 'process_issues'`
+    const tablesR = await client.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
     );
-    if (piColR.rows.some(r => r.column_name === 'lot_number')) {
-      await client.query(
-        `UPDATE process_issues SET lot_number = $1 WHERE lot_id = $2 AND lot_number = $3`,
-        [newName, carrier.id, oldName]
-      );
+    const allTables = tablesR.rows.map(r => r.table_name);
+
+    if (allTables.includes('process_issues')) {
+      const piCols = (await client.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'process_issues'`)).rows.map(r => r.column_name);
+      if (piCols.includes('lot_number') && piCols.includes('lot_id')) {
+        await client.query(
+          `UPDATE process_issues SET lot_number = $1 WHERE lot_id = $2 AND lot_number = $3`,
+          [newName, carrier.id, oldName]
+        );
+      }
     }
 
-    // barcodes (lot_number / barcode_text)
-    const bcColR = await client.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = 'barcodes'`
-    );
-    if (bcColR.rows.length > 0) {
-      if (bcColR.rows.some(r => r.column_name === 'lot_number')) {
+    if (allTables.includes('barcodes')) {
+      const bcCols = (await client.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'barcodes'`)).rows.map(r => r.column_name);
+      if (bcCols.includes('lot_number') && bcCols.includes('lot_id')) {
         await client.query(
           `UPDATE barcodes SET lot_number = $1 WHERE lot_id = $2 AND lot_number = $3`,
           [newName, carrier.id, oldName]
         );
       }
-      if (bcColR.rows.some(r => r.column_name === 'barcode_text')) {
+      if (bcCols.includes('barcode_text') && bcCols.includes('lot_id')) {
         await client.query(
           `UPDATE barcodes SET barcode_text = $1 WHERE lot_id = $2 AND barcode_text = $3`,
           [newName, carrier.id, oldName]
@@ -120,14 +126,16 @@ async function runGuardedRename() {
       }
     }
 
-    // 5. Insert structured audit log in lot_op_log
+    // 5. Insert structured audit log in lot_op_log if table exists
     const auditReason = `OWNER_AUTHORIZED_LOT_IDENTITY_CORRECTION | OLD: ${oldName} | NEW: ${newName} | NO_NEW_INVENTORY_ROW`;
     
-    await client.query(
-      `INSERT INTO lot_op_log (lot_id, operation, notes, performed_at)
-       VALUES ($1, $2, $3, NOW())`,
-      [carrier.id, 'LOT_RENAME', auditReason]
-    );
+    if (allTables.includes('lot_op_log')) {
+      await client.query(
+        `INSERT INTO lot_op_log (lot_id, operation, notes, performed_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [carrier.id, 'LOT_RENAME', auditReason]
+      );
+    }
 
     await client.query('COMMIT');
     console.log('\nSUCCESS — SAME LOT RENAMED WITHOUT NEW ID');
@@ -160,3 +168,4 @@ if (require.main === module) {
 }
 
 module.exports = { runGuardedRename };
+
