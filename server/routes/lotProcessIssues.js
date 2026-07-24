@@ -1462,7 +1462,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     }
 
     const rough      = usesWeight(processLot);
-    const rate       = parseFloat(processLot.rate);
+    const rate       = parseFloat(processLot.rate || 0);
     const parentCode = (isSeed && processLot.lot_code) ? processLot.lot_code : processLot.lot_number;
     const parentLevel = isSeed ? (parseInt(processLot.split_level) || 0) : 0;
     const parentPath  = isSeed ? (processLot.genealogy_path || parentCode) : null;
@@ -1781,7 +1781,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       // quantity, growth_diamond source, rough target, weight ≤ input.
       if (isTransformReturn) {
         const roughItem = await ensureRoughItem(client);
-        const outputWeight = parseFloat(line.weight);
+        const outputWeight = parseFloat(line.weight || 0);
         await client.query(
           `UPDATE inventory
              SET item_id    = $1,
