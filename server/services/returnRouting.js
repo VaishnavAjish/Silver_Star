@@ -9,6 +9,8 @@
  * FOR UPDATE row images — an earlier preflight response is never trusted.
  */
 
+const { resolveCarrierCategory } = require('./growthCarrier');
+
 const EPS = 0.0001;
 
 const FALLBACK_OUTPUTS = [
