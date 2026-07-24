@@ -692,7 +692,7 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
       WITH pn_paid AS (
         SELECT
           pn.id AS purchase_note_id,
-          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_paid
+          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_paid
         FROM purchase_notes pn
         LEFT JOIN (
           SELECT purchase_note_id, SUM(amount) AS payment_allocated
@@ -706,6 +706,10 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           SELECT purchase_note_id, SUM(amount) AS advance_allocated
           FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
         ) vaa ON vaa.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+          FROM bill_tds_withholdings WHERE status = 'POSTED' GROUP BY purchase_note_id
+        ) btw ON btw.purchase_note_id = pn.id
       ),
       base_data AS (
         SELECT
@@ -738,7 +742,7 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
       WITH pn_paid AS (
         SELECT
           pn.id AS purchase_note_id,
-          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_paid
+          COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_paid
         FROM purchase_notes pn
         LEFT JOIN (
           SELECT purchase_note_id, SUM(amount) AS payment_allocated
@@ -752,6 +756,10 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           SELECT purchase_note_id, SUM(amount) AS advance_allocated
           FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
         ) vaa ON vaa.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+          FROM bill_tds_withholdings WHERE status = 'POSTED' GROUP BY purchase_note_id
+        ) btw ON btw.purchase_note_id = pn.id
       )
       SELECT * FROM (
         SELECT

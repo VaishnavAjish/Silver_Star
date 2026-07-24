@@ -467,4 +467,55 @@ describe('Manual Bill TDS Withholding & Settlement Engine Tests', () => {
     assert.equal(tdsQueryR.rows[0].date, '2026-05-15');
     assert.equal(tdsQueryR.rows[0].date_source, 'EFFECTIVE_DATE');
   });
+
+  it('Reversed TDS withholding must not leak allocations or affect outstanding balance (Adarsh Security Services scenario)', async () => {
+    // Gross Bill: 30667, TDS1 (reversed): 307, TDS2 (posted): 307 => Expected balance: 30360
+    const billR = await pool.primaryPool.query(`
+      INSERT INTO purchase_notes (vendor_id, doc_number, doc_date, grand_total, balance_due, amount_paid, payment_status, status)
+      VALUES ($1, 'TEST-BILL-148', '2026-06-30', 30667.00, 30667.00, 0, 'UNPAID', 'approved')
+      RETURNING id
+    `, [testVendorId]);
+    const billId = billR.rows[0].id;
+
+    // 1. Create TDS-1 (307)
+    const tds1 = await billTdsService.createBillTdsWithholding({
+      purchaseNoteId: billId,
+      vendorId: testVendorId,
+      tdsAmount: 307.00,
+      nature: 'Security Services 194C',
+    });
+
+    // 2. Reverse TDS-1
+    await billTdsService.reverseBillTdsWithholding({
+      withholdingId: tds1.withholding.id,
+      reason: 'Created in error',
+    });
+
+    // 3. Create TDS-2 (307)
+    const tds2 = await billTdsService.createBillTdsWithholding({
+      purchaseNoteId: billId,
+      vendorId: testVendorId,
+      tdsAmount: 307.00,
+      nature: 'Security Services 194C Corrected',
+    });
+
+    // 4. Verify openDocumentService.getBillOutstanding
+    const state = await openDocumentService.getBillOutstanding(billId);
+    assert.equal(parseFloat(state.grand_total), 30667.00);
+    assert.equal(parseFloat(state.tds_allocated), 307.00);
+    assert.equal(parseFloat(state.je_allocated), 0.00, 'TDS JEs must never inject je_allocations');
+    assert.equal(parseFloat(state.outstanding), 30360.00, 'Outstanding balance must be exactly 30360');
+
+    // 5. Verify vendor query open balance for this bill
+    const vRes = await pool.primaryPool.query(`
+      SELECT GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0) - COALESCE(btw_agg.total_tds, 0), 0) AS balance_due
+      FROM purchase_notes pn
+      LEFT JOIN (SELECT purchase_note_id, SUM(amount) AS total_paid FROM payment_allocations GROUP BY purchase_note_id) pa_agg ON pa_agg.purchase_note_id = pn.id
+      LEFT JOIN (SELECT target_id, SUM(allocated_amount) AS total_je FROM je_allocations WHERE target_type = 'bill' GROUP BY target_id) ja_agg ON ja_agg.target_id = pn.id
+      LEFT JOIN (SELECT purchase_note_id, SUM(amount) AS total_advance FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id) vaa_agg ON vaa_agg.purchase_note_id = pn.id
+      LEFT JOIN (SELECT purchase_note_id, SUM(tds_amount) AS total_tds FROM bill_tds_withholdings WHERE status = 'POSTED' GROUP BY purchase_note_id) btw_agg ON btw_agg.purchase_note_id = pn.id
+      WHERE pn.id = $1
+    `, [billId]);
+    assert.equal(parseFloat(vRes.rows[0].balance_due), 30360.00, 'Vendor query balance_due must be exactly 30360');
+  });
 });

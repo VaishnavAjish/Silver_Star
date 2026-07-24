@@ -79,8 +79,8 @@ router.get('/summary', authenticate, async (req, res) => {
             (CASE WHEN pn.payment_term ~ '[0-9]'
                   THEN regexp_replace(pn.payment_term, '[^0-9]', '', 'g')::int
                   ELSE 0 END) AS due_days,
-            COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) AS total_allocated,
-            GREATEST(0, pn.grand_total - (COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0))) AS outstanding
+            COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0) AS total_allocated,
+            GREATEST(0, pn.grand_total - (COALESCE(pa.payment_allocated, 0) + COALESCE(ja.je_allocated, 0) + COALESCE(vaa.advance_allocated, 0) + COALESCE(btw.tds_allocated, 0))) AS outstanding
           FROM purchase_notes pn
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS payment_allocated
@@ -94,6 +94,10 @@ router.get('/summary', authenticate, async (req, res) => {
             SELECT purchase_note_id, SUM(amount) AS advance_allocated
             FROM vendor_advance_applications WHERE status = 'APPLIED' GROUP BY purchase_note_id
           ) vaa ON vaa.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(tds_amount) AS tds_allocated
+            FROM bill_tds_withholdings WHERE status = 'POSTED' GROUP BY purchase_note_id
+          ) btw ON btw.purchase_note_id = pn.id
           WHERE pn.status != 'cancelled'
         ),
         advances AS (
@@ -363,7 +367,7 @@ router.get('/', authenticate, async (req, res) => {
         ),
         vendor_pns AS (
           SELECT pn.id, pn.vendor_id, pn.grand_total, pn.doc_date, pn.payment_term,
-                 GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) AS balance_due
+                 GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0) - COALESCE(btw_agg.total_tds, 0), 0) AS balance_due
           FROM purchase_notes pn
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS total_paid
@@ -382,6 +386,12 @@ router.get('/', authenticate, async (req, res) => {
             WHERE status = 'APPLIED'
             GROUP BY purchase_note_id
           ) vaa_agg ON vaa_agg.purchase_note_id = pn.id
+          LEFT JOIN (
+            SELECT purchase_note_id, SUM(tds_amount) AS total_tds
+            FROM bill_tds_withholdings
+            WHERE status = 'POSTED'
+            GROUP BY purchase_note_id
+          ) btw_agg ON btw_agg.purchase_note_id = pn.id
           WHERE pn.status != 'cancelled' AND pn.payment_status != 'PAID'
             AND pn.vendor_id IN (SELECT id FROM paginated_vendors)
         ),
@@ -458,10 +468,10 @@ router.get('/:id', authenticate, async (req, res) => {
         SELECT
           pn.vendor_id,
           SUM(CASE WHEN pn.payment_status != 'PAID'
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) ELSE 0 END)    AS open_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0) - COALESCE(btw_agg.total_tds, 0), 0) ELSE 0 END)    AS open_balance,
           SUM(CASE WHEN pn.payment_status != 'PAID'
                         AND (pn.doc_date + INTERVAL '1 day' * (${DUE_DAYS_SQL}))::date < CURRENT_DATE
-                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0), 0) ELSE 0 END)    AS raw_overdue_balance,
+                   THEN GREATEST(pn.grand_total - COALESCE(pa_agg.total_paid, 0) - COALESCE(ja_agg.total_je, 0) - COALESCE(vaa_agg.total_advance, 0) - COALESCE(btw_agg.total_tds, 0), 0) ELSE 0 END)    AS raw_overdue_balance,
           (SELECT MAX(p.date) FROM payments p WHERE p.vendor_id = pn.vendor_id) AS last_payment_date
         FROM purchase_notes pn
         LEFT JOIN (
@@ -481,6 +491,12 @@ router.get('/:id', authenticate, async (req, res) => {
           WHERE status = 'APPLIED'
           GROUP BY purchase_note_id
         ) vaa_agg ON vaa_agg.purchase_note_id = pn.id
+        LEFT JOIN (
+          SELECT purchase_note_id, SUM(tds_amount) AS total_tds
+          FROM bill_tds_withholdings
+          WHERE status = 'POSTED'
+          GROUP BY purchase_note_id
+        ) btw_agg ON btw_agg.purchase_note_id = pn.id
         WHERE pn.status != 'cancelled' AND pn.vendor_id = $1 AND pn.payment_status != 'PAID'
         GROUP BY pn.vendor_id
       ) b ON b.vendor_id = v.id

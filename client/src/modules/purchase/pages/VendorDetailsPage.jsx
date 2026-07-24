@@ -461,6 +461,7 @@ export default function VendorDetailsPage() {
                   <div key={i} style={{
                     padding: '10px 16px', background: c.bg, borderRadius: 8,
                     border: '1px solid var(--g200)', display: 'flex', alignItems: 'center', gap: 10,
+                    flex: '1 1 150px', minWidth: 150,
                   }}>
                     <span style={{ color: c.c }}>{c.icon}</span>
                     <div>
@@ -568,8 +569,8 @@ export default function VendorDetailsPage() {
                         )}
                       </div>
 
-                      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 350px)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                        <table className="dgrid" style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0, minWidth: 700 }}>
+                      <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 250, borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <table className="dgrid" style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 700 }}>
                           <thead>
                             <tr>
                               <th style={{ width: 100, position: 'sticky', top: 0, zIndex: 2, background: 'var(--g50, #f8f9fa)', boxShadow: '0 1px 0 var(--border)' }}>Date</th>
