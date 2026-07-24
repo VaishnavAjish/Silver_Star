@@ -1270,8 +1270,10 @@ export default function InventoryPage() {
         </div>
         <span>
           {total} lots &nbsp;|&nbsp;
-          Total qty: {totals.qty.toLocaleString('en-IN', { maximumFractionDigits: 4 })} &nbsp;|&nbsp;
-          ₹{totals.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          Total qty: {Number(totals?.qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 4 })}
+          {totals?.value != null && (
+            <> &nbsp;|&nbsp; ₹{Number(totals.value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</>
+          )}
         </span>
       </div>
 
