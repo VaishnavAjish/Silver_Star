@@ -2347,6 +2347,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       outcomes,
     });
   } catch (err) {
+    console.error('[RETURN-ERROR] Issue', issueId, ':', err.message, err.stack);
     await client.query('ROLLBACK');
     return res.status(400).json({ error: err.message });
   } finally { client.release(); }
