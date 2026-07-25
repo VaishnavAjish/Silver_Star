@@ -190,6 +190,39 @@ function TopExpensesWidget({ data }) {
   );
 }
 
+// ─── Operator Operations ─────────────────────────────────────────────────────────
+function OperatorOperationsWidget({ data }) {
+  const { primary, secondary } = data;
+  if (!primary) return <div className="wd-empty">No operator data available</div>;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '16px' }}>
+      <div className="wd-stat">
+        <div className="wd-stat-big" style={{ color: '#0D7C5F' }}>{primary.visibleInventory}</div>
+        <div className="wd-stat-sub">Visible Inventory</div>
+      </div>
+      <div className="wd-stat">
+        <div className="wd-stat-big" style={{ color: '#E87722' }}>{primary.inProcessLots}</div>
+        <div className="wd-stat-sub">In-Process Lots</div>
+      </div>
+      <div className="wd-stat">
+        <div className="wd-stat-big" style={{ color: '#1565C0' }}>{primary.growthInProcess}</div>
+        <div className="wd-stat-sub">Growth in Process</div>
+      </div>
+      <div className="wd-stat">
+        <div className="wd-stat-big" style={{ color: '#455A64' }}>
+          {primary.machines?.running || 0} / {primary.machines?.available || 0}
+        </div>
+        <div className="wd-stat-sub">Running / Avail. Machines</div>
+      </div>
+      <div className="wd-stat">
+        <div className="wd-stat-big" style={{ color: '#D32F2F' }}>{primary.overdueProcesses}</div>
+        <div className="wd-stat-sub">Overdue Processes</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 const RENDERERS = {
   profit_loss_summary: ProfitLossWidget,
@@ -200,6 +233,7 @@ const RENDERERS = {
   accounts_receivable: ARWidget,
   accounts_payable:    APWidget,
   top_expenses:        TopExpensesWidget,
+  operator_operations: OperatorOperationsWidget,
 };
 
 export function renderWidget(key, data) {

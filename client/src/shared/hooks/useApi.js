@@ -89,7 +89,9 @@ export function useApi() {
     if (res.status === 204) return null;
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
+      const errorObj = new Error(err.error || `HTTP ${res.status}`);
+      errorObj.status = res.status;
+      throw errorObj;
     }
     return res.json();
   }, [auth]);

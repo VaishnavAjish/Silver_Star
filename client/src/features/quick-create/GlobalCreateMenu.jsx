@@ -43,6 +43,7 @@ export default function GlobalCreateMenu() {
   const go = (path) => { setOpen(false); navigate(path); };
 
   let globalItemIdx = 0;
+  if (grouped.length === 0) return null;
 
   return (
     <div className="gcm-wrap">

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
 import { WIDGET_REGISTRY } from './widgetRegistry';
 import { renderWidget } from './DashboardWidgets';
+import AccessRestricted from '../../../shared/components/AccessRestricted';
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 function Skeleton({ size }) {
@@ -23,6 +24,7 @@ function Skeleton({ size }) {
 }
 
 // ─── WidgetCard ───────────────────────────────────────────────────────────────
+
 export default function WidgetCard({ widgetKey }) {
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
@@ -33,9 +35,30 @@ export default function WidgetCard({ widgetKey }) {
   const loadData = (showSpinner = false) => {
     let active = true;
     if (showSpinner) { setLoading(true); setError(null); }
-    api.get(`/api/dashboard/widget/${widgetKey}`)
-      .then(res  => { if (active) { setData(res.data); setError(null); setLoading(false); } })
-      .catch(err => { if (active) { setError(err.message); setLoading(false); } });
+    
+    const endpoint = widgetKey === 'operator_operations' 
+      ? '/api/dashboard/operator-summary' 
+      : `/api/dashboard/widget/${widgetKey}`;
+
+    api.get(endpoint)
+      .then(res  => { 
+        if (active) { 
+          setData(widgetKey === 'operator_operations' ? res : res.data); 
+          setError(null); 
+          setLoading(false); 
+        } 
+      })
+      .catch(err => { 
+        if (active) { 
+          if (err.status === 404) {
+            setData({ _gracefulEmpty: true });
+            setError(null);
+          } else {
+            setError(err); 
+          }
+          setLoading(false); 
+        } 
+      });
     return () => { active = false; };
   };
 
@@ -64,8 +87,9 @@ export default function WidgetCard({ widgetKey }) {
       {/* Card body */}
       <div className="wc-body">
         {loading && <Skeleton size={meta.size} />}
-        {!loading && error  && <div className="wd-error">Could not load — {error}</div>}
-        {!loading && !error && data != null && renderWidget(widgetKey, data)}
+        {!loading && error?.status === 403 && <AccessRestricted />}
+        {!loading && error && error.status !== 403 && <div className="wd-error">Could not load — {error.message}</div>}
+        {!loading && !error && data != null && (data._gracefulEmpty ? <div className="wd-empty">0 (No data)</div> : renderWidget(widgetKey, data))}
         {!loading && !error && data == null && <div className="wd-empty">No data available</div>}
       </div>
     </div>

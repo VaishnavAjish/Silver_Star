@@ -62,6 +62,13 @@ export const WIDGET_REGISTRY = {
     icon:        Building2,
     color:       '#E87722',
   },
+  operator_operations: {
+    title:       'Operations Overview',
+    description: 'Real-time manufacturing and inventory status',
+    size:        'full',
+    icon:        TrendingUp,
+    color:       '#0D7C5F',
+  },
 };
 
 export const ALL_WIDGET_KEYS = Object.keys(WIDGET_REGISTRY);
