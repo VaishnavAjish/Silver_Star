@@ -133,7 +133,7 @@ function Toggle({ checked, onChange, disabled }) {
 }
 
 /* ── Drawer ─────────────────────────────────────────────────── */
-export default function UserDrawer({ user, onClose, onSaved }) {
+export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
   const api = useApi();
   const { user: me, refreshUser } = useAuth();
 
@@ -471,32 +471,23 @@ export default function UserDrawer({ user, onClose, onSaved }) {
                     </div>
                   </div>
                   
-                  {/* Share Template UI */}
-                  {!isSelf && (
+                  {/* Advanced Actions */}
+                  {!isSelf && onCopySetup && (
                     <div style={{ marginTop: 24, padding: '16px', background: 'var(--g50)', borderRadius: 8, border: '1px solid var(--g200)' }}>
-                      <h4 style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--g800)' }}>Share Inventory Template</h4>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--g800)' }}>Advanced Actions</h4>
                       <p style={{ fontSize: 11, color: 'var(--g500)', marginBottom: 12 }}>
-                        Share one of your inventory templates with this user.
+                        Copy permissions, data visibility, dashboard layout, and templates from an existing user to quickly configure this account.
                       </p>
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        <SelectDropdown 
-                          value={selectedTemplateToShare} 
-                          onChange={e => setSelectedTemplateToShare(e.target.value)}
-                          style={{ flex: 1 }}
-                        >
-                          <option value="">— Select Template —</option>
-                          {myTemplates.filter(t => !t.is_global).map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </SelectDropdown>
-                        <button 
-                          className="btn btn-primary" 
-                          onClick={handleShareTemplate}
-                          disabled={!selectedTemplateToShare || sharingTemplate}
-                        >
-                          {sharingTemplate ? 'Sharing...' : 'Share Template'}
-                        </button>
-                      </div>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onCopySetup(user);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <Copy size={14} /> Copy Setup From Existing User...
+                      </button>
                     </div>
                   )}
                 </div>

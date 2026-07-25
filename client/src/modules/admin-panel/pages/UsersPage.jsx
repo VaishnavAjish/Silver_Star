@@ -8,6 +8,7 @@ import Modal from '../../../shared/components/Modal';
 import UserDrawer from './UserDrawer';
 import UserAuditHistoryModal from '../components/UserAuditHistoryModal';
 import AuditUserHistory from '../components/AuditUserHistory';
+import CopyUserSetupModal from '../components/CopyUserSetupModal';
 import {
   Plus, Edit2, ToggleLeft, ToggleRight, Users, Search, Save,
   ShieldCheck, UserCheck, UserX, Shield, Trash2, Copy, Edit3, X,
@@ -97,6 +98,9 @@ export default function UsersPage() {
   const [form,        setForm]        = useState(EMPTY_FORM);
   const [drawerUser,  setDrawerUser]  = useState(null);
   const [departments, setDepartments] = useState([]);
+  
+  // New state for Copy Setup workflow
+  const [createdUserForSetup, setCreatedUserForSetup] = useState(null);
 
   const loadUsers = useCallback(() => {
     setUsersLoading(true);
@@ -126,11 +130,13 @@ export default function UsersPage() {
     if (form.password.length < 6) return toast.error('Password must be at least 6 characters');
     setSaving(true);
     try {
-      await apiRef.current.post('/api/admin/users', form);
-      toast.success('User created');
+      const newUser = await apiRef.current.post('/api/admin/users', form);
+      toast.success('User created successfully');
       setAddOpen(false);
       loadUsers();
-    } catch (err) { toast.error(err.message); }
+      // Trigger the Copy Setup workflow
+      setCreatedUserForSetup(newUser.data || newUser);
+    } catch (err) { toast.error(err.response?.data?.error || err.message); }
     finally { setSaving(false); }
   };
 
@@ -1114,7 +1120,20 @@ export default function UsersPage() {
         user={drawerUser}
         onClose={() => setDrawerUser(null)}
         onSaved={loadUsers}
+        onCopySetup={setCreatedUserForSetup}
       />
+
+      {/* ── Copy User Setup modal ── */}
+      {createdUserForSetup && (
+        <CopyUserSetupModal
+          targetUser={createdUserForSetup}
+          users={usersList}
+          onClose={() => setCreatedUserForSetup(null)}
+          onSuccess={() => {
+            // Optional: loadUsers() again if needed, but it's already done
+          }}
+        />
+      )}
 
       {/* ── User Audit History modal ── */}
       {selectedUserForHistory && (

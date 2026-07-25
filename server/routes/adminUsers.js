@@ -291,5 +291,160 @@ router.get('/users/:id/effective-access', ...adminOnly, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// GET /api/admin/users/:id/setup-summary
+// Fetches counts of permissions, templates, etc. to preview copy setup
+router.get('/users/:id/setup-summary', ...adminOnly, async (req, res) => {
+  const sourceId = Number(req.params.id);
+  try {
+    const qPerms = pool.query('SELECT COUNT(*) FROM user_permissions WHERE user_id = $1', [sourceId]);
+    const qPrefs = pool.query('SELECT COUNT(*) FROM user_preferences WHERE user_id = $1', [sourceId]);
+    const qDash  = pool.query('SELECT COUNT(*) FROM user_dashboard_widgets WHERE user_id = $1', [sourceId]);
+    const qTmpl  = pool.query('SELECT COUNT(*) FROM template_shares WHERE user_id = $1', [sourceId]);
+    
+    // Also include templates created by them that are not global
+    const qOwnTmpl = pool.query('SELECT COUNT(*) FROM inventory_templates WHERE created_by = $1 AND is_global = false', [sourceId]);
+
+    const qScope = pool.query('SELECT scope_mode FROM user_inventory_scopes WHERE user_id = $1', [sourceId]);
+    const qDepts = pool.query('SELECT COUNT(*) FROM user_inventory_scope_depts WHERE user_id = $1', [sourceId]);
+
+    const [perms, prefs, dash, tmpl, ownTmpl, scope, depts] = await Promise.all([qPerms, qPrefs, qDash, qTmpl, qOwnTmpl, qScope, qDepts]);
+
+    res.json({
+      permissions_count: parseInt(perms.rows[0].count),
+      preferences_count: parseInt(prefs.rows[0].count),
+      dashboard_count: parseInt(dash.rows[0].count),
+      shared_templates_count: parseInt(tmpl.rows[0].count),
+      owned_templates_count: parseInt(ownTmpl.rows[0].count),
+      scope_mode: scope.rows.length ? scope.rows[0].scope_mode : 'ALL',
+      scope_depts_count: parseInt(depts.rows[0].count),
+    });
+  } catch (err) {
+    logger.error('GET setup-summary error:', { error: err.message });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/admin/users/:id/copy-setup
+// Copies selected configurations from source user to target user (:id)
+router.post('/users/:id/copy-setup', ...adminOnly, async (req, res) => {
+  const targetId = Number(req.params.id);
+  const { 
+    source_user_id, 
+    copy_permissions, 
+    copy_visibility, 
+    copy_preferences, 
+    copy_dashboard, 
+    copy_templates 
+  } = req.body;
+
+  if (!source_user_id) return res.status(400).json({ error: 'source_user_id is required' });
+  if (targetId === Number(source_user_id)) return res.status(400).json({ error: 'Cannot copy setup to self' });
+
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Copy Permissions
+    if (copy_permissions) {
+      await client.query('DELETE FROM user_permissions WHERE user_id = $1', [targetId]);
+      await client.query(
+        `INSERT INTO user_permissions (user_id, module, permission_key, allowed)
+         SELECT $1, module, permission_key, allowed 
+         FROM user_permissions WHERE user_id = $2`,
+        [targetId, source_user_id]
+      );
+    }
+
+    // Copy Inventory Visibility
+    if (copy_visibility) {
+      await client.query('DELETE FROM user_inventory_scopes WHERE user_id = $1', [targetId]);
+      await client.query('DELETE FROM user_inventory_scope_depts WHERE user_id = $1', [targetId]);
+      
+      await client.query(
+        `INSERT INTO user_inventory_scopes (user_id, scope_mode, include_unassigned, updated_by, updated_at, created_by)
+         SELECT $1, scope_mode, include_unassigned, $3, NOW(), $3
+         FROM user_inventory_scopes WHERE user_id = $2`,
+        [targetId, source_user_id, req.user.id]
+      );
+
+      await client.query(
+        `INSERT INTO user_inventory_scope_depts (user_id, department_id)
+         SELECT $1, department_id 
+         FROM user_inventory_scope_depts WHERE user_id = $2`,
+        [targetId, source_user_id]
+      );
+    }
+
+    // Copy Preferences
+    if (copy_preferences) {
+      await client.query('DELETE FROM user_preferences WHERE user_id = $1', [targetId]);
+      await client.query(
+        `INSERT INTO user_preferences (user_id, pref_key, pref_value)
+         SELECT $1, pref_key, pref_value 
+         FROM user_preferences WHERE user_id = $2`,
+        [targetId, source_user_id]
+      );
+    }
+
+    // Copy Dashboard Config
+    if (copy_dashboard) {
+      await client.query('DELETE FROM user_dashboard_widgets WHERE user_id = $1', [targetId]);
+      await client.query(
+        `INSERT INTO user_dashboard_widgets (user_id, widget_key, position, is_visible)
+         SELECT $1, widget_key, position, is_visible 
+         FROM user_dashboard_widgets WHERE user_id = $2`,
+        [targetId, source_user_id]
+      );
+    }
+
+    // Copy Templates
+    if (copy_templates) {
+      await client.query('DELETE FROM template_shares WHERE user_id = $1', [targetId]);
+      
+      // 1. Copy explicit shares
+      await client.query(
+        `INSERT INTO template_shares (user_id, template_id)
+         SELECT $1, template_id 
+         FROM template_shares WHERE user_id = $2`,
+        [targetId, source_user_id]
+      );
+      
+      // 2. Also share templates that the source user created (which are not global)
+      await client.query(
+        `INSERT INTO template_shares (user_id, template_id)
+         SELECT $1, id 
+         FROM inventory_templates 
+         WHERE created_by = $2 AND is_global = false
+         ON CONFLICT DO NOTHING`,
+        [targetId, source_user_id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // Audit log
+    await auditLog(pool, req.user.id, 'copy_user_setup', 'user', targetId, {
+      source_user_id,
+      copied: { copy_permissions, copy_visibility, copy_preferences, copy_dashboard, copy_templates }
+    }, req);
+
+    // Real-Time Events
+    if (copy_permissions || copy_visibility) {
+      const { dispatchPermissionChange } = require('../services/eventDispatcher');
+      dispatchPermissionChange(targetId, { changedBy: req.user.id, reason: 'copy_setup' });
+    }
+    if (copy_dashboard) {
+      dispatchEvent('dashboard.widget.updated', { user_id: targetId, module: 'dashboard' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error('POST copy-setup error:', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
 
 module.exports = router;
