@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth, ROLE_DEFAULTS } from '../../../core/context/AuthContext';
-import { X, Save, Key, User, Shield, Eye, Settings, Lock, AlertTriangle, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { X, Save, Key, User, Shield, Eye, Settings, Lock, AlertTriangle, ChevronDown, ChevronRight, Info, Copy } from 'lucide-react';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import toast from 'react-hot-toast';
 import { MODULE_TREE, PERM_BITS, ACTIONS as PERM_ACTIONS, FULL_ACCESS } from '../../../shared/constants/permissions';
