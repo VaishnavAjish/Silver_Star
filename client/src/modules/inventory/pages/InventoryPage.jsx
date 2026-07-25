@@ -177,7 +177,7 @@ export default function InventoryPage() {
       const res = await api.get('/api/inventory-templates');
       if (Array.isArray(res)) {
         setDbTemplates(res);
-        setUserTemplates(res.map(t => {
+        const mapped = res.map(t => {
           const rawCols = t.columns_config || [];
           const migratedCols = Array.isArray(rawCols) ? rawCols : [];
           return {
@@ -189,7 +189,9 @@ export default function InventoryPage() {
             isGlobal: t.is_global,
             author: t.full_name || null
           };
-        }));
+        });
+        setUserTemplates(mapped);
+        localStorage.setItem('inv_user_templates_v2', JSON.stringify(mapped));
       }
     } catch (err) { console.error(err); }
   }, [api]);
