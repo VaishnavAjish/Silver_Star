@@ -112,33 +112,45 @@ export default function InventoryPage() {
   const [urlParams, setUrlParams] = useSearchParams();
   const { hasRole, hasPermission } = useAuth();
 
-  const [search, setSearch] = useState(urlParams.get('q') || '');
-  const [searchInput, setSearchInput] = useState(urlParams.get('q') || '');
-  const [catFilter, setCatFilter] = useState(urlParams.get('cat') || '');
-  const [statusFilt, setStatusFilt] = useState(urlParams.get('status') || '');
-  const [opType, setOpType] = useState(urlParams.get('op') || '');
-  const [processFilter, setProcessFilter] = useState(urlParams.get('process') || '');
-  const [sortBy, setSortBy] = useState(urlParams.get('sort') || 'lot_op_id');
-  const [sortDir, setSortDir] = useState(urlParams.get('sort_dir') || 'desc');
-  const [dateFrom, setDateFrom] = useState(urlParams.get('from') || '');
-  const [dateTo, setDateTo] = useState(urlParams.get('to') || '');
-  const [mixOnly, setMixOnly] = useState(urlParams.get('mix') === 'true');
-  const [splitOnly, setSplitOnly] = useState(urlParams.get('split') === 'true');
-  const [vendorFilter, setVendorFilter] = useState(urlParams.get('vendor') || '');
-  const [locationFilter, setLocationFilter] = useState(urlParams.get('location_id') || '');
-  const [accountBaseFilter, setAccountBaseFilter] = useState(urlParams.get('account_base_id') || '');
-  const [qtyMin, setQtyMin] = useState(urlParams.get('qty_min') || '');
-  const [qtyMax, setQtyMax] = useState(urlParams.get('qty_max') || '');
-  const [weightMin, setWeightMin] = useState(urlParams.get('wt_min') || '');
-  const [weightMax, setWeightMax] = useState(urlParams.get('wt_max') || '');
-  const [page, setPage] = useState(parseInt(urlParams.get('page') || '1'));
-
   const [activeTemplateId, setActiveTemplateId] = useState(initActiveTemplateId);
   const [userTemplates, setUserTemplates] = useState(loadUserTemplates);
   const [colOverrides, setColOverrides] = useState(loadColOverrides);
   const [defaultTemplateId, setDefaultTemplateId] = useState(
     () => localStorage.getItem('inv_default_template') || 'basic'
   );
+
+  const initialTemplateFilters = useMemo(() => {
+    const hasExplicitFilter = ['q', 'cat', 'status', 'op', 'process', 'sort', 'from', 'to', 'mix', 'split', 'vendor', 'location_id', 'account_base_id', 'qty_min', 'qty_max', 'wt_min', 'wt_max'].some(k => urlParams.has(k));
+    if (hasExplicitFilter) return null;
+    
+    // Fall back to active template filters if no explicit URL filters
+    const allTmpls = [...Object.values(SYSTEM_TEMPLATES), ...loadUserTemplates()];
+    const tmpl = allTmpls.find(t => t.id === initActiveTemplateId());
+    return tmpl?.filters || null;
+  }, [urlParams]);
+
+  const [search, setSearch] = useState(urlParams.get('q') || initialTemplateFilters?.search || '');
+  const [searchInput, setSearchInput] = useState(urlParams.get('q') || initialTemplateFilters?.search || '');
+  const [catFilter, setCatFilter] = useState(urlParams.get('cat') || initialTemplateFilters?.catFilter || '');
+  const [statusFilt, setStatusFilt] = useState(urlParams.get('status') || initialTemplateFilters?.statusFilt || '');
+  const [opType, setOpType] = useState(urlParams.get('op') || initialTemplateFilters?.opType || '');
+  const [processFilter, setProcessFilter] = useState(urlParams.get('process') || initialTemplateFilters?.processFilter || '');
+  const [sortBy, setSortBy] = useState(urlParams.get('sort') || initialTemplateFilters?.sortBy || 'lot_op_id');
+  const [sortDir, setSortDir] = useState(urlParams.get('sort_dir') || initialTemplateFilters?.sortDir || 'desc');
+  const [dateFrom, setDateFrom] = useState(urlParams.get('from') || initialTemplateFilters?.dateFrom || '');
+  const [dateTo, setDateTo] = useState(urlParams.get('to') || initialTemplateFilters?.dateTo || '');
+  
+  const [mixOnly, setMixOnly] = useState(urlParams.has('mix') ? urlParams.get('mix') === 'true' : !!initialTemplateFilters?.mixOnly);
+  const [splitOnly, setSplitOnly] = useState(urlParams.has('split') ? urlParams.get('split') === 'true' : !!initialTemplateFilters?.splitOnly);
+  
+  const [vendorFilter, setVendorFilter] = useState(urlParams.get('vendor') || initialTemplateFilters?.vendorFilter || '');
+  const [locationFilter, setLocationFilter] = useState(urlParams.get('location_id') || initialTemplateFilters?.locationFilter || '');
+  const [accountBaseFilter, setAccountBaseFilter] = useState(urlParams.get('account_base_id') || initialTemplateFilters?.accountBaseFilter || '');
+  const [qtyMin, setQtyMin] = useState(urlParams.get('qty_min') || initialTemplateFilters?.qtyMin || '');
+  const [qtyMax, setQtyMax] = useState(urlParams.get('qty_max') || initialTemplateFilters?.qtyMax || '');
+  const [weightMin, setWeightMin] = useState(urlParams.get('wt_min') || initialTemplateFilters?.weightMin || '');
+  const [weightMax, setWeightMax] = useState(urlParams.get('wt_max') || initialTemplateFilters?.weightMax || '');
+  const [page, setPage] = useState(parseInt(urlParams.get('page') || '1'));
 
   const [dbTemplates, setDbTemplates] = useState([]);
   const fetchTemplates = useCallback(async () => {
