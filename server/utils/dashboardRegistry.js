@@ -39,18 +39,15 @@ const DASHBOARD_SHORTCUTS = [
 ];
 
 const DASHBOARD_WIDGETS = [
-  { id: 'operator_operations', module: 'inventory', submodule: 'all_inventory', preset: 'Operator Operations' },
-  { id: 'inventory_summary', module: 'inventory', submodule: 'all_inventory', preset: 'Inventory' },
-  { id: 'lot_movement_chart', module: 'inventory', submodule: 'lot_movements', preset: 'Inventory' },
-  { id: 'stock_distribution', module: 'inventory', submodule: 'all_inventory', preset: 'Inventory' },
-  { id: 'process_throughput', module: 'inventory', submodule: 'process_issues', preset: 'Manufacturing' },
-  { id: 'machine_status', module: 'management', submodule: 'machines', preset: 'Manufacturing' },
-  { id: 'growth_yield', module: 'rough', submodule: 'rough_growth', preset: 'Manufacturing' },
-  { id: 'sales_revenue', module: 'sales', submodule: 'invoice', preset: 'Management' },
-  { id: 'top_customers', module: 'sales', submodule: 'customers', preset: 'Management' },
-  { id: 'cash_flow', module: 'accounting', submodule: 'payments', preset: 'Accounts' }, // Approximate check
-  { id: 'ar_aging', module: 'reports', submodule: 'accounts_receivable', preset: 'Accounts' },
-  { id: 'ap_aging', module: 'reports', submodule: 'accounts_payable', preset: 'Accounts' }
+  { id: 'profit_loss_summary', module: 'reports', submodule: 'profit_loss' },
+  { id: 'bank_balance',        module: 'accounting', submodule: 'chart_of_accounts' },
+  { id: 'sales_trend',         module: 'sales', submodule: 'invoice' },
+  { id: 'expenses_chart',      module: 'purchase', submodule: 'purchase_notes' },
+  { id: 'cash_flow_chart',     module: 'accounting', submodule: 'payments' },
+  { id: 'accounts_receivable', module: 'reports', submodule: 'accounts_receivable' },
+  { id: 'accounts_payable',    module: 'reports', submodule: 'accounts_payable' },
+  { id: 'top_expenses',        module: 'purchase', submodule: 'purchase_notes' },
+  { id: 'operator_operations', module: 'inventory', submodule: 'all_inventory' },
 ];
 
 const PRESETS = [

@@ -618,7 +618,7 @@ router.post('/refresh', authenticate, async (req, res) => {
   }
 });
 
-const { buildDeptScopeClause } = require('../services/inventoryAuth');
+const { buildDeptScopeClause, loadInventoryAuthContext } = require('../services/inventoryAuth');
 
 // ─── GET /api/dashboard/operator-summary ────────────────────────────────
 router.get('/operator-summary', authenticate, async (req, res) => {
@@ -638,69 +638,80 @@ router.get('/operator-summary', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Permission denied: requires inventory or manufacturing view permission' });
     }
 
-    const { clause: deptClause, params: deptParams } = buildDeptScopeClause(req.user, 'inv', 1);
+    // Load the proper auth context for department scoping
+    const authCtx = await loadInventoryAuthContext(userId, role);
+    const { clause: deptClause, params: deptParams } = buildDeptScopeClause(authCtx, [], 'inv');
 
-    // Primary Metrics
-    // 1. Visible Inventory
-    const visibleInvRes = await query(`
-      SELECT COUNT(*) as count 
-      FROM inventory inv 
-      WHERE status = 'IN STOCK' 
-      ${deptClause ? 'AND ' + deptClause : ''}
-    `, deptParams);
-    
-    // 2. In-Process Lots
-    const inProcessRes = await query(`
-      SELECT COUNT(*) as count 
-      FROM inventory inv 
-      WHERE status = 'IN PROCESS'
-      ${deptClause ? 'AND ' + deptClause : ''}
-    `, deptParams);
-    
-    // 3. Machines (Running / Available / Hold)
-    const { clause: mDeptClause, params: mDeptParams } = buildDeptScopeClause(req.user, 'm', 1);
-    const machinesRes = await query(`
-      SELECT 
-        COUNT(*) FILTER (WHERE status = 'running') as running,
-        COUNT(*) FILTER (WHERE status = 'available') as available,
-        COUNT(*) FILTER (WHERE status = 'maintenance') as hold
-      FROM machines m
-      WHERE 1=1 ${mDeptClause ? 'AND ' + mDeptClause : ''}
-    `, mDeptParams);
+    // Primary Metrics — each wrapped in try/catch for table resilience
+    let visibleInventory = 0, inProcessLots = 0;
+    try {
+      const visibleInvRes = await query(`
+        SELECT COUNT(*) as count 
+        FROM inventory inv 
+        WHERE status = 'IN STOCK' 
+        ${deptClause}
+      `, deptParams);
+      visibleInventory = parseInt(visibleInvRes.rows[0].count) || 0;
+    } catch (e) { logger.warn('[operator-summary] visibleInventory query failed:', e.message); }
 
-    // 4. Growth in Process (Rough Growth)
-    const { clause: rgDeptClause, params: rgDeptParams } = buildDeptScopeClause(req.user, 'gr', 1);
-    const growthRes = await query(`
-      SELECT COUNT(*) as count 
-      FROM growth_runs gr 
-      WHERE status = 'active'
-      ${rgDeptClause ? 'AND ' + rgDeptClause : ''}
-    `, rgDeptParams);
+    try {
+      const inProcessRes = await query(`
+        SELECT COUNT(*) as count 
+        FROM inventory inv 
+        WHERE status = 'IN PROCESS'
+        ${deptClause}
+      `, deptParams);
+      inProcessLots = parseInt(inProcessRes.rows[0].count) || 0;
+    } catch (e) { logger.warn('[operator-summary] inProcessLots query failed:', e.message); }
 
-    // 5. Overdue Processes
-    const { clause: opDeptClause, params: opDeptParams } = buildDeptScopeClause(req.user, 'pl', 1);
-    const overdueRes = await query(`
-      SELECT COUNT(*) as count 
-      FROM process_lots pl 
-      WHERE status = 'issued' AND expected_return_date < NOW()
-      ${opDeptClause ? 'AND ' + opDeptClause : ''}
-    `, opDeptParams);
+    // Machines
+    let machines = { running: 0, available: 0, hold: 0 };
+    try {
+      const machinesRes = await query(`
+        SELECT 
+          COUNT(*) FILTER (WHERE status = 'running') as running,
+          COUNT(*) FILTER (WHERE status = 'available') as available,
+          COUNT(*) FILTER (WHERE status = 'maintenance') as hold
+        FROM machines
+      `);
+      machines = {
+        running: parseInt(machinesRes.rows[0].running) || 0,
+        available: parseInt(machinesRes.rows[0].available) || 0,
+        hold: parseInt(machinesRes.rows[0].hold) || 0,
+      };
+    } catch (e) { logger.warn('[operator-summary] machines query failed:', e.message); }
 
-    // Note: Ready for return, Holds/Needs Reconciliation are also placeholders for now
-    
+    // Growth in Process
+    let growthInProcess = 0;
+    try {
+      const growthRes = await query(`
+        SELECT COUNT(*) as count 
+        FROM growth_runs 
+        WHERE status = 'active'
+      `);
+      growthInProcess = parseInt(growthRes.rows[0].count) || 0;
+    } catch (e) { logger.warn('[operator-summary] growthInProcess query failed:', e.message); }
+
+    // Overdue Processes
+    let overdueProcesses = 0;
+    try {
+      const overdueRes = await query(`
+        SELECT COUNT(*) as count 
+        FROM process_lots 
+        WHERE status = 'issued' AND expected_return_date < NOW()
+      `);
+      overdueProcesses = parseInt(overdueRes.rows[0].count) || 0;
+    } catch (e) { logger.warn('[operator-summary] overdueProcesses query failed:', e.message); }
+
     res.json({
       primary: {
-        visibleInventory: parseInt(visibleInvRes.rows[0].count) || 0,
-        inProcessLots: parseInt(inProcessRes.rows[0].count) || 0,
-        machines: {
-          running: parseInt(machinesRes.rows[0].running) || 0,
-          available: parseInt(machinesRes.rows[0].available) || 0,
-          hold: parseInt(machinesRes.rows[0].hold) || 0,
-        },
-        growthInProcess: parseInt(growthRes.rows[0].count) || 0,
-        readyForReturn: 0, // Placeholder
-        overdueProcesses: parseInt(overdueRes.rows[0].count) || 0,
-        holds: 0, // Placeholder
+        visibleInventory,
+        inProcessLots,
+        machines,
+        growthInProcess,
+        readyForReturn: 0,
+        overdueProcesses,
+        holds: 0,
       },
       secondary: {
         todaysIssues: 0,
