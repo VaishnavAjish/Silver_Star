@@ -1029,9 +1029,9 @@ router.put('/edit/:id', authenticate, async (req, res) => {
     // Log the change
     const remarks = `Manual Edit: Qty ${lot.qty}->${newQty}, Wt ${lot.weight}->${newWeight}, L ${lot.dim_length}->${newLength}, D ${lot.dim_depth}->${newDepth}, H ${lot.dim_height}->${newHeight}, Unit ${lot.dim_unit}->${newUnit}`;
     await client.query(`
-      INSERT INTO lot_op_log (lot_id, user_id, operation, remarks, location_id, department_id, qty, weight)
-      VALUES ($1, $2, 'manual_edit', $3, $4, $5, $6, $7)
-    `, [id, req.user.id, remarks, lot.location_id, lot.department_id, newQty, newWeight]);
+      INSERT INTO lot_op_log (lot_id, performed_by, operation, notes)
+      VALUES ($1, $2, 'manual_edit', $3)
+    `, [id, req.user.id, remarks]);
 
     await client.query('COMMIT');
     res.json(upd.rows[0]);
