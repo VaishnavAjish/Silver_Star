@@ -1012,11 +1012,11 @@ router.put('/edit/:id', authenticate, async (req, res) => {
     }
     const lot = currRes.rows[0];
 
-    const newQty = qty !== undefined ? parseFloat(qty) : lot.qty;
-    const newWeight = weight !== undefined ? parseFloat(weight) : lot.weight;
-    const newLength = dim_length !== undefined ? parseFloat(dim_length) : lot.dim_length;
-    const newDepth = dim_depth !== undefined ? parseFloat(dim_depth) : lot.dim_depth;
-    const newHeight = dim_height !== undefined ? parseFloat(dim_height) : lot.dim_height;
+    const newQty = qty !== undefined ? (qty === null ? null : parseFloat(qty)) : lot.qty;
+    const newWeight = weight !== undefined ? (weight === null ? null : parseFloat(weight)) : lot.weight;
+    const newLength = dim_length !== undefined ? (dim_length === null ? null : parseFloat(dim_length)) : lot.dim_length;
+    const newDepth = dim_depth !== undefined ? (dim_depth === null ? null : parseFloat(dim_depth)) : lot.dim_depth;
+    const newHeight = dim_height !== undefined ? (dim_height === null ? null : parseFloat(dim_height)) : lot.dim_height;
     const newUnit = dim_unit !== undefined ? dim_unit : lot.dim_unit;
 
     const upd = await client.query(`
