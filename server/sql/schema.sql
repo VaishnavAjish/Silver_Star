@@ -181,6 +181,7 @@ CREATE TABLE machines (
   last_service    DATE,
   next_service    DATE,
   status          machine_status DEFAULT 'running',
+  control_tower_enabled BOOLEAN DEFAULT true,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );

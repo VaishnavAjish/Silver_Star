@@ -673,6 +673,7 @@ router.get('/operator-summary', authenticate, async (req, res) => {
           COUNT(*) FILTER (WHERE status = 'available') as available,
           COUNT(*) FILTER (WHERE status = 'maintenance') as hold
         FROM machines
+        WHERE control_tower_enabled = true
       `);
       machines = {
         running: parseInt(machinesRes.rows[0].running) || 0,

@@ -74,6 +74,7 @@ router.get('/kpi', authenticate, async (req, res) => {
         ORDER BY CASE mp.status WHEN 'running' THEN 1 ELSE 2 END, mp.id DESC
         LIMIT 1
       ) amp ON true
+      WHERE m.control_tower_enabled = true
       GROUP BY 1
     `);
 
@@ -117,7 +118,7 @@ router.get('/machines', authenticate, async (req, res) => {
     const { dept, category, location, status, operator, process_type, overdue, search, length_min, length_max, height_min, height_max, limit = 200, offset = 0 } = req.query;
 
     const params = [];
-    const where  = ['1=1'];
+    const where  = ['m.control_tower_enabled = true'];
 
     if (category && category !== 'ALL') {
       params.push(category);
@@ -303,8 +304,8 @@ router.get('/alerts', authenticate, async (req, res) => {
       pool.query(`
         SELECT m.id, m.code, m.name, m.next_service
         FROM   machines m
-        WHERE  m.status = 'maintenance'
-           OR  (m.next_service IS NOT NULL AND m.next_service <= CURRENT_DATE + INTERVAL '7 days')
+        WHERE  m.control_tower_enabled = true 
+          AND (m.status = 'maintenance' OR (m.next_service IS NOT NULL AND m.next_service <= CURRENT_DATE + INTERVAL '7 days'))
         ORDER  BY m.next_service NULLS LAST LIMIT 20
       `),
 
@@ -314,7 +315,8 @@ router.get('/alerts', authenticate, async (req, res) => {
                mp.target_runtime_hours
         FROM   machine_processes mp
         JOIN   machines m ON m.id = mp.machine_id
-        WHERE  mp.status = 'running'
+        WHERE  m.control_tower_enabled = true 
+          AND  mp.status = 'running'
           AND  mp.expected_completion_at IS NOT NULL
           AND  mp.expected_completion_at < NOW()
         ORDER  BY mp.expected_completion_at LIMIT 20
@@ -324,12 +326,12 @@ router.get('/alerts', authenticate, async (req, res) => {
         SELECT m.id, m.code, m.name, mp.id AS process_id, mp.process_number, mp.paused_at
         FROM   machines m
         JOIN   machine_processes mp ON mp.machine_id = m.id
-        WHERE  mp.status = 'hold'
+        WHERE  m.control_tower_enabled = true AND mp.status = 'hold'
         ORDER  BY mp.paused_at LIMIT 20
       `),
 
       pool.query(`
-        SELECT id, code, name FROM machines WHERE status = 'breakdown'
+        SELECT id, code, name FROM machines WHERE control_tower_enabled = true AND status = 'breakdown'
         ORDER BY code LIMIT 20
       `),
 
@@ -340,7 +342,8 @@ router.get('/alerts', authenticate, async (req, res) => {
                mp.target_runtime_hours
         FROM   machine_processes mp
         JOIN   machines m ON m.id = mp.machine_id
-        WHERE  mp.status = 'running'
+        WHERE  m.control_tower_enabled = true
+          AND  mp.status = 'running'
           AND  mp.target_runtime_hours IS NOT NULL
           AND  mp.expected_rough_qty IS NOT NULL
           AND  ${RUNTIME_SQL} > mp.target_runtime_hours * 1.1
@@ -356,7 +359,8 @@ router.get('/alerts', authenticate, async (req, res) => {
                mp.target_runtime_hours
         FROM   machines m
         JOIN   machine_processes mp ON mp.machine_id = m.id AND mp.status = 'running'
-        WHERE  mp.target_runtime_hours IS NOT NULL
+        WHERE  m.control_tower_enabled = true
+          AND  mp.target_runtime_hours IS NOT NULL
           AND  ${RUNTIME_SQL} >= mp.target_runtime_hours
           AND  EXISTS (
                  SELECT 1 FROM lot_process_issues lpi
