@@ -222,7 +222,7 @@ function allocateComponentValues(lines, outputs, biscuitPool, seedPool) {
 function buildReturnPlan({
   issue, processLot, biscuit, allowedOutputs,
   lines, measurements, openSiblingCount, biscuitCandidateCount,
-  attachedSeed,
+  attachedSeed, allowWeightOverride = false
 }) {
   const invalid = error => ({ valid: false, route: 'REJECT', error });
   const warnings = [];
@@ -580,7 +580,7 @@ function buildReturnPlan({
     if (!hasWeight || !(outputWeight > 0))
       return invalid('An in-place transformation requires the operator-measured output weight.');
     const inputWeight = parseFloat(processLot.weight || 0);
-    if (inputWeight > 0 && outputWeight > inputWeight + EPS)
+    if (inputWeight > 0 && outputWeight > inputWeight + EPS && !allowWeightOverride)
       return invalid(`Output weight ${outputWeight.toFixed(4)} exceeds input weight ${inputWeight.toFixed(4)} — a cutting process cannot create mass.`);
     if (measurements && measurements.weight != null && measurements.weight !== '' &&
         Math.abs(parseFloat(measurements.weight) - outputWeight) > EPS)

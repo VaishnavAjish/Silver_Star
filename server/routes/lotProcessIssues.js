@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
+const { hasPermission } = require('../utils/permissions');
 const { isSeedItem, nextSiblingCode, nextLotOpId, nextMfgProcessNumber } = require('../services/seedLotCodeService');
 const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowthCycle } = require('../services/growthRunService');
 // Growth-Again identity: pure carrier classification (growth_run + growth_diamond),
@@ -1279,10 +1280,20 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
       openSiblingCount = s.open_siblings;
     }
 
+    let allowWeightOverride = false;
+    if (req.user) {
+      if (req.user.role === 'super_admin') {
+        allowWeightOverride = true;
+      } else {
+        allowWeightOverride = await hasPermission(req.user.id, 'process_return', 'override_weight_variance');
+      }
+    }
+
     const plan = buildReturnPlan({
       issue, processLot, biscuit, allowedOutputs, lines,
       measurements, openSiblingCount, biscuitCandidateCount,
       attachedSeed: attachedSeedCtx,
+      allowWeightOverride
     });
     if (!plan.valid) return res.json(plan);
 
@@ -1535,10 +1546,20 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       );
       openSiblingCount = s.open_siblings;
     }
+    let allowWeightOverride = false;
+    if (req.user) {
+      if (req.user.role === 'super_admin') {
+        allowWeightOverride = true;
+      } else {
+        allowWeightOverride = await hasPermission(req.user.id, 'process_return', 'override_weight_variance');
+      }
+    }
+
     const plan = buildReturnPlan({
       issue, processLot, biscuit, allowedOutputs, lines,
       measurements, openSiblingCount, biscuitCandidateCount,
       attachedSeed: attachedSeedCtx,
+      allowWeightOverride
     });
     if (!plan.valid) throw new Error(plan.error);
     const remainingAfter = plan.remaining_after;
@@ -1737,7 +1758,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
       // itself so history/genealogy stay intact on the single record, then move on.
       // Phase C: NOT for COMPONENT returns (Seed Remove) — those split the
       // assembly into diamond + recovered-seed CHILD lots below.
-      if (isGrowthCarrier && !isComponentReturn) {
+      if (isGrowthCarrier && !isComponentReturn && !isTransformReturn) {
         await client.query(
           `INSERT INTO process_return_lines (return_id, return_type, qty, lot_id, lot_code, remarks)
            VALUES ($1,$2,$3,$4,$5,$6)`,

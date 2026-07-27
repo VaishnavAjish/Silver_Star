@@ -11,9 +11,10 @@ export const PERM_BITS = {
   import:  256,
   manage:  512,
   sidebar: 1024,
+  override_weight_variance: 2048,
 };
 
-export const FULL_ACCESS = 2047;
+export const FULL_ACCESS = 4095;
 
 export const ACTIONS = [
   { id: 'view',    label: 'VIEW' },
@@ -27,6 +28,7 @@ export const ACTIONS = [
   { id: 'print',   label: 'PRINT' },
   { id: 'manage',  label: 'MANAGE' },
   { id: 'sidebar', label: 'SIDEBAR' },
+  { id: 'override_weight_variance', label: 'OVERRIDE WEIGHT VARIANCE' },
 ];
 
 /* ── Module / Submodule Tree ─────────────────────────────── */
