@@ -2031,7 +2031,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // Phase C: never measure the biscuit on a COMPONENT return — it was just
     // consumed by the Seed Remove split. A growth_diamond carrier (Growth
     // Again) is measured the same way as a biscuit: same row, cycle recorded.
-    const measureTarget = (isGrowthCarrier && !isComponentReturn)
+    const measureTarget = (isGrowthCarrier && !isComponentReturn && !isTransformReturn)
       ? processLot
       : (routesToBiscuit ? biscuit : null);
     if (measureTarget && measurements && (
