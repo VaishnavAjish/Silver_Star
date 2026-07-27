@@ -605,12 +605,14 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                       </div>
                     )}
                     <div style={{ fontSize: 10, fontWeight: 600, marginTop: 4,
-                      color: (plan && !plan.valid) || !compEqual ? '#C62828' : 'var(--g500)' }}>
+                      color: (plan && !plan.valid) || !compEqual ? '#C62828' : (plan && plan.warnings && plan.warnings.length > 0 ? '#F57F17' : 'var(--g500)') }}>
                       {!compEqual
                         ? 'Each family must equal the return quantity on its own — families are never summed.'
                         : (plan && !plan.valid)
                           ? (plan.error || 'Seed-family weight validation failed.')
-                          : 'Component Split — Valid. Seed bounded by reference; Growth measured independently.'}
+                          : (plan && plan.warnings && plan.warnings.length > 0)
+                            ? plan.warnings[0]
+                            : 'Component Split — Valid. Seed bounded by reference; Growth measured independently.'}
                     </div>
                   </>
                 ) : (
@@ -1258,9 +1260,15 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               the server decides partial vs final from the quantity balance.
               This block keeps the inline warnings only. */}
           {(((!isComponentMode) && ((!balanced && linesTotal > 0) || overFill)) ||
-            (isComponentMode && (compOver || weightOver))) && (
-            <div style={{ padding: '10px 12px', background: '#FFEBEE',
-              border: '1px solid #EF9A9A', borderRadius: 8, marginBottom: 12 }}>
+            (isComponentMode && (compOver || weightOver)) ||
+            (plan && plan.warnings && plan.warnings.length > 0)) && (
+            <div style={{ padding: '10px 12px', background: (plan && plan.warnings && plan.warnings.length > 0 && !compOver && !weightOver && balanced && !overFill) ? '#FFF3E0' : '#FFEBEE',
+              border: (plan && plan.warnings && plan.warnings.length > 0 && !compOver && !weightOver && balanced && !overFill) ? '1px solid #FFCC80' : '1px solid #EF9A9A', borderRadius: 8, marginBottom: 12 }}>
+              {plan && plan.warnings && plan.warnings.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#E65100', marginBottom: 4 }}>
+                  <AlertCircle size={12} /> {plan.warnings[0]}
+                </div>
+              )}
               {!isComponentMode && !balanced && linesTotal > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#C62828' }}>
                   <AlertCircle size={12} /> Return quantities must balance before posting.

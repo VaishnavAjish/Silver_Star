@@ -622,7 +622,7 @@ test('detach posting #23-24: value conserved on both rows; genealogy intact', DB
 test('detach posting #25-26: missing/ambiguous carrier or attached Seed aborts under lock', DB_SKIP, () => {});
 test('detach posting #27: rollback on failure restores both identities', DB_SKIP, () => {});
 
-test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', () => {
+test('phase C: recovered Seed weight beyond the Seed reference ceiling warns but DOES NOT BLOCK', () => {
   const p = buildReturnPlan({ ...planBase,
     processLot: biscuitValued, biscuit: null,
     allowedOutputs: seedRemoveOutputs,
@@ -631,8 +631,9 @@ test('phase C: recovered Seed weight beyond the Seed reference ceiling BLOCKS', 
       { type: 'reprocess', qty: 9, weight: 30 }, // > 25.65
       { type: 'usable', qty: 9, weight: 50 },
     ] });
-  assert.equal(p.valid, false);
-  assert.match(p.error, /exceeds the Seed reference weight/);
+  assert.equal(p.valid, true);
+  assert.equal(p.warnings.length, 1);
+  assert.match(p.warnings[0], /exceeds the Seed reference weight/);
 });
 
 test('phase C (detach): zero carrier carrying value is VALID (growth pool 0, seed pool intact)', () => {

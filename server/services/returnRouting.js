@@ -225,6 +225,7 @@ function buildReturnPlan({
   attachedSeed,
 }) {
   const invalid = error => ({ valid: false, route: 'REJECT', error });
+  const warnings = [];
 
   if (!issue) return invalid('Issue not found');
   if (issue.status !== 'OPEN')
@@ -379,13 +380,14 @@ function buildReturnPlan({
       // Seed reference = existing canonical attached-Seed weight (NOT the biscuit
       // "assembly" weight, which is the Seed reference, not a Seed+Growth mass).
       const seedRefWeight = attachedSeed.refWeight != null ? parseFloat(attachedSeed.refWeight) : null;
-      // Seed-family output above the reference beyond tolerance (EPS — the
-      // engine's existing weight tolerance) remains INVALID.
-      if (seedRefWeight != null && seedOutWeight > seedRefWeight + EPS)
-        return invalid(
+      // Seed-family output above the reference generates a warning but is now
+      // permitted (Seed may gain weight from deposited material).
+      if (seedRefWeight != null && seedOutWeight > seedRefWeight + EPS) {
+        warnings.push(
           `Recovered Seed weight ${seedOutWeight.toFixed(4)} exceeds the Seed ` +
-          `reference weight ${seedRefWeight.toFixed(4)} beyond tolerance.`
+          `reference weight ${seedRefWeight.toFixed(4)}.`
         );
+      }
       const seedVariance = seedRefWeight != null ? seedRefWeight - seedOutWeight : null;
       const seedLossWeight = seedVariance != null && seedVariance > 0 ? seedVariance : 0;
       const combinedOutputWeight = seedOutWeight + growthGeneratedWeight;
@@ -542,6 +544,7 @@ function buildReturnPlan({
     remaining_after: remainingAfter,
     projected_issue_status: isFinal ? 'RETURNED' : 'OPEN',
     component_mode: isComponentMode,
+    warnings,
   };
 
   // ── Growth Diamond → Rough Diamond: configuration-driven in-place
