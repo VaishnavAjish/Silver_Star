@@ -1336,6 +1336,12 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
   }
 });
 
+async function ensureRoughItem(client) {
+  const { rows } = await client.query("SELECT id FROM items WHERE category ILIKE 'rough' ORDER BY id ASC LIMIT 1");
+  if (rows.length === 0) throw new Error('No item found with category "rough" for Final Block transformation.');
+  return rows[0];
+}
+
 // ── CREATE RETURN ──────────────────────────────────────────────────────────────
 // Accepts multi-line returns, partial returns, and five return types.
 // Body: { return_date, notes, lines: [{type, qty, remarks}], remaining_in_process? }
