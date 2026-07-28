@@ -201,9 +201,11 @@ const stockTransferRoutes = require('./routes/stockTransfer');
 const roleRoutes = require('./routes/roles');
 const reportingPreferencesRoutes = require('./routes/reportingPreferences');
 const transferRoutes = require('./routes/transfers');
+const nidhiConnectRoutes = require('./routes/nidhiConnect');
 
 
 app.use('/api/auth', authRoutes);
+app.use('/api/nidhi-connect', nidhiConnectRoutes);
 app.use('/api/accounts', accountsRoutes);
 // Journal entries: canonical path + legacy alias, single handler via array mount
 app.use(['/api/journal', '/api/journal-entries', '/api/general-ledger'], journalRoutes);
