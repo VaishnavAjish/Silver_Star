@@ -15,7 +15,7 @@ import {
   Search, Package, RefreshCw, GitBranch, GitMerge,
   MoreVertical, X, Filter, ChevronLeft, ChevronRight,
   CheckSquare, Square, Share2, Download, Printer, Columns, Send, ChevronDown,
-  History, RotateCcw, CheckCircle, Edit
+  History, RotateCcw, CheckCircle, Edit, Edit3
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 import StockTransferHistoryModal from '../../../shared/components/Modals/StockTransferHistoryModal';
@@ -24,6 +24,7 @@ import LotIssuePage from './LotIssuePage';
 import MixLotsPage from './MixLotsPage';
 import LotReturnPage from './LotReturnPage';
 import EditLotModal from './EditLotModal';
+import CorrectLotNameModal from '../components/CorrectLotNameModal';
 import { getAllowedActions } from '../utils/actionMatrix';
 import {
   LOCATION_COL, DEPARTMENT_COL, SOURCE_COL,
@@ -853,6 +854,7 @@ export default function InventoryPage() {
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
       canEditLot && { label: 'Edit Lot', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'edit_lot', lotId: row.id }), color: 'var(--brand)' },
+      canEditLot && { label: 'Correct Lot Name', icon: <Edit3 size={11} />, fn: () => setActiveModal({ type: 'correct_lot_name', lot: row }), color: 'var(--brand)' },
       perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
@@ -1319,6 +1321,14 @@ export default function InventoryPage() {
       {/* ════ POPUP MODALS ════ */}
       {activeModal && activeModal.type === 'edit_lot' && (
         <EditLotModal lotId={activeModal.lotId} onComplete={() => { setActiveModal(null); load(); }} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal && activeModal.type === 'correct_lot_name' && (
+        <CorrectLotNameModal
+          open={true}
+          lot={activeModal.lot || { id: activeModal.lotId, lot_name: activeModal.lotName || '', sequence_number: activeModal.sequenceNumber || '', row_version: 1 }}
+          onClose={() => setActiveModal(null)}
+          onUpdated={() => { setActiveModal(null); load(); }}
+        />
       )}
       {activeModal && activeModal.type !== 'edit_lot' && (
         <div className="modal-overlay" onClick={() => setActiveModal(null)} style={{ zIndex: 1000 }}>

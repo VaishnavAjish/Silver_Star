@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useApi } from '../../../shared/hooks/useApi';
-import { X, Save } from 'lucide-react';
+import { X, Save, Edit3 } from 'lucide-react';
+import CorrectLotNameModal from '../components/CorrectLotNameModal';
 
 export default function EditLotModal({ lotId, onClose, onComplete }) {
   const api = useApi();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showCorrectNameModal, setShowCorrectNameModal] = useState(false);
+  const [lotDetails, setLotDetails] = useState(null);
   const [formData, setFormData] = useState({
     qty: '', weight: '', dim_length: '', dim_depth: '', dim_height: '', dim_unit: ''
   });
@@ -16,6 +19,7 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
     setLoading(true);
     api.get(`/api/inventory/${lotId}`)
       .then(res => {
+        setLotDetails(res);
         setFormData({
           qty: res.qty ?? '',
           weight: res.weight ?? '',
@@ -145,15 +149,46 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
               </div>
             </div>
             
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
-              <button type="button" className="btn btn-outline" onClick={onClose} disabled={submitting}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Save size={14} /> {submitting ? 'Saving...' : 'Save Changes'}
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 24 }}>
+              <button
+                type="button"
+                className="btn btn-outline-primary"
+                onClick={() => setShowCorrectNameModal(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}
+              >
+                <Edit3 size={13} /> Correct Lot Name (NidhiConnect)
               </button>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="btn btn-outline" onClick={onClose} disabled={submitting}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Save size={14} /> {submitting ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </div>
           </form>
         )}
       </div>
+
+      {showCorrectNameModal && (
+        <CorrectLotNameModal
+          open={true}
+          lot={lotDetails ? {
+            id: lotDetails.id,
+            lot_name: lotDetails.lot_code || lotDetails.lot_number || '',
+            sequence_number: lotDetails.sequence_number || (lotDetails.lot_code || '').split('-').pop() || '',
+            row_version: lotDetails.row_version || 1,
+            batch_id: lotDetails.batch_id,
+            batch_status: lotDetails.batch_status || 'DRAFT',
+            b5_confirmed: lotDetails.b5_confirmed
+          } : { id: lotId, lot_name: '', sequence_number: '', row_version: 1 }}
+          onClose={() => setShowCorrectNameModal(false)}
+          onUpdated={() => {
+            setShowCorrectNameModal(false);
+            onComplete();
+          }}
+        />
+      )}
     </div>
   );
 }
