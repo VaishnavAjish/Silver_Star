@@ -1330,7 +1330,7 @@ export default function InventoryPage() {
           onUpdated={() => { setActiveModal(null); load(); }}
         />
       )}
-      {activeModal && activeModal.type !== 'edit_lot' && (
+      {activeModal && activeModal.type !== 'edit_lot' && activeModal.type !== 'correct_lot_name' && (
         <div className="modal-overlay" onClick={() => setActiveModal(null)} style={{ zIndex: 1000 }}>
           <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 1300, padding: 0, display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
