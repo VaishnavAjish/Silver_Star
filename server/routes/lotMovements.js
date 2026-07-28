@@ -409,7 +409,7 @@ router.post('/mix/preview', authenticate, async (req, res) => {
     // execute rejects, or the operator discovers the block only after confirming.
     const isSeed = isSeedItem(rows[0]);
     const mixDims = resolveMixDimensions(rows);
-    if (isSeed && mixDims.conflict) {
+    if (mixDims.conflict) {
       return res.status(409).json({
         error: mixDimensionError(mixDims),
         dimensions_conflict: true,
@@ -417,9 +417,11 @@ router.post('/mix/preview', authenticate, async (req, res) => {
       });
     }
 
-    const totalEffQty = rows.reduce((s, r) => s + effQty(r), 0);
-    const totalVal    = rows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0);
-    const wAvgRate    = totalEffQty > 0
+    const totalQtySum   = rows.reduce((s, r) => s + parseFloat(r.qty || 0), 0);
+    const totalWeightSum = rows.reduce((s, r) => s + parseFloat(r.weight || 0), 0);
+    const totalEffQty   = rows.reduce((s, r) => s + effQty(r), 0);
+    const totalVal      = rows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0);
+    const wAvgRate      = totalEffQty > 0
       ? Math.round((totalVal / totalEffQty) * 10000) / 10000
       : 0;
 
@@ -427,21 +429,31 @@ router.post('/mix/preview', authenticate, async (req, res) => {
     const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
 
     res.json({
-      child_dimensions: isSeed ? mixDims.dims : null,
+      child_dimensions: mixDims.dims,
       dimensions_conflict: false,
       parents: rows.map(r => ({
         id: r.id,
         lot_number: r.lot_number,
+        lot_code: r.lot_code,
+        qty: parseFloat(r.qty || 0),
+        weight: parseFloat(r.weight || 0),
         effective_qty: effQty(r),
-        rate: parseFloat(r.rate),
-        total_value: parseFloat(r.total_value),
+        dim_length: r.dim_length != null ? parseFloat(r.dim_length) : null,
+        dim_depth: r.dim_depth != null ? parseFloat(r.dim_depth) : null,
+        dim_height: r.dim_height != null ? parseFloat(r.dim_height) : null,
+        dim_unit: r.dim_unit,
+        rate: r.rate != null ? parseFloat(r.rate) : null,
+        total_value: r.total_value != null ? parseFloat(r.total_value) : null,
         status: r.status,
       })),
+      child_qty: totalQtySum,
+      child_weight: Math.round(totalWeightSum * 10000) / 10000,
       child_effective_qty: totalEffQty,
       child_cost_per_unit: wAvgRate,
       child_total_value: Math.round(totalVal * 100) / 100,
       child_lot_code_preview: rows[0].category === 'seed' ? 'MX####' : `MIX-${ym}-XXXX`,
       unit: rows[0].unit,
+      category: rows[0].category,
       item_name: rows[0].item_name,
       valid: true,
     });
@@ -515,10 +527,8 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
     // mixed lot would claim a size that isn't true of its contents. Reject here,
     // before the first write, so the transaction rolls back clean.
     const mixDims = resolveMixDimensions(rows);
-    if (isSeed && mixDims.conflict) throw new Error(mixDimensionError(mixDims));
-    const childDims = isSeed
-      ? mixDims.dims
-      : { dim_length: null, dim_depth: null, dim_height: null, dim_unit: null };
+    if (mixDims.conflict) throw new Error(mixDimensionError(mixDims));
+    const childDims = mixDims.dims;
 
     // batch_no is likewise not mergeable: keep it only when the parents agree.
     const batchNos     = [...new Set(rows.map(r => r.batch_no || null))];
@@ -551,8 +561,8 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
       mixLotCode = null;
     }
 
-    const invQty    = rough ? totalQtySum  : totalEffQty;
-    const invWeight = rough ? totalWeightSum : 0;
+    const invQty    = totalQtySum;
+    const invWeight = totalWeightSum;
 
     const mixLotOpId = await nextLotOpId(client);
 
@@ -590,19 +600,25 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
       ]
     );
 
-    // For seed mixes: set root_lot_id = self (mix creates a new genealogy root)
-    if (isSeed) {
-      await client.query(
-        'UPDATE inventory SET root_lot_id = id WHERE id = $1',
-        [childInv.id]
-      );
-    }
+    // Root Lot & Genealogy Path inheritance:
+    // If all parents share the exact same root_lot_id, inherit it. Otherwise self-root.
+    const parentRootIds = [...new Set(rows.map(r => r.root_lot_id).filter(Boolean))];
+    const commonRootId  = parentRootIds.length === 1 ? parentRootIds[0] : childInv.id;
+    const parentGenPaths = [...new Set(rows.map(r => r.genealogy_path).filter(Boolean))];
+    const childGenPath  = parentGenPaths.length === 1
+      ? `${parentGenPaths[0]}/MIX-${childCode}`
+      : `MIX-${childCode}`;
 
-    // Track mix components for genealogy
+    await client.query(
+      'UPDATE inventory SET root_lot_id = $1, genealogy_path = $2 WHERE id = $3',
+      [commonRootId, childGenPath, childInv.id]
+    );
+
+    // Track mix components for genealogy (recording both qty and weight)
     for (const p of rows) {
       await client.query(
-        `INSERT INTO lot_mix_components (mixed_lot_id, source_lot_id, qty) VALUES ($1, $2, $3)`,
-        [childInv.id, p.id, effQty(p)]
+        `INSERT INTO lot_mix_components (mixed_lot_id, source_lot_id, qty, weight) VALUES ($1, $2, $3, $4)`,
+        [childInv.id, p.id, effQty(p), parseFloat(p.weight || 0)]
       );
     }
 
@@ -630,10 +646,14 @@ router.post('/mix', authenticate, authorize('admin', 'operator'), async (req, re
       child_lot: {
         id: childInv.id,
         lot_number: childCode,
+        qty: invQty,
+        weight: invWeight,
         effective_qty: totalEffQty,
         rate: wAvgRate,
         total_value: Math.round(totalVal * 100) / 100,
-        dimensions: isSeed ? childDims : null,
+        dimensions: childDims,
+        root_lot_id: commonRootId,
+        genealogy_path: childGenPath,
       },
     });
     dispatchEvent('lot.merged', { movement_id: mv.id, movement_number: movNum, parent_lot_ids, child_lot_id: childInv.id, child_lot_number: childCode }).catch(() => {});

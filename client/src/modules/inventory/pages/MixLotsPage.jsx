@@ -81,9 +81,12 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
   );
   const mixValid = selectedLots.length >= 2 && uniqueItems.length === 1;
 
-  const totalEffQty = selectedLots.reduce((s, l) => s + effQty(l), 0);
-  const totalVal    = selectedLots.reduce((s, l) => s + parseFloat(l.total_value || 0), 0);
-  const wAvgRate    = totalEffQty > 0
+  const totalQtySum   = selectedLots.reduce((s, l) => s + parseFloat(l.qty || 0), 0);
+  const totalWeightSum = selectedLots.reduce((s, l) => s + parseFloat(l.weight || 0), 0);
+  const totalEffQty   = selectedLots.reduce((s, l) => s + effQty(l), 0);
+  const hasFinancials = selectedLots.length > 0 && selectedLots.every(l => l.total_value !== undefined && l.total_value !== null);
+  const totalVal      = hasFinancials ? selectedLots.reduce((s, l) => s + parseFloat(l.total_value || 0), 0) : null;
+  const wAvgRate      = hasFinancials && totalEffQty > 0
     ? Math.round((totalVal / totalEffQty) * 10000) / 10000
     : 0;
 
@@ -215,13 +218,18 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
                   <thead><tr>
                     <th style={{ width: 36 }}></th>
                     <th>Lot</th><th>Item</th><th style={{ width: 70 }}>Cat</th>
-                    <th style={{ width: 80 }}>Qty</th><th style={{ width: 60 }}>Unit</th>
-                    <th style={{ width: 90 }}>Rate (₹)</th><th style={{ width: 90 }}>Value (₹)</th>
+                    <th style={{ width: 70 }} className="num">Qty</th>
+                    <th style={{ width: 75 }} className="num">Weight</th>
+                    <th style={{ width: 50 }}>Unit</th>
+                    <th style={{ width: 110 }}>Dimensions</th>
+                    <th style={{ width: 90 }} className="num">Rate (₹)</th>
+                    <th style={{ width: 90 }} className="num">Value (₹)</th>
                   </tr></thead>
                   <tbody>
                     {filtered.map(l => {
                       const checked = selected.has(l.id);
                       const disabled = !checked && uniqueItems.length === 1 && !uniqueItems.includes(l.item_id);
+                      const hasFin = l.total_value !== undefined && l.total_value !== null;
                       return (
                         <tr key={l.id}
                           onClick={() => !disabled && toggle(l.id)}
@@ -245,10 +253,14 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
                           </td>
                           <td style={{ fontSize: 11 }}>{l.item_name}</td>
                           <td><span className="badge b-stock" style={{ fontSize: 9 }}>{l.category}</span></td>
-                          <td className="num">{effQty(l).toFixed(4)}</td>
+                          <td className="num">{Number(l.qty || 0).toFixed(4)}</td>
+                          <td className="num">{parseFloat(l.weight || 0) > 0 ? parseFloat(l.weight).toFixed(4) : '—'}</td>
                           <td>{l.unit}</td>
-                          <td className="num">₹{Number(l.rate || 0).toLocaleString('en-IN')}</td>
-                          <td className="num">₹{Number(l.total_value || 0).toLocaleString('en-IN')}</td>
+                          <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--g700)' }}>
+                            {formatDims(l) || '—'}
+                          </td>
+                          <td className="num">{hasFin ? `₹${Number(l.rate || 0).toLocaleString('en-IN')}` : 'Restricted'}</td>
+                          <td className="num">{hasFin ? `₹${Number(l.total_value || 0).toLocaleString('en-IN')}` : 'Restricted'}</td>
                         </tr>
                       );
                     })}
@@ -302,9 +314,10 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
                     Result — weighted average
                   </div>
                   {[
-                    { l: `Combined ${qtyLabel}`, v: `${totalEffQty.toFixed(4)} ${unit}` },
-                    { l: 'Weighted Rate', v: `₹${wAvgRate.toLocaleString('en-IN', { maximumFractionDigits: 4 })}` },
-                    { l: 'Total Value', v: `₹${totalVal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` },
+                    { l: 'Combined Qty', v: `${totalQtySum.toFixed(4)} ${unit || 'pcs'}` },
+                    { l: 'Combined Weight', v: totalWeightSum > 0 ? `${totalWeightSum.toFixed(4)} ct/g` : '—' },
+                    { l: 'Weighted Rate', v: hasFinancials ? `₹${wAvgRate.toLocaleString('en-IN', { maximumFractionDigits: 4 })}` : 'Restricted' },
+                    { l: 'Total Value', v: hasFinancials ? `₹${totalVal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Restricted' },
                   ].map(({ l, v }) => (
                     <div key={l} style={{ display: 'flex', justifyContent: 'space-between',
                       fontSize: 12, padding: '3px 0' }}>
@@ -369,16 +382,22 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
             </div>
             <table className="dgrid" style={{ fontSize: 12, marginBottom: 16 }}>
               <thead><tr>
-                <th>Lot Number</th><th>{qtyLabel}</th>
-                <th>Rate (₹)</th><th>Value (₹)</th>
+                <th>Lot Number</th>
+                <th className="num">Qty</th>
+                <th className="num">Weight</th>
+                <th>Dimensions</th>
+                <th className="num">Rate (₹)</th>
+                <th className="num">Value (₹)</th>
               </tr></thead>
               <tbody>
                 {preview.parents.map((p, i) => (
                   <tr key={i}>
-                    <td style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>{p.lot_number}</td>
-                    <td className="num">{p.effective_qty.toFixed(4)}</td>
-                    <td className="num">₹{Number(p.rate).toLocaleString('en-IN')}</td>
-                    <td className="num">₹{Number(p.total_value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>{p.lot_code || p.lot_number}</td>
+                    <td className="num">{p.qty != null ? p.qty.toFixed(4) : p.effective_qty.toFixed(4)}</td>
+                    <td className="num">{p.weight != null && p.weight > 0 ? p.weight.toFixed(4) : '—'}</td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{formatDims(p) || '—'}</td>
+                    <td className="num">{p.rate != null ? `₹${Number(p.rate).toLocaleString('en-IN')}` : 'Restricted'}</td>
+                    <td className="num">{p.total_value != null ? `₹${Number(p.total_value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Restricted'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -386,16 +405,15 @@ export default function MixLots({ initialLotIds, onComplete, onCancel, isModal }
 
             <div style={{ padding: 12, background: '#E8F5E9', borderRadius: 8, fontSize: 12 }}>
               <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 6 }}>
-                ↓ Resulting lot ({preview.child_lot_code_preview})
+                ↓ Resulting lot ({preview.child_lot_code_preview}) — {preview.item_name} ({preview.category})
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
                 {[
-                  { l: qtyLabel, v: `${preview.child_effective_qty.toFixed(4)} ${preview.unit}` },
-                  { l: 'Rate (weighted avg)', v: `₹${Number(preview.child_cost_per_unit).toLocaleString('en-IN', { maximumFractionDigits: 4 })}` },
-                  { l: 'Total Value', v: `₹${Number(preview.child_total_value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` },
-                  ...(formatDims(preview.child_dimensions)
-                    ? [{ l: 'Dimensions', v: formatDims(preview.child_dimensions) }]
-                    : []),
+                  { l: 'Combined Qty', v: `${(preview.child_qty != null ? preview.child_qty : preview.child_effective_qty).toFixed(4)} ${preview.unit || 'pcs'}` },
+                  { l: 'Combined Weight', v: preview.child_weight != null && preview.child_weight > 0 ? `${preview.child_weight.toFixed(4)}` : '—' },
+                  { l: 'Rate (weighted avg)', v: preview.child_cost_per_unit != null ? `₹${Number(preview.child_cost_per_unit).toLocaleString('en-IN', { maximumFractionDigits: 4 })}` : 'Restricted' },
+                  { l: 'Total Value', v: preview.child_total_value != null ? `₹${Number(preview.child_total_value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Restricted' },
+                  { l: 'Dimensions', v: formatDims(preview.child_dimensions) || 'Unmeasured / Preserved' },
                 ].map(({ l, v }) => (
                   <div key={l} style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 9, color: '#2E7D32', textTransform: 'uppercase', letterSpacing: '.5px' }}>{l}</div>
