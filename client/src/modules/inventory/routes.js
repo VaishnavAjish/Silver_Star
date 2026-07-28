@@ -14,12 +14,14 @@ const LotReturnPage        = lazy(() => import('./pages/LotReturnPage'));
 const ProcessReturnsListPage = lazy(() => import('./pages/ProcessReturnsListPage'));
 const StockTransferPage    = lazy(() => import('./pages/StockTransferPage'));
 const NewTransferPage      = lazy(() => import('./pages/NewTransferPage'));
+const NidhiConnectPage     = lazy(() => import('./pages/NidhiConnectPage'));
 
 export default [
   { path: 'inventory',                           Component: InventoryPage },
   { path: 'inventory/clipboard-data',            Component: InventoryPage },
   { path: 'inventory/opening',                   Component: InventoryOpeningPage },
   { path: 'inventory/closing',                   Component: InventoryClosingPage },
+  { path: 'inventory/nidhi-connect',             Component: NidhiConnectPage },
   { path: 'inventory/mix',                       Component: MixLots },
   { path: 'inventory/lots/:id',                  Component: LotWorkspacePage },
   { path: 'inventory/:lotId/split',              Component: SplitLot },
