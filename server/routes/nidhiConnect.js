@@ -3,7 +3,25 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const { correctLotName, reopenBatch } = require('../services/nidhiConnectService');
+const pool = require('../db/pool');
+
+/**
+ * GET /api/nidhi-connect/lots
+ */
+router.get('/lots', authenticate, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.*, b.status as batch_status, s.series_prefix
+       FROM import_row_lots r
+       JOIN import_batches b ON r.batch_id = b.id
+       JOIN lot_series s ON r.lot_series_id = s.id
+       ORDER BY r.id DESC LIMIT 200`
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /**
  * POST /api/nidhi-connect/lots/:id/correct-name
