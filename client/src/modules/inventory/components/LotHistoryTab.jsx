@@ -275,6 +275,7 @@ export default function LotHistoryTab({ lotId }) {
                 <th style={{ width: 130 }}>Type</th>
                 <th style={{ width: 92 }}>Source</th>
                 <th style={{ width: 88 }}>Status →</th>
+                <th style={{ width: 110 }}>Process</th>
                 <th style={{ width: 78 }} className="num">Qty Δ</th>
                 <th style={{ width: 90 }} className="num">Balance After</th>
                 <th style={{ width: 96 }}>Txn</th>
@@ -317,6 +318,7 @@ export default function LotHistoryTab({ lotId }) {
                       </span>
                     </td>
                     <td style={{ fontSize: 11 }}>{r.status_change || '—'}</td>
+                    <td style={{ fontSize: 11, color: 'var(--g700)', fontWeight: 500 }}>{r.process_name || '—'}</td>
                     <td className="num" style={{ fontSize: 11, fontFamily: 'var(--mono)',
                       color: (!r.affects_qty_balance || delta == null || delta === 0) ? 'var(--g400)' : delta < 0 ? '#C62828' : '#2E7D32' }}>
                       {(!r.affects_qty_balance || delta == null || delta === 0) ? '—' : (delta > 0 ? `+${fmtNum(delta)}` : fmtNum(delta))}

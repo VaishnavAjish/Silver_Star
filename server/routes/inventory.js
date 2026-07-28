@@ -576,6 +576,7 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
                inv.status::text AS status_change,
                NULL::text AS weight_change,
                NULL::text AS dimension_change,
+               NULL::text AS process_name,
                inv.remarks::text AS remarks,
                'creation'::text AS source,
                inv.qty::numeric AS qty_delta,
@@ -608,6 +609,7 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
                ol.new_status::text AS status_change,
                CASE WHEN ol.qty_delta IS NOT NULL THEN (ol.qty_delta::text || ' units') ELSE NULL END AS weight_change,
                NULL::text AS dimension_change,
+               COALESCE(pm_pi.process_name, pi.process_type, pm_pr.process_name, pr_pi.process_type)::text AS process_name,
                ol.notes::text AS remarks,
                'op_log'::text AS source,
                CASE
@@ -636,8 +638,14 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
         LEFT JOIN users u ON u.id = ol.performed_by
         LEFT JOIN lot_process_issues pi
                ON ol.reference_type = 'lot_process_issue' AND pi.id = ol.reference_id
+        LEFT JOIN process_master pm_pi
+               ON pm_pi.process_code = pi.process_type
         LEFT JOIN lot_process_returns pr
                ON ol.reference_type = 'lot_process_return' AND pr.id = ol.reference_id
+        LEFT JOIN lot_process_issues pr_pi
+               ON pr_pi.id = pr.issue_id
+        LEFT JOIN process_master pm_pr
+               ON pm_pr.process_code = pr_pi.process_type
         WHERE ol.lot_id = $1
 
         UNION ALL
@@ -654,6 +662,7 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
                'CONSUMED'::text AS status_change,
                ('-' || lmp.quantity_consumed::text) AS weight_change,
                NULL::text AS dimension_change,
+               NULL::text AS process_name,
                lm.notes::text AS remarks,
                'movement'::text AS source,
                -(lmp.quantity_consumed::numeric) AS qty_delta,
@@ -682,6 +691,7 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
                'IN STOCK'::text AS status_change,
                ('+' || lmc.quantity::text) AS weight_change,
                NULL::text AS dimension_change,
+               NULL::text AS process_name,
                lm.notes::text AS remarks,
                'movement'::text AS source,
                lmc.quantity::numeric AS qty_delta,
@@ -710,6 +720,7 @@ router.get('/:id/history', authenticate, requireInventoryView, async (req, res) 
                NULL::text AS status_change,
                ('Weight: ' || COALESCE(grc.prev_weight::text, '0') || ' → ' || COALESCE(grc.new_weight::text, '0')) AS weight_change,
                ('Height: ' || COALESCE(grc.prev_height::text, '0') || ' → ' || COALESCE(grc.new_height::text, '0') || ' (+' || COALESCE(grc.growth_mm::text, '0') || ' ' || COALESCE(grc.dim_unit::text, 'mm') || ')') AS dimension_change,
+               COALESCE(pm.process_name::text, grc.process_type::text) AS process_name,
                grc.remarks::text AS remarks,
                'growth_cycle'::text AS source,
                NULL::numeric AS qty_delta,
