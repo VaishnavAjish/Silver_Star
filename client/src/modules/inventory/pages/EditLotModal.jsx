@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useApi } from '../../../shared/hooks/useApi';
-import { X, Save, Edit3 } from 'lucide-react';
+import { X, Save, Edit } from 'lucide-react';
 import CorrectLotNameModal from '../components/CorrectLotNameModal';
 
 export default function EditLotModal({ lotId, onClose, onComplete }) {
@@ -156,7 +156,7 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
                 onClick={() => setShowCorrectNameModal(true)}
                 style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}
               >
-                <Edit3 size={13} /> Correct Lot Name (NidhiConnect)
+                <Edit size={13} /> Correct Lot Name (NidhiConnect)
               </button>
 
               <div style={{ display: 'flex', gap: 8 }}>

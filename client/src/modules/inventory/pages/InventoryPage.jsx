@@ -15,7 +15,7 @@ import {
   Search, Package, RefreshCw, GitBranch, GitMerge,
   MoreVertical, X, Filter, ChevronLeft, ChevronRight,
   CheckSquare, Square, Share2, Download, Printer, Columns, Send, ChevronDown,
-  History, RotateCcw, CheckCircle, Edit, Edit3
+  History, RotateCcw, CheckCircle, Edit
 } from 'lucide-react';
 import DatePicker from '../../../shared/components/DatePicker';
 import StockTransferHistoryModal from '../../../shared/components/Modals/StockTransferHistoryModal';
@@ -854,7 +854,7 @@ export default function InventoryPage() {
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
       canEditLot && { label: 'Edit Lot', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'edit_lot', lotId: row.id }), color: 'var(--brand)' },
-      canEditLot && { label: 'Correct Lot Name', icon: <Edit3 size={11} />, fn: () => setActiveModal({ type: 'correct_lot_name', lot: row }), color: 'var(--brand)' },
+      canEditLot && { label: 'Correct Lot Name', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'correct_lot_name', lot: row }), color: 'var(--brand)' },
       perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },

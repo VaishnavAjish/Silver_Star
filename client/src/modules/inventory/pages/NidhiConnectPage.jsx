@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useApi } from '../../../shared/hooks/useApi';
 import CorrectLotNameModal from '../components/CorrectLotNameModal';
-import { Edit3, Lock, CheckCircle, Search, RefreshCw, AlertCircle } from 'lucide-react';
+import { Edit, Lock, CheckCircle, Search, RefreshCw, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function NidhiConnectPage() {
@@ -126,12 +126,8 @@ export default function NidhiConnectPage() {
                     )}
                   </td>
                   <td className="num">
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => handleCorrectName(l)}
-                      style={{ fontSize: 11, padding: '3px 8px' }}
-                    >
-                      <Edit3 size={12} /> Correct
+                    <button className="btn btn-sm" onClick={() => handleCorrectName(l)} style={{ fontSize: 11, padding: '3px 8px' }}>
+                      <Edit size={12} /> Correct
                     </button>
                   </td>
                 </tr>

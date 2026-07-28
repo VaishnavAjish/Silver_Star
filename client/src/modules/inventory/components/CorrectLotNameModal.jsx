@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import Modal from '../../../shared/components/Modal';
 import { useApi } from '../../../shared/hooks/useApi';
 import toast from 'react-hot-toast';
-import { Edit3, AlertCircle, RefreshCw, Lock } from 'lucide-react';
+import { Edit, AlertCircle, RefreshCw, Lock } from 'lucide-react';
 
 export default function CorrectLotNameModal({ open, onClose, lot, onUpdated }) {
   const api = useApi();
@@ -81,7 +81,7 @@ export default function CorrectLotNameModal({ open, onClose, lot, onUpdated }) {
       open={open}
       onClose={onClose}
       title="Correct Lot Name (NidhiConnect)"
-      icon={<Edit3 size={16} style={{ color: 'var(--brand)', marginRight: 6 }} />}
+      icon={<Edit size={16} style={{ color: 'var(--brand)', marginRight: 6 }} />}
       large
       footer={
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
