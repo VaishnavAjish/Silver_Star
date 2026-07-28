@@ -217,6 +217,7 @@ export default function ProcessReturnsListPage() {
                     <th style={{ width: 110 }}>Dimension</th>
                     <th style={{ width: 88 }}>Process</th>
                     <th style={{ width: 96 }}>Machine</th>
+                    <th style={{ width: 70 }} className="num">Curr Wt</th>
                     <th style={{ width: 70 }} className="num">Issued Qty</th>
                     <th style={{ width: 74 }} className="num">Returned Qty</th>
                     <th style={{ width: 78 }} className="num">Remaining Qty</th>
@@ -258,6 +259,9 @@ export default function ProcessReturnsListPage() {
                           <span style={{ fontSize: 11, fontWeight: 600, color: r.machine_name ? 'var(--g800)' : 'var(--g400)' }}>
                             {r.machine_name || '—'}
                           </span>
+                        </td>
+                        <td className="num" style={{ fontSize: 11 }}>
+                          {Number(r.source_lot_weight || r.process_lot_weight || 0).toFixed(4)}
                         </td>
                         <td className="num" style={{ fontSize: 11 }}>
                           {Number(r.issued_qty).toFixed(4)}

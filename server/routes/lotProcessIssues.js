@@ -199,6 +199,8 @@ router.get('/', authenticate, async (req, res) => {
               -- Carrier identity (Growth Again: the process lot IS the carrier;
               -- resolveIssueGrowthContext prefers these over the legacy gr link).
               pl.run_no AS process_lot_run_no,
+              pl.weight AS process_lot_weight,
+              sl.weight AS source_lot_weight,
               pl.dim_length AS process_lot_dim_length, pl.dim_depth AS process_lot_dim_depth,
               pl.dim_height AS process_lot_dim_height, pl.dim_unit AS process_lot_dim_unit,
               pli.category AS process_lot_category,
