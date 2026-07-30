@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const pool = require('../db/pool');
+const { correctLotName, reopenBatch } = require('../services/nidhiConnectService');
 
 /**
  * GET /api/nidhi-connect/lots

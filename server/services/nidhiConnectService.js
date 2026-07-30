@@ -193,6 +193,18 @@ async function correctLotName({
       throw err;
     }
 
+    // 7b. Sync current inventory table views if matching lot exists
+    try {
+      await client.query(
+        `UPDATE inventory
+         SET lot_code = $1, lot_number = $1, lot_name = $1
+         WHERE lot_code = $2 OR lot_number = $2 OR lot_name = $2`,
+        [normalizedNewName, oldLotName]
+      );
+    } catch (invErr) {
+      // Safe fallback if optional inventory table fields differ
+    }
+
     // 8. Append Audit Event
     await client.query(
       `INSERT INTO import_row_lot_events
