@@ -909,6 +909,45 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
         }
       }
 
+      if (isGrowthGroup && growthRun) {
+        // Enforce Growth process lot identity: process_lot_id on lot_process_issues MUST
+        // reference the generated/current Growth inventory row (growthRun.id).
+        await client.query(
+          `UPDATE lot_process_issues
+           SET process_lot_id = $1
+           WHERE machine_process_id = $2`,
+          [growthRun.id, machProc.id]
+        );
+      }
+
+      // Backend Invariant Verification before Commit
+      if (isGrowthGroup) {
+        if (!growthRun || !growthRun.id) {
+          throw new Error(`Growth Process invariant violation: No Growth inventory row created for machine process ${machProc.id}.`);
+        }
+        const { rows: piCheck } = await client.query(
+          `SELECT pi.id, pi.process_lot_id, pl.lot_number AS process_lot_name
+           FROM lot_process_issues pi
+           JOIN inventory pl ON pl.id = pi.process_lot_id
+           WHERE pi.machine_process_id = $1`,
+          [machProc.id]
+        );
+
+        const expectedGrowthNumber = growthRun.lot_number || growthRun.lot_code;
+        for (const piRow of piCheck) {
+          if (String(piRow.process_lot_id) !== String(growthRun.id)) {
+            throw new Error(
+              `Growth Process invariant violation: process_lot_id #${piRow.process_lot_id} does not reference Growth inventory row #${growthRun.id}.`
+            );
+          }
+          if (piRow.process_lot_name !== expectedGrowthNumber) {
+            throw new Error(
+              `Growth Process invariant violation: Process Lot name '${piRow.process_lot_name}' does not equal Growth Number '${expectedGrowthNumber}'.`
+            );
+          }
+        }
+      }
+
       await client.query('COMMIT');
 
       // Real-Time: process started (machine-linked flow)
