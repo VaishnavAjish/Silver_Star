@@ -213,12 +213,18 @@ async function correctLotName({
       const baseNewName = normalizedNewName.split(' ')[0].trim();
       await client.query(
         `UPDATE inventory
-         SET lot_code   = REPLACE(lot_code, $2, $1),
-             lot_number = REPLACE(lot_number, $2, $1),
-             lot_name   = REPLACE(lot_name, $2, $1)
-         WHERE lot_code LIKE $2 || '%'
-            OR lot_number LIKE $2 || '%'
-            OR lot_name LIKE $2 || '%'`,
+         SET lot_code       = REPLACE(lot_code, $2, $1),
+             lot_number     = REPLACE(lot_number, $2, $1),
+             lot_name       = REPLACE(lot_name, $2, $1),
+             remarks        = REPLACE(remarks, $2, $1),
+             batch_no       = REPLACE(batch_no, $2, $1),
+             genealogy_path = REPLACE(genealogy_path, $2, $1)
+         WHERE lot_code ILIKE '%' || $2 || '%'
+            OR lot_number ILIKE '%' || $2 || '%'
+            OR lot_name ILIKE '%' || $2 || '%'
+            OR remarks ILIKE '%' || $2 || '%'
+            OR batch_no ILIKE '%' || $2 || '%'
+            OR genealogy_path ILIKE '%' || $2 || '%'`,
         [baseNewName, baseOldName]
       );
     } catch (invErr) {
