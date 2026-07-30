@@ -8,6 +8,7 @@ import {
   Package, Clock, Download, Printer, ArrowRight,
 } from 'lucide-react';
 import { exportToCSV, printTable } from '../../../shared/utils/exportUtils';
+import StockTransferChallanPrint from '../components/StockTransferChallanPrint';
 
 /* ── Status badge ────────────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
@@ -228,9 +229,24 @@ function TransferDetailModal({ transfer, onClose }) {
               )}
             </span>
           </div>
-          <button className="btn btn-primary" style={{ minWidth: 80, fontWeight: 600 }} onClick={onClose}>
-            Close
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {isApproved && (
+              <button
+                className="btn"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  borderColor: 'var(--brand)', color: 'var(--brand)',
+                  fontWeight: 600, fontSize: 12
+                }}
+                onClick={() => window.print()}
+              >
+                <Printer size={13} /> Print Challan
+              </button>
+            )}
+            <button className="btn btn-primary" style={{ minWidth: 80, fontWeight: 600 }} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -390,6 +406,7 @@ export default function StockTransferPage() {
   return (
     <>
       <TransferDetailModal transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
+      <StockTransferChallanPrint transfer={detailTransfer} />
 
       <div className="grid-page animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

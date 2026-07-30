@@ -250,13 +250,19 @@ router.get('/pending', authenticate, async (req, res) => {
         approver.full_name AS approved_by_name,
         (
           SELECT json_agg(json_build_object(
-            'lot_id',      ptl.lot_id,
-            'transfer_qty', ptl.transfer_qty,
-            'lot_code',    inv.lot_code,
-            'lot_number',  inv.lot_number,
-            'item_name',   i.name,
-            'unit',        inv.unit,
-            'total_value', inv.total_value
+            'lot_id',           ptl.lot_id,
+            'transfer_qty',     ptl.transfer_qty,
+            'lot_code',         inv.lot_code,
+            'lot_number',       inv.lot_number,
+            'item_name',        i.name,
+            'item_description', i.description,
+            'item_category',    i.category,
+            'unit',             inv.unit,
+            'weight',           inv.weight,
+            'dim_length',       inv.dim_length,
+            'dim_depth',        inv.dim_depth,
+            'dim_height',       inv.dim_height,
+            'total_value',      inv.total_value
           ) ORDER BY ptl.id)
           FROM pending_transfer_lots ptl
           JOIN inventory inv ON inv.id = ptl.lot_id
