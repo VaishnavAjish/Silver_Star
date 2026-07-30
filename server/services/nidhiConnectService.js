@@ -69,7 +69,7 @@ async function correctLotName({
     if (shouldRelease) await client.query('BEGIN');
 
     // 1. Fetch & Lock ImportRowLot
-    const { rows: lotRows } = await client.query(
+    let { rows: lotRows } = await client.query(
       `SELECT r.*, b.status as batch_status, s.series_prefix
        FROM import_row_lots r
        JOIN import_batches b ON r.batch_id = b.id
@@ -77,6 +77,20 @@ async function correctLotName({
        WHERE r.id = $1 FOR UPDATE OF r`,
       [importRowLotId]
     );
+
+    if (!lotRows.length) {
+      // Fallback lookup if importRowLotId passed is inventory.id
+      const { rows: fallbackRows } = await client.query(
+        `SELECT r.*, b.status as batch_status, s.series_prefix
+         FROM import_row_lots r
+         JOIN import_batches b ON r.batch_id = b.id
+         JOIN lot_series s ON r.lot_series_id = s.id
+         JOIN inventory inv ON (inv.import_row_lot_id = r.id OR r.lot_name = SPLIT_PART(inv.lot_code, ' ', 1) OR r.lot_name = SPLIT_PART(inv.lot_number, ' ', 1))
+         WHERE inv.id = $1 FOR UPDATE OF r`,
+        [importRowLotId]
+      );
+      lotRows = fallbackRows;
+    }
 
     if (!lotRows.length) {
       const err = new Error(`ImportRowLot with ID ${importRowLotId} not found`);
@@ -126,7 +140,7 @@ async function correctLotName({
     // 5. Company-Wide Uniqueness Pre-Check
     const { rows: existingNameRows } = await client.query(
       `SELECT id FROM import_row_lots WHERE company_id = $1 AND lot_name = $2 AND id != $3`,
-      [companyId, normalizedNewName, importRowLotId]
+      [companyId, normalizedNewName, lot.id]
     );
 
     if (existingNameRows.length > 0) {
@@ -162,7 +176,7 @@ async function correctLotName({
       // Verify sequence_number availability in new series
       const { rows: seqConflictRows } = await client.query(
         `SELECT id FROM import_row_lots WHERE lot_series_id = $1 AND sequence_number = $2 AND id != $3`,
-        [newSeriesId, sequenceNumber, importRowLotId]
+        [newSeriesId, sequenceNumber, lot.id]
       );
 
       if (seqConflictRows.length > 0) {
@@ -183,7 +197,7 @@ async function correctLotName({
            updated_at = NOW()
        WHERE id = $4 AND row_version = $5
        RETURNING *`,
-      [normalizedNewName, newSeriesId, newRowVersion, importRowLotId, lot.row_version]
+      [normalizedNewName, newSeriesId, newRowVersion, lot.id, lot.row_version]
     );
 
     if (!updatedLot) {
@@ -195,11 +209,17 @@ async function correctLotName({
 
     // 7b. Sync current inventory table views if matching lot exists
     try {
+      const baseOldName = oldLotName.split(' ')[0].trim();
+      const baseNewName = normalizedNewName.split(' ')[0].trim();
       await client.query(
         `UPDATE inventory
-         SET lot_code = $1, lot_number = $1, lot_name = $1
-         WHERE lot_code = $2 OR lot_number = $2 OR lot_name = $2`,
-        [normalizedNewName, oldLotName]
+         SET lot_code   = REPLACE(lot_code, $2, $1),
+             lot_number = REPLACE(lot_number, $2, $1),
+             lot_name   = REPLACE(lot_name, $2, $1)
+         WHERE lot_code LIKE $2 || '%'
+            OR lot_number LIKE $2 || '%'
+            OR lot_name LIKE $2 || '%'`,
+        [baseNewName, baseOldName]
       );
     } catch (invErr) {
       // Safe fallback if optional inventory table fields differ

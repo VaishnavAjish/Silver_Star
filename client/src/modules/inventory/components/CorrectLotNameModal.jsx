@@ -14,8 +14,9 @@ export default function CorrectLotNameModal({ open, onClose, lot, onUpdated }) {
 
   useEffect(() => {
     if (lot) {
-      const name = lot.lot_name || lot.lot_code || lot.lot_number || '';
-      setNewLotName(name);
+      const rawName = lot.lot_name || lot.lot_code || lot.lot_number || '';
+      const baseName = rawName.split(' ')[0].trim();
+      setNewLotName(baseName);
       setReason('');
       setBatchStatus(lot.batch_status || 'DRAFT');
     }
@@ -23,7 +24,8 @@ export default function CorrectLotNameModal({ open, onClose, lot, onUpdated }) {
 
   if (!lot) return null;
 
-  const currentLotName = lot.lot_name || lot.lot_code || lot.lot_number || '';
+  const rawLotName = lot.lot_name || lot.lot_code || lot.lot_number || '';
+  const currentLotName = rawLotName.split(' ')[0].trim();
   const currentSeqNum = lot.sequence_number || (currentLotName ? currentLotName.split('-').pop() : '');
   const isReadyForImport = batchStatus === 'READY_FOR_FINAL_IMPORT';
   const isB5Confirmed = Boolean(lot.b5_confirmed);
