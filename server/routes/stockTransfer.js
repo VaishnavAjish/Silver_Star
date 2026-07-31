@@ -168,14 +168,11 @@ async function getTransferDeptScope(userId, userRole) {
   }
 
   const ctx = await loadInventoryAuthContext(userId, userRole);
-  if (ctx.scopeMode === 'ALL') {
-    return { isAll: true, allowedDeptIds: [] };
-  }
-  if (ctx.scopeMode === 'NONE') {
-    return { isAll: false, isNone: true, allowedDeptIds: [] };
+  let allowed = [];
+  if (ctx.scopeMode === 'SELECTED' && ctx.allowedDeptIds?.length) {
+    allowed = ctx.allowedDeptIds.map(Number).filter(Boolean);
   }
 
-  let allowed = (ctx.allowedDeptIds || []).map(Number).filter(Boolean);
   if (!allowed.length) {
     const { rows: [u] } = await pool.query('SELECT department_id FROM users WHERE id = $1', [userId]);
     if (u && u.department_id) {
@@ -183,11 +180,15 @@ async function getTransferDeptScope(userId, userRole) {
     }
   }
 
-  if (!allowed.length) {
-    return { isAll: false, isNone: true, allowedDeptIds: [] };
+  if (allowed.length) {
+    return { isAll: false, isNone: false, allowedDeptIds: allowed };
   }
 
-  return { isAll: false, isNone: false, allowedDeptIds: allowed };
+  if (ctx.scopeMode === 'ALL') {
+    return { isAll: true, allowedDeptIds: [] };
+  }
+
+  return { isAll: false, isNone: true, allowedDeptIds: [] };
 }
 
 router.post('/pending', authenticate, async (req, res) => {
