@@ -46,21 +46,29 @@ function checkPermission(module, action, submodule = '') {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
     // 0. Super Admin — full unrestricted access to everything
-    if (req.user.role === 'super_admin') return next();
+    if (req.user.role === 'super_admin' || req.user.role === 'superadmin' || req.user.role === 'super admin') {
+      return next();
+    }
 
     try {
-      // 1. Check RBAC role_permissions via user_roles
-      const hasPerm = await hasPermission(req.user.id, module, action, submodule);
-      if (hasPerm) return next();
+      // Check if user has RBAC entries configured for this module
+      const { rows: [rbacCountRow] } = await pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         WHERE ur.user_id = $1 AND rp.module = $2`,
+        [req.user.id, module]
+      );
 
-      // Also check module-level (submodule = '') if submodule-specific returned nothing
-      if (submodule) {
-        const hasModulePerm = await hasPermission(req.user.id, module, action, '');
-        if (hasModulePerm) return next();
+      const hasRbacConfig = rbacCountRow && rbacCountRow.count > 0;
+
+      if (hasRbacConfig) {
+        const hasPerm = await hasPermission(req.user.id, module, action, submodule);
+        if (hasPerm) return next();
+
+        // Strict RBAC match: when RBAC entries exist, deny immediately if permission bit is 0
+        return res.status(403).json({ error: `Permission denied: ${module}.${action}` });
       }
-
-      // 2. Legacy admin role bypass
-      // if (req.user.role === 'admin') return next();
 
       // 3. Legacy user_permissions overrides
       const { rows } = await pool.query(
@@ -73,7 +81,7 @@ function checkPermission(module, action, submodule = '') {
           : res.status(403).json({ error: `Permission denied: ${module}.${action}` });
       }
 
-      // 4. Legacy ROLE_DEFAULTS fallback
+      // 4. Legacy ROLE_DEFAULTS fallback ONLY when no RBAC configuration exists
       const allowed = ROLE_DEFAULTS[req.user.role]?.[module]?.includes(action) ?? false;
       return allowed ? next() : res.status(403).json({ error: `Permission denied: ${module}.${action}` });
     } catch (err) {

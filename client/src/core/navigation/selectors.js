@@ -18,9 +18,10 @@ export function isEntryVisible(entry, ctx) {
     return !entry.module || hasPermission(entry.module, entry.requiredAction, entry.submodule || '');
   }
   if (entry.editorOnly) {
-    return !entry.module || hasPermission(entry.module, 'create') || hasPermission(entry.module, 'edit');
+    const sub = entry.submodule || '';
+    return !entry.module || hasPermission(entry.module, 'create', sub) || hasPermission(entry.module, 'edit', sub) || hasPermission(entry.module, 'view', sub) || hasPermission(entry.module, 'sidebar', sub);
   }
-  if (entry.submodule) return hasPermission(entry.module, 'sidebar', entry.submodule);
+  if (entry.submodule) return hasPermission(entry.module, 'sidebar', entry.submodule) || hasPermission(entry.module, 'view', entry.submodule);
   if (entry.module) return hasPermission(entry.module, 'view');
   return true;
 }

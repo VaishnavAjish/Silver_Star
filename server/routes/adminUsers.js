@@ -375,13 +375,13 @@ router.post('/users/:id/copy-setup', ...adminOnly, async (req, res) => {
       );
     }
 
-    // Copy Preferences
+    // Copy Preferences (excluding security visibility keys)
     if (copy_preferences) {
       await client.query('DELETE FROM user_preferences WHERE user_id = $1', [targetId]);
       await client.query(
         `INSERT INTO user_preferences (user_id, pref_key, pref_value)
          SELECT $1, pref_key, pref_value 
-         FROM user_preferences WHERE user_id = $2`,
+         FROM user_preferences WHERE user_id = $2 AND pref_key NOT LIKE 'vis.%'`,
         [targetId, source_user_id]
       );
     }

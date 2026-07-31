@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
+import { useTabs } from '../../../core/tabs';
 import toast from 'react-hot-toast';
 import {
   Search, X, RefreshCw, CheckCircle, XCircle, Trash2,
@@ -257,6 +258,7 @@ function TransferDetailModal({ transfer, onClose }) {
 export default function StockTransferPage() {
   const api      = useApi();
   const { user } = useAuth();
+  const { openTab } = useTabs();
   const navigate = useNavigate();
 
   const [transfers,      setTransfers]      = useState([]);
@@ -451,7 +453,10 @@ export default function StockTransferPage() {
               </button>
               <button 
                 className="btn btn-sm btn-primary" 
-                onClick={() => navigate('/inventory/stock-transfer/new')}
+                onClick={() => {
+                  openTab({ id: '/inventory/stock-transfer/new', name: 'New Transfer', path: '/inventory/stock-transfer/new', closable: true });
+                  navigate('/inventory/stock-transfer/new');
+                }}
                 style={{ marginLeft: 8 }}
               >
                 + New Transfer

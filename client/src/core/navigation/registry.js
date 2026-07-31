@@ -33,10 +33,10 @@ export const NAVIGATION = [
   {
     id: 'sec-inventory', label: 'Inventory', icon: Warehouse, actionType: 'group', children: [
       { id: 'all-inventory', label: 'All Inventory', path: '/inventory', icon: Boxes, module: 'inventory', submodule: 'all_inventory', pinnable: true, searchable: true },
-      { id: 'opening-entry', label: 'Opening Entry', path: '/inventory/opening', icon: Package, module: 'inventory', editorOnly: true, pinnable: true, searchable: true },
-      { id: 'closing-entry', label: 'Closing Entry', path: '/inventory/closing', icon: Package, module: 'inventory', editorOnly: true, pinnable: true, searchable: true },
-      { id: 'mix-lots', label: 'Mix Lots', path: '/inventory/mix', icon: Layers, module: 'inventory', editorOnly: true, searchable: true },
-      { id: 'stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer', icon: Send, module: 'inventory', editorOnly: true, pinnable: true, searchable: true },
+      { id: 'opening-entry', label: 'Opening Entry', path: '/inventory/opening', icon: Package, module: 'inventory', submodule: 'opening_entry', editorOnly: true, pinnable: true, searchable: true },
+      { id: 'closing-entry', label: 'Closing Entry', path: '/inventory/closing', icon: Package, module: 'inventory', submodule: 'closing_entry', editorOnly: true, pinnable: true, searchable: true },
+      { id: 'mix-lots', label: 'Mix Lots', path: '/inventory/mix', icon: Layers, module: 'inventory', submodule: 'mix_lots', editorOnly: true, searchable: true },
+      { id: 'stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer', icon: Send, module: 'inventory', submodule: 'stock_transfer', editorOnly: true, pinnable: true, searchable: true },
       { id: 'lot-movements', label: 'Lot Movements', path: '/lot-movements', icon: GitBranch, module: 'inventory', submodule: 'lot_movements', pinnable: true, searchable: true },
     ],
   },

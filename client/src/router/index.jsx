@@ -64,7 +64,7 @@ function buildRoute({ index: isIndex, path, Component: C, adminOnly, requirePerm
 
   let element = content;
   if (requirePermission) {
-    element = <PermissionGuard module={requirePermission.module} action={requirePermission.action || 'view'}>{element}</PermissionGuard>;
+    element = <PermissionGuard module={requirePermission.module} action={requirePermission.action || 'view'} submodule={requirePermission.submodule || ''}>{element}</PermissionGuard>;
   }
   if (adminOnly) {
     element = <AdminGuard>{element}</AdminGuard>;

@@ -41,6 +41,7 @@ async function genTransferNum(client) {
         `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;`,
         `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS dest_location_name VARCHAR(100);`,
         `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS destination_department_id INTEGER REFERENCES departments(id);`,
+        `ALTER TABLE pending_transfers ADD COLUMN IF NOT EXISTS source_department_id INTEGER REFERENCES departments(id);`,
         `CREATE TABLE IF NOT EXISTS pending_transfer_lots (
           id SERIAL PRIMARY KEY,
           pending_transfer_id INTEGER REFERENCES pending_transfers(id) ON DELETE CASCADE,
@@ -157,10 +158,49 @@ router.post('/preview', authenticate, async (req, res) => {
   } catch (err) { logger.error('[stockTransfer] /preview error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
+const { loadInventoryAuthContext } = require('../services/inventoryAuth');
+
+async function getTransferDeptScope(userId, userRole) {
+  const normRole = String(userRole || '').toLowerCase().trim();
+  const isSuperAdmin = ['super_admin', 'superadmin', 'super admin', 'admin', 'administrator'].includes(normRole);
+  if (isSuperAdmin) {
+    return { isAll: true, allowedDeptIds: [] };
+  }
+
+  const ctx = await loadInventoryAuthContext(userId, userRole);
+  if (ctx.scopeMode === 'ALL') {
+    return { isAll: true, allowedDeptIds: [] };
+  }
+  if (ctx.scopeMode === 'NONE') {
+    return { isAll: false, isNone: true, allowedDeptIds: [] };
+  }
+
+  let allowed = (ctx.allowedDeptIds || []).map(Number).filter(Boolean);
+  if (!allowed.length) {
+    const { rows: [u] } = await pool.query('SELECT department_id FROM users WHERE id = $1', [userId]);
+    if (u && u.department_id) {
+      allowed = [parseInt(u.department_id)];
+    }
+  }
+
+  if (!allowed.length) {
+    return { isAll: false, isNone: true, allowedDeptIds: [] };
+  }
+
+  return { isAll: false, isNone: false, allowedDeptIds: allowed };
+}
+
 router.post('/pending', authenticate, async (req, res) => {
   const client = await pool.primaryPool.connect();
   try {
     const { transferId, destination_department_id, selectedLotIds, transferQtys } = req.body;
+
+    const { rows: [userRow] } = await client.query('SELECT department_id FROM users WHERE id = $1', [req.user.id]);
+    const sourceDeptId = userRow?.department_id ? parseInt(userRow.department_id) : null;
+    if (!sourceDeptId) {
+      client.release();
+      return res.status(400).json({ error: 'Primary Department is not configured for this user.' });
+    }
 
     await client.query('BEGIN');
 
@@ -171,16 +211,22 @@ router.post('/pending', authenticate, async (req, res) => {
     const destLocationId = destDept.location_id;
     const destDeptName = destDept.dest_department_name;
 
+    const { rows: [srcDept] } = await client.query(
+      'SELECT d.location_id FROM departments d WHERE d.id = $1', [sourceDeptId]
+    );
+
     const { rows: [pt] } = await client.query(`
-      INSERT INTO pending_transfers (transfer_id, destination_location_id, destination_department_id, dest_location_name, created_by, status)
-      VALUES ($1, $2, $3, $4, $5, 'Pending')
+      INSERT INTO pending_transfers (transfer_id, source_department_id, source_location_id, destination_location_id, destination_department_id, dest_location_name, created_by, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending')
       ON CONFLICT (transfer_id) DO UPDATE SET
+        source_department_id = EXCLUDED.source_department_id,
+        source_location_id = EXCLUDED.source_location_id,
         destination_location_id = EXCLUDED.destination_location_id,
         destination_department_id = EXCLUDED.destination_department_id,
         dest_location_name = EXCLUDED.dest_location_name,
         status = 'Pending'
       RETURNING id
-    `, [transferId, destLocationId || null, destination_department_id || null, destDeptName || null, req.user?.id || null]);
+    `, [transferId, sourceDeptId, srcDept?.location_id || null, destLocationId || null, destination_department_id || null, destDeptName || null, req.user?.id || null]);
     
     await client.query('DELETE FROM pending_transfer_lots WHERE pending_transfer_id = $1', [pt.id]);
     
@@ -207,16 +253,29 @@ router.post('/pending', authenticate, async (req, res) => {
 // Diagnostic: see exact state of one pending transfer + current lot statuses
 router.get('/pending/:id/debug', authenticate, async (req, res) => {
   try {
+    const scope = await getTransferDeptScope(req.user.id, req.user.role);
     const { rows: [pt] } = await pool.query(
-      `SELECT pt.*, sl.name AS src_name, dl.name AS dst_name, u.full_name AS created_by_name
+      `SELECT pt.*, sd.name AS src_name, d.name AS dst_name, u.full_name AS created_by_name
        FROM pending_transfers pt
-       LEFT JOIN locations sl ON sl.id = pt.source_location_id
-       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
+       LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, (
+         SELECT inv.department_id FROM pending_transfer_lots ptl
+         JOIN inventory inv ON inv.id = ptl.lot_id
+         WHERE ptl.pending_transfer_id = pt.id LIMIT 1
+       ))
+       LEFT JOIN departments d ON d.id = pt.destination_department_id
        LEFT JOIN users u ON u.id = pt.created_by
        WHERE pt.id = $1`,
       [req.params.id]
     );
     if (!pt) return res.status(404).json({ error: 'Transfer not found' });
+
+    if (!scope.isAll) {
+      if (scope.isNone) return res.status(403).json({ error: 'Permission denied: department scope restriction' });
+      const srcId = pt.source_department_id ? parseInt(pt.source_department_id) : null;
+      const dstId = pt.destination_department_id ? parseInt(pt.destination_department_id) : null;
+      const hasAccess = (srcId && scope.allowedDeptIds.includes(srcId)) || (dstId && scope.allowedDeptIds.includes(dstId));
+      if (!hasAccess) return res.status(403).json({ error: 'Permission denied: department scope restriction' });
+    }
 
     const { rows: lots } = await pool.query(
       `SELECT ptl.lot_id, ptl.transfer_qty,
@@ -238,14 +297,45 @@ router.get('/pending/:id/debug', authenticate, async (req, res) => {
 router.get('/pending', authenticate, async (req, res) => {
   try {
     const { status } = req.query;
-    const statusFilter = status ? `WHERE pt.status = $1` : '';
-    const params = status ? [status] : [];
+    const scope = await getTransferDeptScope(req.user.id, req.user.role);
+
+    if (scope.isNone) {
+      return res.json({ data: [] });
+    }
+
+    const whereClauses = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (status) {
+      whereClauses.push(`pt.status = $${paramIdx}`);
+      params.push(status);
+      paramIdx++;
+    }
+
+    if (!scope.isAll) {
+      whereClauses.push(`(
+        COALESCE(pt.source_department_id, (
+          SELECT inv.department_id FROM pending_transfer_lots ptl
+          JOIN inventory inv ON inv.id = ptl.lot_id
+          WHERE ptl.pending_transfer_id = pt.id LIMIT 1
+        )) = ANY($${paramIdx}::int[])
+        OR
+        pt.destination_department_id = ANY($${paramIdx}::int[])
+      )`);
+      params.push(scope.allowedDeptIds);
+      paramIdx++;
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const { rows } = await pool.query(`
       SELECT
         pt.*,
-        sl.name  AS source_location_name,
+        COALESCE(sd.name, sl.name) AS source_location_name,
         COALESCE(d.name, dl.name)  AS destination_location_name,
+        sd.name AS source_department_name,
+        d.name AS destination_department_name,
         u.full_name AS created_by_name,
         approver.full_name AS approved_by_name,
         (
@@ -270,12 +360,17 @@ router.get('/pending', authenticate, async (req, res) => {
           WHERE ptl.pending_transfer_id = pt.id
         ) AS lots
       FROM pending_transfers pt
+      LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, (
+        SELECT inv.department_id FROM pending_transfer_lots ptl
+        JOIN inventory inv ON inv.id = ptl.lot_id
+        WHERE ptl.pending_transfer_id = pt.id LIMIT 1
+      ))
       LEFT JOIN locations sl ON sl.id = pt.source_location_id
       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
       LEFT JOIN departments d ON d.id = pt.destination_department_id
       LEFT JOIN users     u  ON u.id  = pt.created_by
       LEFT JOIN users     approver ON approver.id = pt.approved_by
-      ${statusFilter}
+      ${whereSql}
       ORDER BY pt.created_at DESC
     `, params);
 
@@ -678,6 +773,13 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
   const client = await pool.primaryPool.connect();
   try {
+    const { rows: [userRow] } = await client.query('SELECT department_id FROM users WHERE id = $1', [req.user.id]);
+    const sourceDeptId = userRow?.department_id ? parseInt(userRow.department_id) : null;
+    if (!sourceDeptId) {
+      client.release();
+      return res.status(400).json({ error: 'Primary Department is not configured for this user.' });
+    }
+
     await client.query('BEGIN');
 
     const lot_ids = payloadLots.map(l => l.lot_id);

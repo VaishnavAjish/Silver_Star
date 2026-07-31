@@ -268,7 +268,7 @@ router.post('/logout', asyncWrap(async (req, res) => {
 router.get('/me', authenticate, asyncWrap(async (req, res) => {
   const [userR, permsR, prefsR, rolesR, rbacPermsR] = await Promise.all([
     pool.query(
-      'SELECT id, username, email, full_name, role, last_login, mfa_enabled FROM users WHERE id = $1',
+      'SELECT id, username, email, full_name, role, last_login, mfa_enabled, department_id, department_id AS primary_department_id FROM users WHERE id = $1',
       [req.user.id]
     ).catch(err => { throw err; }),
     pool.query(
