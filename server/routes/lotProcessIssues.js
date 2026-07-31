@@ -1644,7 +1644,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
 
       if (req.body && req.body.legacy_seed_override) {
         const normRole = String(req.user ? req.user.role : '').toLowerCase().trim();
-        const isSuperAdmin = ['super_admin', 'superadmin', 'super admin'].includes(normRole);
+        const isSuperAdmin = ['super_admin', 'superadmin', 'super admin', 'admin', 'administrator'].includes(normRole);
         const hasPerm = isSuperAdmin || (req.user && await hasPermission(req.user.id, 'process_return', 'seed_remove_override'));
         if (!hasPerm) {
           throw new Error('Permission denied: legacy seed resolution override requires Super Admin permission.');
