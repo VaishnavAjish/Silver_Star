@@ -544,8 +544,8 @@ export default function StockTransferPage() {
                               </>
                             : '—'}
                         </td>
-                        <td style={{ fontSize: 11 }}>{t.source_location_name || '—'}</td>
-                        <td style={{ fontSize: 11 }}>{t.destination_location_name || '—'}</td>
+                        <td style={{ fontSize: 11 }}>{t.source_location_name || t.source_department_name || t.source_warehouse || 'Admin'}</td>
+                        <td style={{ fontSize: 11 }}>{t.destination_location_name || t.destination_department_name || t.destination_warehouse || 'Unknown'}</td>
                         <td><StatusBadge status={t.status} /></td>
                         <td style={{ fontSize: 11, color: 'var(--g500)' }}>
                           {t.created_at
