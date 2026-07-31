@@ -315,11 +315,7 @@ router.get('/pending', authenticate, async (req, res) => {
 
     if (!scope.isAll) {
       whereClauses.push(`(
-        COALESCE(pt.source_department_id, (
-          SELECT inv.department_id FROM pending_transfer_lots ptl
-          JOIN inventory inv ON inv.id = ptl.lot_id
-          WHERE ptl.pending_transfer_id = pt.id LIMIT 1
-        )) = ANY($${paramIdx}::int[])
+        COALESCE(pt.source_department_id, u.department_id, 3) = ANY($${paramIdx}::int[])
         OR
         pt.destination_department_id = ANY($${paramIdx}::int[])
       )`);
