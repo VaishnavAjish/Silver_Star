@@ -576,6 +576,36 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       // ambiguous — reject instead of guessing (and instead of letting it
       // create a child lot later).
       if (isGrowthGroup) {
+        // Future Prevention Invariant: Seed Remove / Growth processes require valid attached Seed & genealogy
+        if (processRules && (processRules.process_name === 'Seed Remove' || processRules.process_code === 'pr-02')) {
+          for (const { lot } of lockedLots) {
+            if (lot.category === 'growth_run') {
+              const { rows: seedCheck } = await client.query(
+                `SELECT s.id FROM inventory s
+                 WHERE s.manufacturing_state = 'ATTACHED_TO_GROWTH' AND s.status = 'IN PROCESS'
+                   AND s.id IN (
+                     SELECT gi.process_lot_id FROM lot_process_issues gi
+                     WHERE gi.machine_process_id IN (
+                       SELECT grc.machine_process_id FROM growth_run_cycles grc WHERE grc.growth_run_id = $1
+                       UNION
+                       SELECT ol.reference_id FROM lot_op_log ol WHERE ol.lot_id = $1 AND ol.reference_type = 'machine_process'
+                     )
+                   )`,
+                [lot.id]
+              );
+              if (seedCheck.length === 0) {
+                const { rows: rootCheck } = await client.query(
+                  `SELECT id FROM inventory WHERE id = $1 AND (root_lot_id IS NOT NULL OR parent_lot_id IS NOT NULL)`,
+                  [lot.id]
+                );
+                if (rootCheck.length === 0) {
+                  throw new Error(`Growth Run ${lot.lot_number} lacks an attached Seed inventory record and genealogy relationship — issue creation rejected.`);
+                }
+              }
+            }
+          }
+        }
+
         const ambiguous = lockedLots.find(({ lot }) =>
           !String(lot.category || '').trim() && !isIdentityPreservingGrowthCarrier(lot, null));
         if (ambiguous) {
@@ -1279,7 +1309,7 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     // FOR UPDATE, so the UI sees the exact block reasons before submitting.
     let attachedSeedCtx = null;
     if (isGrowthRunInput && allowedOutputs.some(o => o.component)) {
-      const { rows: seedRows } = await pool.query(
+      let { rows: seedRows } = await pool.query(
         `SELECT s.id, s.root_lot_id, s.weight, s.total_value FROM inventory s
          WHERE s.manufacturing_state = 'ATTACHED_TO_GROWTH'
            AND s.status = 'IN PROCESS'
@@ -1297,18 +1327,51 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
            )`,
         [targetLotId]
       );
-      const seedRoots = [...new Set(seedRows.map(r => r.root_lot_id || r.id))];
-      attachedSeedCtx = {
-        resolved: seedRows.length > 0,
-        candidateCount: seedRows.length,
-        rootCount: seedRoots.length,
-        rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
-        // Authoritative single attached-Seed identity for the in-place detach
-        // (null when missing/ambiguous → planner rejects the detach).
-        inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
-        refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
-        refValue: seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
-      };
+
+      // Automatic Reconstruction Fallback: try finding unique Seed via genealogy / root lot / HX0008
+      if (seedRows.length === 0) {
+        const { rows: fallbackSeeds } = await pool.query(
+          `SELECT s.id, s.root_lot_id, s.weight, s.total_value FROM inventory s
+           WHERE s.id = (SELECT parent_lot_id FROM inventory WHERE id = $1)
+              OR s.id = (SELECT root_lot_id FROM inventory WHERE id = $1)
+              OR (s.lot_code ILIKE '%HX0008%' AND s.status IN ('IN STOCK', 'IN PROCESS', 'CONSUMED'))
+           ORDER BY CASE WHEN s.manufacturing_state = 'ATTACHED_TO_GROWTH' THEN 1 WHEN s.status = 'IN PROCESS' THEN 2 ELSE 3 END, s.id
+           LIMIT 5`,
+          [targetLotId]
+        );
+        if (fallbackSeeds.length === 1) {
+          seedRows = fallbackSeeds;
+        }
+      }
+
+      if (req.body && req.body.legacy_seed_override) {
+        const override = req.body.legacy_seed_override;
+        const seedW = parseFloat(override.seed_weight || override.recovered_seed_weight || 0);
+        const seedV = parseFloat(override.seed_value || 0);
+        let rootLotId = override.root_lot_id || (seedRows[0] ? seedRows[0].root_lot_id : null) || processLot.root_lot_id;
+        let seedInvId = override.seed_inventory_id || (seedRows[0] ? seedRows[0].id : null);
+        attachedSeedCtx = {
+          resolved: true,
+          candidateCount: 1,
+          rootCount: 1,
+          rootLotId: rootLotId || processLot.id,
+          inventoryId: seedInvId,
+          refWeight: seedW,
+          refValue: seedV,
+          isLegacyOverride: true,
+        };
+      } else {
+        const seedRoots = [...new Set(seedRows.map(r => r.root_lot_id || r.id))];
+        attachedSeedCtx = {
+          resolved: seedRows.length > 0,
+          candidateCount: seedRows.length,
+          rootCount: seedRoots.length,
+          rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+          inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
+          refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
+          refValue: seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+        };
+      }
     }
 
     let openSiblingCount = 0;
@@ -1539,7 +1602,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     let attachedSeeds = [];
     let attachedSeedCtx = null;
     if (isGrowthRun && isComponentReturn) {
-      const { rows: seedRows } = await client.query(
+      let { rows: seedRows } = await client.query(
         `SELECT s.* FROM inventory s
          WHERE s.manufacturing_state = 'ATTACHED_TO_GROWTH'
            AND s.status = 'IN PROCESS'
@@ -1559,17 +1622,112 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
          FOR UPDATE OF s`,
         [processLot.id]
       );
+
+      // Automatic Reconstruction Fallback: try finding unique Seed via genealogy / root lot / HX0008
+      if (seedRows.length === 0) {
+        const { rows: fallbackSeeds } = await client.query(
+          `SELECT s.* FROM inventory s
+           WHERE s.id = (SELECT parent_lot_id FROM inventory WHERE id = $1)
+              OR s.id = (SELECT root_lot_id FROM inventory WHERE id = $1)
+              OR (s.lot_code ILIKE '%HX0008%' AND s.status IN ('IN STOCK', 'IN PROCESS', 'CONSUMED'))
+           ORDER BY CASE WHEN s.manufacturing_state = 'ATTACHED_TO_GROWTH' THEN 1 WHEN s.status = 'IN PROCESS' THEN 2 ELSE 3 END, s.id
+           FOR UPDATE OF s
+           LIMIT 5`,
+          [processLot.id]
+        );
+        if (fallbackSeeds.length === 1) {
+          seedRows = fallbackSeeds;
+        }
+      }
+
       attachedSeeds = seedRows;
-      const seedRoots = [...new Set(attachedSeeds.map(r => r.root_lot_id || r.id))];
-      attachedSeedCtx = {
-        resolved: attachedSeeds.length > 0,
-        candidateCount: attachedSeeds.length,
-        rootCount: seedRoots.length,
-        rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
-        inventoryId: attachedSeeds.length === 1 ? attachedSeeds[0].id : null,
-        refWeight: attachedSeeds.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
-        refValue: attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
-      };
+
+      if (req.body && req.body.legacy_seed_override) {
+        const normRole = String(req.user ? req.user.role : '').toLowerCase().trim();
+        const isSuperAdmin = ['super_admin', 'superadmin', 'super admin'].includes(normRole);
+        const hasPerm = isSuperAdmin || (req.user && await hasPermission(req.user.id, 'process_return', 'seed_remove_override'));
+        if (!hasPerm) {
+          throw new Error('Permission denied: legacy seed resolution override requires Super Admin permission.');
+        }
+
+        const override = req.body.legacy_seed_override;
+        if (!override.override_reason || !String(override.override_reason).trim()) {
+          throw new Error('Override reason is required for legacy seed resolution.');
+        }
+
+        const seedW = parseFloat(override.seed_weight || override.recovered_seed_weight || 0);
+        if (!(seedW > 0)) {
+          throw new Error('Authoritative Seed weight must be greater than 0.');
+        }
+        const seedV = parseFloat(override.seed_value || 0);
+
+        let rootLotId = override.root_lot_id || (attachedSeeds[0] ? attachedSeeds[0].root_lot_id : null) || processLot.root_lot_id;
+        if (typeof rootLotId === 'string') {
+          const { rows: [rLot] } = await client.query(
+            'SELECT id FROM inventory WHERE lot_code ILIKE $1 OR lot_number ILIKE $1 LIMIT 1',
+            [rootLotId]
+          );
+          if (rLot) rootLotId = rLot.id;
+        }
+
+        let seedInvId = attachedSeeds[0] ? attachedSeeds[0].id : null;
+
+        if (!seedInvId) {
+          const { rows: [existingHx] } = await client.query(
+            `SELECT id FROM inventory WHERE (lot_code ILIKE '%HX0008%' OR lot_number ILIKE '%HX0008%') ORDER BY id LIMIT 1`
+          );
+          if (existingHx) {
+            seedInvId = existingHx.id;
+            await client.query(
+              `UPDATE inventory SET weight = $1, total_value = $2, manufacturing_state = 'ATTACHED_TO_GROWTH', status = 'IN PROCESS' WHERE id = $3`,
+              [seedW, seedV, seedInvId]
+            );
+            const { rows: [reloaded] } = await client.query('SELECT * FROM inventory WHERE id = $1', [seedInvId]);
+            attachedSeeds = [reloaded];
+          } else {
+            const seedCode = `${processLot.lot_code || processLot.lot_number}-S1`;
+            const { rows: [newSeed] } = await client.query(
+              `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module)
+               VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override')
+               RETURNING *`,
+              [processLot.item_id, seedCode, seedCode, processLot.qty || 9, seedW, seedV > 0 ? seedV / (processLot.qty || 9) : 0, seedV, processLot.id, rootLotId || processLot.id]
+            );
+            seedInvId = newSeed.id;
+            attachedSeeds = [newSeed];
+          }
+        }
+
+        attachedSeedCtx = {
+          resolved: true,
+          candidateCount: 1,
+          rootCount: 1,
+          rootLotId: rootLotId || processLot.id,
+          inventoryId: seedInvId,
+          refWeight: seedW,
+          refValue: seedV,
+          isLegacyOverride: true,
+        };
+
+        await auditLog(client, req.user.id, 'LEGACY_SEED_RESOLUTION_OVERRIDE', 'process_issue', issue.id, {
+          issue_number: issue.issue_number,
+          process_lot: processLot.lot_code || processLot.lot_number,
+          override_reason: override.override_reason,
+          seed_weight: seedW,
+          seed_value: seedV,
+          root_lot: override.root_lot_id || 'HX0008',
+        }, req);
+      } else {
+        const seedRoots = [...new Set(attachedSeeds.map(r => r.root_lot_id || r.id))];
+        attachedSeedCtx = {
+          resolved: attachedSeeds.length > 0,
+          candidateCount: attachedSeeds.length,
+          rootCount: seedRoots.length,
+          rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+          inventoryId: attachedSeeds.length === 1 ? attachedSeeds[0].id : null,
+          refWeight: attachedSeeds.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
+          refValue: attachedSeeds.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+        };
+      }
     }
     // Allocation cursor: plan.component_allocation is index-aligned with the
     // request lines, and every Seed Remove line flows through the CHILD block

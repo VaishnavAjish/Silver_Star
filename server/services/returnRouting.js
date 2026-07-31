@@ -340,10 +340,14 @@ function buildReturnPlan({
     if (isGrowthRun) {
       // (1) Authoritative attached Seed is mandatory — NO fallback.
       if (!attachedSeed || !attachedSeed.resolved || (parseInt(attachedSeed.candidateCount) || 0) < 1) {
-        return invalid(
-          'Attached Seed could not be resolved for this Growth Run. Seed Remove ' +
-          'cannot continue without authoritative Seed quantity, weight, value, and genealogy.'
-        );
+        return {
+          valid: false,
+          route: 'REJECT',
+          legacyResolutionRequired: true,
+          error:
+            'Attached Seed could not be resolved for this Growth Run. Seed Remove ' +
+            'cannot continue without authoritative Seed quantity, weight, value, and genealogy.'
+        };
       }
       // (2) Multiple Seed roots without exact per-line attribution → block.
       if ((parseInt(attachedSeed.rootCount) || 0) > 1) {

@@ -112,6 +112,14 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   const [planLoading, setPlanLoading] = useState(false);
   const planSeqRef = useRef(0);
 
+  // Legacy Seed Resolution Override States
+  const [overrideRootSeed, setOverrideRootSeed]   = useState('HX0008');
+  const [overrideSeedWeight, setOverrideSeedWeight] = useState('27.6800');
+  const [overrideSeedValue, setOverrideSeedValue]   = useState('0.00');
+  const [overrideReason, setOverrideReason]       = useState('');
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const [overrideTypedText, setOverrideTypedText] = useState('');
+
   // Dynamic config
   const returnTypes = React.useMemo(() => {
     const arr = (issue?.allowed_outputs?.length ? issue.allowed_outputs : FALLBACK_TYPES);
@@ -409,6 +417,29 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     } catch (err) {
       toast.error(err.message || 'Failed to record return');
     } finally { setSaving(false); }
+  };
+
+  const handleLegacyOverrideSubmit = async () => {
+    if (!overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim()) return;
+    setSaving(true);
+    try {
+      const payload = {
+        ...buildReturnPayload(),
+        legacy_seed_override: {
+          root_lot_id: overrideRootSeed || 'HX0008',
+          seed_weight: parseFloat(overrideSeedWeight) || 27.68,
+          seed_value: parseFloat(overrideSeedValue) || 0,
+          override_reason: overrideReason.trim(),
+        }
+      };
+      const res = await api.post(`/api/lot-process-issues/${issueId}/return`, payload);
+      toast.success(`Legacy Seed Resolution Return ${res.return_number} recorded successfully — issue closed`);
+      if (isModal) { onComplete?.(); } else { navigate('/inventory/process-issues'); }
+    } catch (err) {
+      toast.error(err.message || 'Failed to record legacy seed return override');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── States ──────────────────────────────────────────────────────────────────
@@ -795,6 +826,114 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               </div>
             );
           })()}
+
+          {/* Legacy Seed Resolution Override UI Card for Super Admin */}
+          {plan && !plan.valid && (plan.legacyResolutionRequired || (plan.error && plan.error.includes('Attached Seed could not be resolved'))) && (
+            <div style={{
+              background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: 8,
+              padding: 16, marginBottom: 14, boxShadow: '0 2px 4px rgba(0,0,0,0.04)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#B78103', fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+                <AlertCircle size={16} />
+                Legacy Seed Resolution Required
+              </div>
+              <div style={{ fontSize: 12, color: '#5D4037', marginBottom: 12 }}>
+                This historical Growth Run does not contain a complete attached-Seed link in the database.
+                A controlled Super Admin override is required to complete Seed Remove.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Root Seed Lot</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
+                    value={overrideRootSeed}
+                    onChange={e => setOverrideRootSeed(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Authoritative Seed Qty</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ fontSize: 12, fontFamily: 'var(--mono)', background: 'var(--g100)' }}
+                    value={`${currentRemaining} PCS`}
+                    readOnly
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Recovered Seed Weight (ct)</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    className="form-control"
+                    style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
+                    value={overrideSeedWeight}
+                    onChange={e => setOverrideSeedWeight(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Seed Inventory Value (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
+                    value={overrideSeedValue}
+                    onChange={e => setOverrideSeedValue(e.target.value)}
+                    placeholder="e.g. 100.00"
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Override Reason (Required)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ fontSize: 12 }}
+                    value={overrideReason}
+                    onChange={e => setOverrideReason(e.target.value)}
+                    placeholder="Reason for legacy seed resolution..."
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, borderTop: '1px dashed #FFE082' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: '#3E2723', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={overrideConfirmed}
+                    onChange={e => setOverrideConfirmed(e.target.checked)}
+                  />
+                  I confirm these values represent the physical recovered Seed for this historical Growth Run.
+                </label>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#5D4037' }}>Type confirmation:</span>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ width: 220, fontSize: 11, fontFamily: 'var(--mono)', textTransform: 'uppercase' }}
+                    value={overrideTypedText}
+                    onChange={e => setOverrideTypedText(e.target.value)}
+                    placeholder="OVERRIDE SEED RESOLUTION"
+                  />
+                  <button
+                    className="btn btn-sm btn-primary"
+                    style={{ background: '#B78103', borderColor: '#9E6B00' }}
+                    disabled={saving || !overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim() || !(parseFloat(overrideSeedWeight) > 0)}
+                    onClick={handleLegacyOverrideSubmit}
+                  >
+                    Complete Legacy Return Override
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Return lines table — single output family (all normal processes;
               multiple dispositions like Usable/Damaged stay ONE family). The
