@@ -332,10 +332,10 @@ router.get('/pending', authenticate, async (req, res) => {
     const { rows } = await pool.query(`
       SELECT
         pt.*,
-        COALESCE(sd.name, sl.name) AS source_location_name,
-        COALESCE(d.name, dl.name)  AS destination_location_name,
-        sd.name AS source_department_name,
-        d.name AS destination_department_name,
+        COALESCE(sd.name, sl.name, 'Admin') AS source_location_name,
+        COALESCE(d.name, dl.name, 'Unknown')  AS destination_location_name,
+        COALESCE(sd.name, 'Admin') AS source_department_name,
+        COALESCE(d.name, 'Unknown') AS destination_department_name,
         u.full_name AS created_by_name,
         approver.full_name AS approved_by_name,
         (
@@ -360,16 +360,12 @@ router.get('/pending', authenticate, async (req, res) => {
           WHERE ptl.pending_transfer_id = pt.id
         ) AS lots
       FROM pending_transfers pt
-      LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, (
-        SELECT inv.department_id FROM pending_transfer_lots ptl
-        JOIN inventory inv ON inv.id = ptl.lot_id
-        WHERE ptl.pending_transfer_id = pt.id LIMIT 1
-      ))
+      LEFT JOIN users u ON u.id = pt.created_by
+      LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, u.department_id, 3)
       LEFT JOIN locations sl ON sl.id = pt.source_location_id
       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
       LEFT JOIN departments d ON d.id = pt.destination_department_id
-      LEFT JOIN users     u  ON u.id  = pt.created_by
-      LEFT JOIN users     approver ON approver.id = pt.approved_by
+      LEFT JOIN users approver ON approver.id = pt.approved_by
       ${whereSql}
       ORDER BY pt.created_at DESC
     `, params);
