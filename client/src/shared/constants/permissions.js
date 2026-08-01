@@ -14,6 +14,7 @@ export const PERM_BITS = {
   override_weight_variance: 2048,
 };
 
+export const ALL_PERMISSION_BITS = 4095;
 export const FULL_ACCESS = 4095;
 
 export const ACTIONS = [
