@@ -335,14 +335,17 @@ app.post('/api/cache/flush', authenticate, async (req, res) => {
 });
 
 // ── Static React Build (production single-server mode) ───────────────────────
-if (process.env.SERVE_STATIC === 'true') {
-  const path = require('path');
-  const staticDir = path.join(__dirname, 'public');
+const path = require('path');
+const fs = require('fs');
+const clientDistDir = path.join(__dirname, '../client/dist');
+const serverPublicDir = path.join(__dirname, 'public');
+const staticDir = fs.existsSync(clientDistDir) ? clientDistDir : serverPublicDir;
+
+if (process.env.SERVE_STATIC === 'true' || process.env.NODE_ENV === 'production' || fs.existsSync(staticDir)) {
   app.use(express.static(staticDir, { 
-    maxAge: '1y', 
-    immutable: true,
-    setHeaders: (res, path) => {
-      if (path.endsWith('index.html')) {
+    maxAge: '1d',
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
