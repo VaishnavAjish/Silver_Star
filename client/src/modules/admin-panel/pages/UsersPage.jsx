@@ -35,6 +35,7 @@ const roleColors = ['#0D7C5F', '#1565C0', '#6A1B9A', '#E65100', '#2E7D32', '#C62
 const PAGE_TABS = [
   { id: 'users', label: 'Users',       icon: Users },
   { id: 'audit', label: 'Audit Trail', icon: Clock },
+  { id: 'logger', label: 'Logger',      icon: Terminal },
 ];
 
 /* ── Skeleton shimmer ───────────────────────────────────────── */
@@ -493,10 +494,7 @@ export default function UsersPage() {
         {/* ── Tab Bar ── */}
         <div style={{ borderBottom: '1px solid var(--g200)', background: '#fff', flexShrink: 0 }}>
           <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', overflowX: 'auto' }}>
-            {[
-              ...PAGE_TABS,
-              ...((!me?.role || String(me?.role).toLowerCase().includes('super') || String(me?.role).toLowerCase().includes('admin')) ? [{ id: 'logger', label: 'Logger', icon: Terminal }] : [])
-            ].map(t => (
+            {PAGE_TABS.map(t => (
               <button key={t.id}
                 className={`adm-page-tab${pageTab === t.id ? ' active' : ''}`}
                 onClick={() => setPageTab(t.id)}>

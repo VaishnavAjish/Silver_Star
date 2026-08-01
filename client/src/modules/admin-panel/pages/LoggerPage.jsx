@@ -53,7 +53,6 @@ export default function LoggerPage() {
 
   // Initial and Polling load
   useEffect(() => {
-    if (!isSuperAdmin) return;
     fetchBackendLogs();
     fetchFrontendLogs();
 
@@ -68,7 +67,7 @@ export default function LoggerPage() {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [isSuperAdmin, backendLevel, frontendLevel, autoRefresh]);
+  }, [backendLevel, frontendLevel, autoRefresh]);
 
   // Check migrations
   const handleCheckMigrations = async () => {
@@ -95,21 +94,6 @@ export default function LoggerPage() {
       toast.error('Failed to clear logs');
     }
   };
-
-  if (!isSuperAdmin) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center' }}>
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 12, padding: '16px 24px',
-          background: '#FFEBEE', borderRadius: 10, border: '1px solid #FFCDD2', color: '#C62828',
-          fontSize: 14, fontWeight: 600,
-        }}>
-          <Shield size={20} />
-          Access Denied: The Logger page is strictly restricted to Super Admin role.
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '20px 24px', background: '#F8FAFC', boxSizing: 'border-box' }}>
