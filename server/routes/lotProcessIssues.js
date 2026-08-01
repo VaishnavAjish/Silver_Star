@@ -63,6 +63,33 @@ async function logOp(client, lotId, op, refType, refId, qtyDelta, newStatus, not
   );
 }
 
+// ── TEMPORARY FIX ROUTE ──────────────────────────────────────────────────────
+router.get('/fix-qty', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: issues } = await client.query("SELECT * FROM lot_process_issues WHERE issue_number = 'PI-202608-1053'");
+    if (!issues.length) throw new Error('Issue not found!');
+    const issue = issues[0];
+    if (Number(issue.issued_qty) !== 21) {
+       await client.query('ROLLBACK');
+       return res.json({ message: 'Already fixed or qty is not 21' });
+    }
+    await client.query("UPDATE lot_process_issues SET issued_qty = 18 WHERE id = $1", [issue.id]);
+    await client.query("UPDATE inventory SET qty = qty - 3 WHERE id = $1", [issue.process_lot_id]);
+    await client.query("UPDATE inventory SET qty = qty + 3, status = 'IN STOCK' WHERE id = $1", [issue.source_lot_id]);
+    await client.query("UPDATE lot_op_log SET qty_delta = 18 WHERE reference_id = $1 AND operation = 'issue_receive'", [issue.id]);
+    await client.query("UPDATE lot_op_log SET qty_delta = -18 WHERE reference_id = $1 AND operation = 'issue'", [issue.id]);
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Fixed PI-202608-1053 to 18 pieces!' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ── LIST ──────────────────────────────────────────────────────────────────────
 router.get('/', authenticate, async (req, res) => {
   try {
