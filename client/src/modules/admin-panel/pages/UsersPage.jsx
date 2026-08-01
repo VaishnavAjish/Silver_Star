@@ -471,14 +471,29 @@ export default function UsersPage() {
         {/* ── Page Header ── */}
         <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
           <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 2px 8px rgba(13,124,95,.3)', flexShrink: 0 }}>
-                <ShieldCheck size={20} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 2px 8px rgba(13,124,95,.3)', flexShrink: 0 }}>
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <h1 style={{ fontSize: 19, fontWeight: 700, color: 'var(--g900)', lineHeight: 1.25 }}>Admin Panel</h1>
+                  <p style={{ fontSize: 12, color: 'var(--g500)', marginTop: 1 }}>Manage system users, roles, permissions and preferences</p>
+                </div>
               </div>
-              <div>
-                <h1 style={{ fontSize: 19, fontWeight: 700, color: 'var(--g900)', lineHeight: 1.25 }}>Admin Panel</h1>
-                <p style={{ fontSize: 12, color: 'var(--g500)', marginTop: 1 }}>Manage system users, roles, permissions and preferences</p>
-              </div>
+
+              <button
+                type="button"
+                onClick={() => setPageTab('logger')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '8px 16px', borderRadius: 8, background: '#0F172A',
+                  color: '#38BDF8', border: '1px solid #1E293B', fontWeight: 600, fontSize: 12.5,
+                  cursor: 'pointer', boxShadow: '0 2px 6px rgba(15,23,42,0.15)', transition: 'all 0.15s',
+                }}
+              >
+                <Terminal size={15} /> System Logger
+              </button>
             </div>
 
             {/* Stat cards — always visible */}

@@ -343,13 +343,11 @@ const staticDir = fs.existsSync(clientDistDir) ? clientDistDir : serverPublicDir
 
 if (process.env.SERVE_STATIC === 'true' || process.env.NODE_ENV === 'production' || fs.existsSync(staticDir)) {
   app.use(express.static(staticDir, { 
-    maxAge: '1d',
+    maxAge: 0,
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      }
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
     }
   }));
   // SPA fallback — all non-API routes serve index.html

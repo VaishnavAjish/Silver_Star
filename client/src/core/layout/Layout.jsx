@@ -40,7 +40,7 @@ const ROOT_PATHS = new Set([
   '/reports/accounts-receivable', '/reports/accounts-payable',
   '/reports/bank-reconciliation', '/reports/cost-center',
   '/reports/fund-utilization',
-  '/admin/users', '/clipboard',
+  '/admin/users', '/admin/logger', '/clipboard',
 ]);
 
 // Sidebar item. Permission filtering happens UPSTREAM via filterNavigation, so
@@ -189,6 +189,7 @@ function LayoutInner() {
     '/manufacturing/control-tower': 'Manufacturing Control Tower',
     '/manufacturing/process-master': 'Process Master',
     '/admin/users': 'Admin Panel',
+    '/admin/logger': 'System Logger',
     '/clipboard': 'Clipboard',
   };
 
