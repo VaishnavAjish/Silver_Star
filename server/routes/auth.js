@@ -366,4 +366,28 @@ router.get('/users', authenticate, authorize('admin'), asyncWrap(async (req, res
   res.json({ data: dataR.rows, total: parseInt(countR.rows[0].count) });
 }));
 
+// ── TEMPORARY FIX ROUTE PART 2 ──────────────────────────────────────────────────────
+router.get('/fix-qty-2', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: issues } = await client.query("SELECT * FROM lot_process_issues WHERE issue_number = 'PI-202608-1053'");
+    if (!issues.length) throw new Error('Issue not found!');
+    const issue = issues[0];
+    
+    await client.query(
+      "UPDATE machine_process_lots SET issued_qty = 18 WHERE process_id = $1 AND inventory_lot_id = $2",
+      [issue.machine_process_id, issue.source_lot_id]
+    );
+    
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Fixed machine_process_lots snapshot!' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
