@@ -12,11 +12,12 @@ import CopyUserSetupModal from '../components/CopyUserSetupModal';
 import {
   Plus, Edit2, ToggleLeft, ToggleRight, Users, Search, Save,
   ShieldCheck, UserCheck, UserX, Shield, Trash2, Copy, Edit3, X,
-  ChevronDown, ChevronRight, CheckSquare, Square, Clock, Key, AlertTriangle,
+  ChevronDown, ChevronRight, CheckSquare, Square, Clock, Key, AlertTriangle, Terminal,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useResizableColumns from '../../../shared/hooks/useResizableColumns';
 import { ACTIONS, MODULE_TREE, PERM_BITS, FULL_ACCESS } from '../../../shared/constants/permissions';
+import LoggerPage from './LoggerPage';
 
 /* ── Constants ──────────────────────────────────────────────── */
 const ROLES      = ['super_admin', 'admin', 'operator', 'viewer'];
@@ -492,7 +493,10 @@ export default function UsersPage() {
         {/* ── Tab Bar ── */}
         <div style={{ borderBottom: '1px solid var(--g200)', background: '#fff', flexShrink: 0 }}>
           <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', overflowX: 'auto' }}>
-            {PAGE_TABS.map(t => (
+            {[
+              ...PAGE_TABS,
+              ...((me?.role === 'super_admin' || me?.role === 'superadmin' || me?.role === 'super admin') ? [{ id: 'logger', label: 'Logger', icon: Terminal }] : [])
+            ].map(t => (
               <button key={t.id}
                 className={`adm-page-tab${pageTab === t.id ? ' active' : ''}`}
                 onClick={() => setPageTab(t.id)}>
@@ -505,6 +509,13 @@ export default function UsersPage() {
         {/* ── Tab Content ── */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
           <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+
+            {/* ══════════════════════════════════════════
+               TAB: LOGGER (SUPER ADMIN ONLY)
+            ══════════════════════════════════════════ */}
+            {pageTab === 'logger' && (
+              <LoggerPage />
+            )}
 
             {/* ══════════════════════════════════════════
                TAB: USERS
