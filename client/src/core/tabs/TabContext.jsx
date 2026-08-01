@@ -13,9 +13,8 @@ const HOME_TAB = {
   closable: false,
 };
 
-// Phase 33: routes that no longer exist. Any persisted tab pointing at one of
-// these is dropped on load so stale tabs can't reference removed components.
-const DEAD_TAB_IDS = new Set(['/rough-growth/new']);
+// Remove legacy admin user tab cache to force fresh render of Admin Panel with Logger tab
+const DEAD_TAB_IDS = new Set(['/rough-growth/new', '/admin/users']);
 
 function loadPersistedTabs() {
   // If auto-restore is disabled, always return clean workspace with only Dashboard
