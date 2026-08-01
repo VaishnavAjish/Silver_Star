@@ -13,7 +13,7 @@ const router = express.Router();
 function superAdminOnly(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
   const normRole = String(req.user.role || '').toLowerCase().trim();
-  if (normRole === 'super_admin' || normRole === 'superadmin' || normRole === 'super admin') {
+  if (normRole.includes('super') || normRole === 'admin') {
     return next();
   }
   return res.status(403).json({ error: 'Access denied: Super Admin only' });

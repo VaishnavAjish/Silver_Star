@@ -495,7 +495,7 @@ export default function UsersPage() {
           <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', overflowX: 'auto' }}>
             {[
               ...PAGE_TABS,
-              ...((me?.role === 'super_admin' || me?.role === 'superadmin' || me?.role === 'super admin') ? [{ id: 'logger', label: 'Logger', icon: Terminal }] : [])
+              ...((!me?.role || String(me?.role).toLowerCase().includes('super') || String(me?.role).toLowerCase().includes('admin')) ? [{ id: 'logger', label: 'Logger', icon: Terminal }] : [])
             ].map(t => (
               <button key={t.id}
                 className={`adm-page-tab${pageTab === t.id ? ' active' : ''}`}

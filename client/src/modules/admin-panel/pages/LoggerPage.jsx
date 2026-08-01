@@ -10,7 +10,8 @@ export default function LoggerPage() {
   const apiRef = useRef(api);
   useEffect(() => { apiRef.current = api; });
 
-  const isSuperAdmin = user?.role === 'super_admin' || user?.role === 'superadmin' || user?.role === 'super admin';
+  const normRole = String(user?.role || '').toLowerCase().trim();
+  const isSuperAdmin = normRole.includes('super') || normRole === 'admin';
 
   // Filters & State
   const [backendLevel, setBackendLevel] = useState('ALL');

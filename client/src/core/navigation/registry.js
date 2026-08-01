@@ -18,7 +18,7 @@
  */
 import {
   LayoutDashboard, ClipboardList, Warehouse, Cpu, Gem, ShoppingCart, FileText,
-  Building2, Landmark, BarChart3, Database, ShieldCheck,
+  Building2, Landmark, BarChart3, Database, ShieldCheck, Terminal,
   Package, Send, RotateCcw, Clock, Layers, GitBranch, Boxes,
   Receipt, CreditCard, HandCoins, BookOpen, TrendingUp, TrendingDown, Users,
   Calculator, Settings as Cog, Wrench, ClipboardCheck,
@@ -130,6 +130,7 @@ export const NAVIGATION = [
   },
 
   { id: 'admin-users', label: 'Admin Panel', path: '/admin/users', icon: ShieldCheck, actionType: 'route', module: 'admin', submodule: 'users', adminOnly: true, searchable: true },
+  { id: 'admin-logger', label: 'System Logger', path: '/admin/logger', icon: Terminal, actionType: 'route', module: 'admin', submodule: 'users', adminOnly: true, searchable: true },
 ];
 
 // ── Global + Create menu — driven by the SAME registry (actionType='create').
