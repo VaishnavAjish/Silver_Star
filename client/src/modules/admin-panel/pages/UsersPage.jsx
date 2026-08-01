@@ -496,7 +496,7 @@ export default function UsersPage() {
         {/* ── Tab Bar ── */}
         <div style={{ borderBottom: '1px solid var(--g200)', background: '#fff', flexShrink: 0 }}>
           <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', overflowX: 'auto' }}>
-            {PAGE_TABS.map(t => (
+            {PAGE_TABS.filter(t => t.id !== 'logger' || me?.role === 'super_admin').map(t => (
               <button key={t.id}
                 className={`adm-page-tab${pageTab === t.id ? ' active' : ''}`}
                 onClick={() => setPageTab(t.id)}>
@@ -513,7 +513,7 @@ export default function UsersPage() {
             {/* ══════════════════════════════════════════
                TAB: LOGGER (SUPER ADMIN ONLY)
             ══════════════════════════════════════════ */}
-            {pageTab === 'logger' && (
+            {pageTab === 'logger' && me?.role === 'super_admin' && (
               <LoggerPage />
             )}
 
