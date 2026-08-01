@@ -481,19 +481,6 @@ export default function UsersPage() {
                   <p style={{ fontSize: 12, color: 'var(--g500)', marginTop: 1 }}>Manage system users, roles, permissions and preferences</p>
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setPageTab('logger')}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  padding: '8px 16px', borderRadius: 8, background: '#0F172A',
-                  color: '#38BDF8', border: '1px solid #1E293B', fontWeight: 600, fontSize: 12.5,
-                  cursor: 'pointer', boxShadow: '0 2px 6px rgba(15,23,42,0.15)', transition: 'all 0.15s',
-                }}
-              >
-                <Terminal size={15} /> System Logger
-              </button>
             </div>
 
             {/* Stat cards — always visible */}
