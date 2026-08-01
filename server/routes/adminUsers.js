@@ -296,7 +296,8 @@ router.get('/users/:id/effective-access', ...adminOnly, async (req, res) => {
 router.get('/users/:id/setup-summary', ...adminOnly, async (req, res) => {
   const sourceId = Number(req.params.id);
   try {
-    const qPerms = pool.query('SELECT COUNT(*) FROM user_permissions WHERE user_id = $1', [sourceId]);
+    const qPerms = pool.query('SELECT COUNT(*) FROM user_permission_overrides WHERE user_id = $1', [sourceId]);
+    const qLegacyPerms = pool.query('SELECT COUNT(*) FROM user_permissions WHERE user_id = $1', [sourceId]);
     const qPrefs = pool.query('SELECT COUNT(*) FROM user_preferences WHERE user_id = $1', [sourceId]);
     const qDash  = pool.query('SELECT COUNT(*) FROM user_dashboard_widgets WHERE user_id = $1', [sourceId]);
     const qTmpl  = pool.query('SELECT COUNT(*) FROM template_shares WHERE user_id = $1', [sourceId]);
@@ -307,10 +308,10 @@ router.get('/users/:id/setup-summary', ...adminOnly, async (req, res) => {
     const qScope = pool.query('SELECT scope_mode FROM user_inventory_scopes WHERE user_id = $1', [sourceId]);
     const qDepts = pool.query('SELECT COUNT(*) FROM user_inventory_scope_depts WHERE user_id = $1', [sourceId]);
 
-    const [perms, prefs, dash, tmpl, ownTmpl, scope, depts] = await Promise.all([qPerms, qPrefs, qDash, qTmpl, qOwnTmpl, qScope, qDepts]);
+    const [perms, legacyPerms, prefs, dash, tmpl, ownTmpl, scope, depts] = await Promise.all([qPerms, qLegacyPerms, qPrefs, qDash, qTmpl, qOwnTmpl, qScope, qDepts]);
 
     res.json({
-      permissions_count: parseInt(perms.rows[0].count),
+      permissions_count: parseInt(perms.rows[0].count) || parseInt(legacyPerms.rows[0].count),
       preferences_count: parseInt(prefs.rows[0].count),
       dashboard_count: parseInt(dash.rows[0].count),
       shared_templates_count: parseInt(tmpl.rows[0].count),
@@ -344,8 +345,16 @@ router.post('/users/:id/copy-setup', ...adminOnly, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Copy Permissions
+    // Copy Permission Overrides
     if (copy_permissions) {
+      await client.query('DELETE FROM user_permission_overrides WHERE user_id = $1', [targetId]);
+      await client.query(
+        `INSERT INTO user_permission_overrides (user_id, module, submodule, allow_mask, deny_mask, created_by, updated_by)
+         SELECT $1, module, submodule, allow_mask, deny_mask, $3, $3
+         FROM user_permission_overrides WHERE user_id = $2`,
+        [targetId, source_user_id, req.user.id]
+      );
+      // Legacy user_permissions copy
       await client.query('DELETE FROM user_permissions WHERE user_id = $1', [targetId]);
       await client.query(
         `INSERT INTO user_permissions (user_id, module, permission_key, allowed)

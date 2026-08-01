@@ -16,59 +16,180 @@ const PERM_BITS = {
   override_weight_variance: 2048,
 };
 
-const FULL_ACCESS = 4095;
+const ALL_PERMISSION_BITS = Object.values(PERM_BITS).reduce((a, b) => a | b, 0); // 4095
+const FULL_ACCESS = ALL_PERMISSION_BITS;
 
 /**
- * Get effective permissions for a user on a given module+submodule.
- * Checks: role_permissions via user_roles → then legacy user_permissions fallback
- * Returns a bitmask integer.
+ * Resolve canonical effective permission bitmask for a user on a given module+submodule.
+ * Effective precedence:
+ *   1. Super Admin bypass (FULL_ACCESS)
+ *   2. Role baseline permissions (role_mask)
+ *   3. User overrides (allow_mask, deny_mask)
+ *   Effective = ((role_mask | allow_mask) & ~deny_mask) & ALL_PERMISSION_BITS
  */
-async function getUserPermissionBitmask(userId, module, submodule = '') {
-  const { rows: [row] } = await pool.query(
+async function resolveEffectivePermission(userId, module, submodule = '', userRole = null) {
+  if (!userRole) {
+    const { rows: [u] } = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    userRole = u?.role;
+  }
+  const normRole = String(userRole || '').toLowerCase().trim();
+  if (['super_admin', 'superadmin', 'super admin'].includes(normRole)) {
+    return ALL_PERMISSION_BITS;
+  }
+
+  // 1. Query role baseline mask
+  const { rows: [roleRow] } = await pool.query(
     `SELECT BIT_OR(rp.permissions) AS mask
      FROM user_roles ur
      JOIN role_permissions rp ON rp.role_id = ur.role_id
      WHERE ur.user_id = $1 AND rp.module = $2 AND rp.submodule = $3`,
     [userId, module, submodule]
   );
+  const roleMask = roleRow && roleRow.mask != null ? parseInt(roleRow.mask) : 0;
 
-  if (row && row.mask != null) {
-    return parseInt(row.mask);
-  }
-
-  // Fallback: legacy user_permissions table
-  const { rows: legacyRows } = await pool.query(
-    `SELECT permission_key, allowed FROM user_permissions
-     WHERE user_id = $1 AND module = $2`,
-    [userId, module]
+  // 2. Query user overrides
+  const { rows: [overrideRow] } = await pool.query(
+    `SELECT allow_mask, deny_mask FROM user_permission_overrides
+     WHERE user_id = $1 AND module = $2 AND submodule = $3`,
+    [userId, module, submodule]
   );
 
-  if (legacyRows.length > 0) {
-    let mask = 0;
-    for (const p of legacyRows) {
-      if (p.allowed && PERM_BITS[p.permission_key] !== undefined) {
-        mask |= PERM_BITS[p.permission_key];
-      }
-    }
-    return mask;
+  let allowMask = 0;
+  let denyMask = 0;
+
+  if (overrideRow) {
+    allowMask = parseInt(overrideRow.allow_mask || 0);
+    denyMask = parseInt(overrideRow.deny_mask || 0);
   }
 
-  return 0;
+  // 3. Fallback: if no role_permissions AND no overrides exist for user, check legacy user_permissions
+  if (!roleRow?.mask && !overrideRow) {
+    const { rows: legacyRows } = await pool.query(
+      `SELECT permission_key, allowed FROM user_permissions
+       WHERE user_id = $1 AND module = $2`,
+      [userId, module]
+    );
+    if (legacyRows.length > 0) {
+      for (const p of legacyRows) {
+        if (p.allowed && PERM_BITS[p.permission_key] !== undefined) {
+          allowMask |= PERM_BITS[p.permission_key];
+        }
+      }
+    }
+  }
+
+  // Calculate effective mask limited to ALL_PERMISSION_BITS
+  const effectiveMask = ((roleMask | allowMask) & ~denyMask) & ALL_PERMISSION_BITS;
+  return effectiveMask;
+}
+
+/**
+ * Get all effective permissions for a user across modules and submodules.
+ * Used for /api/auth/me payload.
+ */
+async function getAllEffectivePermissionsForUser(userId, userRole = null) {
+  if (!userRole) {
+    const { rows: [u] } = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    userRole = u?.role;
+  }
+  const normRole = String(userRole || '').toLowerCase().trim();
+  const isSuperAdmin = ['super_admin', 'superadmin', 'super admin'].includes(normRole);
+
+  if (isSuperAdmin) {
+    return [{ module: '*', submodule: '*', mask: ALL_PERMISSION_BITS }];
+  }
+
+  // Fetch all role permissions for user
+  const { rows: rolePerms } = await pool.query(
+    `SELECT rp.module, rp.submodule, BIT_OR(rp.permissions)::int AS mask
+     FROM user_roles ur
+     JOIN role_permissions rp ON rp.role_id = ur.role_id
+     WHERE ur.user_id = $1
+     GROUP BY rp.module, rp.submodule`,
+    [userId]
+  );
+
+  // Fetch all user permission overrides for user
+  const { rows: overrides } = await pool.query(
+    `SELECT module, submodule, allow_mask, deny_mask
+     FROM user_permission_overrides
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  // Fetch legacy user permissions
+  const { rows: legacyPerms } = await pool.query(
+    `SELECT module, permission_key, allowed
+     FROM user_permissions WHERE user_id = $1`,
+    [userId]
+  );
+
+  const map = new Map();
+
+  for (const r of rolePerms) {
+    const key = `${r.module}:${r.submodule}`;
+    map.set(key, { module: r.module, submodule: r.submodule, roleMask: r.mask || 0, allowMask: 0, denyMask: 0 });
+  }
+
+  for (const o of overrides) {
+    const key = `${o.module}:${o.submodule}`;
+    const existing = map.get(key) || { module: o.module, submodule: o.submodule, roleMask: 0, allowMask: 0, denyMask: 0 };
+    existing.allowMask = o.allow_mask || 0;
+    existing.denyMask = o.deny_mask || 0;
+    map.set(key, existing);
+  }
+
+  if (rolePerms.length === 0 && overrides.length === 0 && legacyPerms.length > 0) {
+    const legacyMap = new Map();
+    for (const lp of legacyPerms) {
+      const key = `${lp.module}:`;
+      let mask = legacyMap.get(key) || 0;
+      if (lp.allowed && PERM_BITS[lp.permission_key]) {
+        mask |= PERM_BITS[lp.permission_key];
+      }
+      legacyMap.set(key, mask);
+    }
+    for (const [key, mask] of legacyMap.entries()) {
+      const [mod, sub] = key.split(':');
+      map.set(key, { module: mod, submodule: sub, roleMask: 0, allowMask: mask, denyMask: 0 });
+    }
+  }
+
+  const result = [];
+  for (const [key, item] of map.entries()) {
+    const effMask = ((item.roleMask | item.allowMask) & ~item.denyMask) & ALL_PERMISSION_BITS;
+    result.push({
+      module: item.module,
+      submodule: item.submodule,
+      mask: effMask,
+      role_mask: item.roleMask,
+      allow_mask: item.allowMask,
+      deny_mask: item.denyMask
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Legacy compatibility helper.
+ */
+async function getUserPermissionBitmask(userId, module, submodule = '') {
+  return resolveEffectivePermission(userId, module, submodule);
 }
 
 /**
  * Check if a user has a specific permission action on a module (and optional submodule).
  */
-async function hasPermission(userId, module, action, submodule = '') {
+async function hasPermission(userId, module, action, submodule = '', userRole = null) {
   const bit = PERM_BITS[action];
   if (bit === undefined) return false;
-  const mask = await getUserPermissionBitmask(userId, module, submodule);
+  const mask = await resolveEffectivePermission(userId, module, submodule, userRole);
   return (mask & bit) === bit;
 }
 
 /**
- * Synchronous permission check using a pre-loaded permissions map.
- * Useful for middleware after permissions are loaded.
+ * Synchronous permission check using a pre-loaded permissions map/bitmask.
  */
 function checkPermissionBitmask(mask, action) {
   const bit = PERM_BITS[action];
@@ -85,7 +206,7 @@ function actionsToBitmask(actions) {
   for (const a of actions) {
     if (PERM_BITS[a] !== undefined) mask |= PERM_BITS[a];
   }
-  return mask;
+  return mask & ALL_PERMISSION_BITS;
 }
 
 /**
@@ -101,8 +222,11 @@ function bitmaskToActions(mask) {
 
 module.exports = {
   PERM_BITS,
+  ALL_PERMISSION_BITS,
   FULL_ACCESS,
   getUserPermissionBitmask,
+  resolveEffectivePermission,
+  getAllEffectivePermissionsForUser,
   hasPermission,
   checkPermissionBitmask,
   actionsToBitmask,

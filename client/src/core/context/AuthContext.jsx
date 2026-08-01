@@ -174,7 +174,7 @@ export function AuthProvider({ children }) {
 
   const _PERM_BITS = { view: 1, create: 2, edit: 4, delete: 8, approve: 16, export: 32, print: 64, reject: 128, import: 256, manage: 512, sidebar: 1024 };
 
-  // Check permission — order: admin bypass → RBAC bitmask → legacy overrides → role defaults
+  // Check permission — canonical resolution using backend-computed user.effective_permissions
   const hasPermission = (module, action, submodule = '') => {
     if (!user) return false;
     const role = String(user.role || '').toLowerCase().trim();
@@ -183,33 +183,50 @@ export function AuthProvider({ children }) {
     const bit = _PERM_BITS[action];
     if (bit === undefined) return false;
 
-    // 1. RBAC bitmask from assigned roles (loaded by /me)
+    // 1. Primary: Use backend-computed effective_permissions
+    const effPerms = user.effective_permissions || [];
+    if (effPerms.length > 0) {
+      if (effPerms.some(p => p.module === '*' && p.submodule === '*')) return true;
+
+      if (submodule) {
+        const sub = effPerms.find(p => p.module === module && p.submodule === submodule);
+        if (sub != null) return (parseInt(sub.mask) & bit) === bit;
+        return false;
+      }
+
+      const mod = effPerms.find(p => p.module === module && p.submodule === '');
+      if (mod != null) return (parseInt(mod.mask) & bit) === bit;
+
+      const modEntries = effPerms.filter(p => p.module === module);
+      if (modEntries.length > 0) {
+        return modEntries.some(p => (parseInt(p.mask) & bit) === bit);
+      }
+    }
+
+    // 2. Fallback to RBAC bitmask from assigned roles
     const rbacPerms = user.rbac_permissions || [];
     if (rbacPerms.length > 0) {
       if (submodule) {
-        // Specific submodule requested → strict match only
         const sub = rbacPerms.find(p => p.module === module && p.submodule === submodule);
         if (sub != null) return (parseInt(sub.mask) & bit) === bit;
         return false;
       }
-      // No submodule → check module-level entry first
       const mod = rbacPerms.find(p => p.module === module && p.submodule === '');
       if (mod != null) return (parseInt(mod.mask) & bit) === bit;
 
-      // No module-level entry → check if ANY submodule grants the action (for sidebar/general visibility)
       const modEntries = rbacPerms.filter(p => p.module === module);
       if (modEntries.length > 0) {
         return modEntries.some(p => (parseInt(p.mask) & bit) === bit);
       }
     }
 
-    // 2. Legacy per-user permission overrides
+    // 3. Legacy per-user permission overrides
     const override = (user.permissions || []).find(
       p => p.module === module && p.permission_key === action
     );
     if (override !== undefined) return Boolean(override.allowed);
 
-    // 3. Legacy ROLE_DEFAULTS fallback ONLY if no RBAC entries exist for this user
+    // 4. Legacy ROLE_DEFAULTS fallback ONLY if no RBAC or effective entries exist
     if (rbacPerms.length > 0) return false;
     return ROLE_DEFAULTS[user.role]?.[module]?.includes(action) ?? false;
   };

@@ -1,20 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth, ROLE_DEFAULTS } from '../../../core/context/AuthContext';
-import { X, Save, Key, User, Shield, Eye, Settings, Lock, AlertTriangle, ChevronDown, ChevronRight, Info, Copy } from 'lucide-react';
+import { X, Save, Key, User, Shield, Eye, Settings, Lock, AlertTriangle, ChevronDown, ChevronRight, Info, Copy, RotateCcw, Check, Minus } from 'lucide-react';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import toast from 'react-hot-toast';
-import { MODULE_TREE, PERM_BITS, ACTIONS as PERM_ACTIONS, FULL_ACCESS } from '../../../shared/constants/permissions';
+import { MODULE_TREE, PERM_BITS, ACTIONS as PERM_ACTIONS, ALL_PERMISSION_BITS } from '../../../shared/constants/permissions';
 
 /* ── Static config ──────────────────────────────────────────── */
-
 const ROLES = ['super_admin', 'admin', 'operator', 'viewer'];
-
-
-
-// Use shared MODULE_TREE + PERM_ACTIONS from permissions constants
-// PERM_ACTIONS = [{ id:'view',label:'VIEW' }, ...]
 
 const VISIBILITY_KEYS = [
   { key: 'vis.show_cogs', label: 'Cost of Goods (COGS)', desc: 'Per-lot cost figures' },
@@ -70,43 +63,8 @@ const TABS = [
   { id: 'security', label: 'Security', icon: Lock },
 ];
 
-/* ── Helpers ────────────────────────────────────────────────── */
-
-// Build effective bitmask map { 'module:submodule': mask } from role permission trees
-function buildEffectivePerms(roleTrees, legacyRole) {
-  const combined = {};
-
-  if (roleTrees.length > 0) {
-    roleTrees.forEach(tree => {
-      (tree || []).forEach(mod => {
-        (mod.submodules || []).forEach(sm => {
-          const key = `${mod.module}:${sm.key}`;
-          combined[key] = (combined[key] || 0) | (sm.permissions || 0);
-        });
-      });
-    });
-  } else {
-    // Fall back to ROLE_DEFAULTS (legacy) when no RBAC roles assigned
-    const defaults = legacyRole === 'admin' ? null : (ROLE_DEFAULTS[legacyRole] || {});
-    MODULE_TREE.forEach(mod => {
-      (mod.submodules || []).forEach(sm => {
-        const key = `${mod.module}:${sm.key}`;
-        if (defaults === null) {
-          combined[key] = FULL_ACCESS; // admin/super_admin = full access
-        } else {
-          let mask = 0;
-          (defaults[mod.module] || []).forEach(a => { if (PERM_BITS[a]) mask |= PERM_BITS[a]; });
-          combined[key] = mask;
-        }
-      });
-    });
-  }
-  return combined;
-}
-
 /* ── Toggle switch ──────────────────────────────────────────── */
 function Toggle({ checked, onChange, disabled }) {
-
   return (
     <button
       type="button"
@@ -147,18 +105,15 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
   const [departments, setDepartments] = useState([]);
   const [allRoles, setAllRoles] = useState([]);
   const [assignedRoleIds, setAssignedRoleIds] = useState([]);
-  const [myTemplates, setMyTemplates] = useState([]);
-  const [selectedTemplateToShare, setSelectedTemplateToShare] = useState('');
-  const [sharingTemplate, setSharingTemplate] = useState(false);
   const [inventoryScope, setInventoryScope] = useState({ scope_mode: 'ALL', department_ids: [] });
   const [deptSearch, setDeptSearch] = useState('');
 
-  // Submodule permission matrix (effective from roles, editable)
-  const [effectivePerms, setEffectivePerms] = useState({}); // { 'module:submodule': bitmask }
+  // Per-user overrides map: { 'module:submodule': { allow_mask, deny_mask } }
+  const [userOverrides, setUserOverrides] = useState({});
   const [expanded, setExpanded] = useState({}); // { moduleKey: bool }
   const [permsDirty, setPermsDirty] = useState(false);
 
-  // Stable api ref — prevents effect re-fires
+  // Stable api ref
   const apiRef = useRef(api);
   useEffect(() => { apiRef.current = api; });
 
@@ -178,12 +133,11 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
       apiRef.current.get(`/api/admin/users/${user.id}/preferences`),
       apiRef.current.get('/api/departments', { limit: 500, offset: 0 }).then(r => Array.isArray(r) ? r : (r?.data || [])).catch(() => []),
       apiRef.current.get('/api/roles').then(r => (r?.data || [])).catch(() => []),
-      apiRef.current.get('/api/inventory-templates').catch(() => []),
-      apiRef.current.get(`/api/admin/users/${user.id}/inventory-scope`).catch(() => (null))
-    ]).then(async ([prefRows, deptData, rolesData, myTmplData, invScopeData]) => {
+      apiRef.current.get(`/api/admin/users/${user.id}/inventory-scope`).catch(() => null),
+      apiRef.current.get(`/api/admin/users/${user.id}/permission-overrides`).then(r => r?.data || []).catch(() => []),
+    ]).then(([prefRows, deptData, rolesData, invScopeData, overridesData]) => {
       setDepartments(deptData || []);
       setAllRoles(rolesData || []);
-      setMyTemplates(Array.isArray(myTmplData) ? myTmplData : []);
       if (invScopeData) {
         setInventoryScope({
           scope_mode: invScopeData.scope_mode || 'ALL',
@@ -194,27 +148,22 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
       } else {
         setInventoryScope({ scope_mode: 'ALL', department_ids: [] });
       }
+
       const p = { ...PREF_DEFAULTS };
       prefRows.forEach(r => { p[r.pref_key] = r.pref_value; });
       setPrefs(p);
 
-      // Auto-derive RBAC role from legacy role slug (1:1 mapping)
       const matchingRole = (rolesData || []).find(r => r.slug === user.role);
       const roleIds = matchingRole ? [matchingRole.id] : [];
       setAssignedRoleIds(roleIds);
 
-      if (roleIds.length > 0) {
-        const trees = await Promise.all(
-          roleIds.map(rid =>
-            apiRef.current.get(`/api/roles/${rid}/permissions`)
-              .then(r => r.data || [])
-              .catch(() => [])
-          )
-        );
-        setEffectivePerms(buildEffectivePerms(trees, user.role));
-      } else {
-        setEffectivePerms(buildEffectivePerms([], user.role));
-      }
+      // Load overrides into map
+      const ovMap = {};
+      (overridesData || []).forEach(ov => {
+        const key = `${ov.module}:${ov.submodule || ''}`;
+        ovMap[key] = { allow_mask: ov.allow_mask || 0, deny_mask: ov.deny_mask || 0 };
+      });
+      setUserOverrides(ovMap);
       setPermsDirty(false);
       setFetching(false);
     }).catch(() => {
@@ -223,37 +172,68 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
     });
   }, [user?.id]);
 
-  // When role dropdown changes, auto-sync the RBAC role assignment
-  const handleRoleChange = async (newRole) => {
+  // When role dropdown changes, update role and keep overrides intact with prompt
+  const handleRoleChange = (newRole) => {
     setBasic(b => ({ ...b, role: newRole }));
     const matchingRole = allRoles.find(r => r.slug === newRole);
     const newIds = matchingRole ? [matchingRole.id] : [];
     setAssignedRoleIds(newIds);
-    if (newIds.length > 0) {
-      const trees = await Promise.all(
-        newIds.map(rid =>
-          apiRef.current.get(`/api/roles/${rid}/permissions`)
-            .then(r => r.data || [])
-            .catch(() => [])
-        )
-      );
-      setEffectivePerms(buildEffectivePerms(trees, newRole));
-    } else {
-      setEffectivePerms(buildEffectivePerms([], newRole));
-    }
   };
 
   const toggleExpand = (moduleKey) =>
     setExpanded(prev => ({ ...prev, [moduleKey]: !(prev[moduleKey] !== false) }));
 
-  const togglePerm = (moduleKey, smKey, actionId) => {
+  // Get current override state for action: 'ALLOW' | 'DENY' | 'INHERIT'
+  const getOverrideState = (moduleKey, smKey, actionId) => {
+    const key = `${moduleKey}:${smKey}`;
+    const ov = userOverrides[key] || { allow_mask: 0, deny_mask: 0 };
+    const bit = PERM_BITS[actionId];
+    if (bit === undefined) return 'INHERIT';
+
+    if ((ov.allow_mask & bit) === bit) return 'ALLOW';
+    if ((ov.deny_mask & bit) === bit) return 'DENY';
+    return 'INHERIT';
+  };
+
+  // Cycle action override state: INHERIT -> ALLOW -> DENY -> INHERIT
+  const cycleOverrideState = (moduleKey, smKey, actionId) => {
     const key = `${moduleKey}:${smKey}`;
     const bit = PERM_BITS[actionId];
-    setEffectivePerms(prev => {
-      const cur = prev[key] || 0;
-      return { ...prev, [key]: (cur & bit) === bit ? (cur & ~bit) : (cur | bit) };
+    if (bit === undefined) return;
+
+    const currentState = getOverrideState(moduleKey, smKey, actionId);
+    let nextState = 'ALLOW';
+    if (currentState === 'ALLOW') nextState = 'DENY';
+    else if (currentState === 'DENY') nextState = 'INHERIT';
+
+    setUserOverrides(prev => {
+      const cur = prev[key] || { allow_mask: 0, deny_mask: 0 };
+      let allow = cur.allow_mask || 0;
+      let deny = cur.deny_mask || 0;
+
+      if (nextState === 'ALLOW') {
+        allow |= bit;
+        deny &= ~bit;
+      } else if (nextState === 'DENY') {
+        allow &= ~bit;
+        deny |= bit;
+      } else {
+        allow &= ~bit;
+        deny &= ~bit;
+      }
+
+      return {
+        ...prev,
+        [key]: { allow_mask: allow, deny_mask: deny }
+      };
     });
     setPermsDirty(true);
+  };
+
+  const resetAllOverrides = () => {
+    setUserOverrides({});
+    setPermsDirty(true);
+    toast.success('All permission overrides reset to INHERIT');
   };
 
   /* ── Save all tabs ── */
@@ -274,67 +254,40 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
         }),
         apiRef.current.put(`/api/admin/users/${user.id}/preferences`, { preferences: prefArray }),
         apiRef.current.put(`/api/roles/users/${user.id}/roles`, { role_ids: assignedRoleIds }),
-      ];
-
-      saves.push(
         apiRef.current.put(`/api/admin/users/${user.id}/inventory-scope`, {
           scope_mode: inventoryScope.scope_mode,
           include_unassigned: false,
           department_ids: inventoryScope.department_ids,
         })
-      );
+      ];
 
-      // Save role permissions if admin edited them
-      if (permsDirty && assignedRoleIds.length === 1) {
-        const payload = [];
-        MODULE_TREE.forEach(mod => {
-          (mod.submodules || []).forEach(sm => {
-            payload.push({ module: mod.module, submodule: sm.key, permissions: effectivePerms[`${mod.module}:${sm.key}`] || 0 });
-          });
+      // Save per-user permission overrides ONLY (never modify role permissions)
+      if (permsDirty) {
+        const overridesList = [];
+        Object.entries(userOverrides).forEach(([key, val]) => {
+          const [module, submodule] = key.split(':');
+          if ((val.allow_mask || 0) > 0 || (val.deny_mask || 0) > 0) {
+            overridesList.push({
+              module,
+              submodule: submodule || '',
+              allow_mask: val.allow_mask || 0,
+              deny_mask: val.deny_mask || 0,
+            });
+          }
         });
-        saves.push(apiRef.current.put(`/api/roles/${assignedRoleIds[0]}/permissions`, { permissions: payload }));
+        saves.push(
+          apiRef.current.put(`/api/admin/users/${user.id}/permission-overrides`, { overrides: overridesList })
+        );
       }
 
       await Promise.all(saves);
 
-      toast.success('User settings saved');
+      toast.success('User settings saved successfully');
       if (user.id === me?.id) await refreshUser();
       onSaved?.();
       onClose();
     } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleShareTemplate = async () => {
-    if (!selectedTemplateToShare) return toast.error('Select a template to share');
-    setSharingTemplate(true);
-    try {
-      await apiRef.current.post(`/api/inventory-templates/${selectedTemplateToShare}/share`, {
-        target_user_id: user.id
-      });
-      toast.success('Template shared successfully');
-      setSelectedTemplateToShare('');
-    } catch (err) {
-      toast.error(err.message || 'Failed to share template');
-    } finally {
-      setSharingTemplate(false);
-    }
-  };
-
-  /* ── Reset password (Security tab only) ── */
-  const handleResetPw = async () => {
-    if (!pw.password || pw.password.length < 6) return toast.error('Minimum 6 characters');
-    if (pw.password !== pw.confirm) return toast.error('Passwords do not match');
-    setSaving(true);
-    try {
-      await apiRef.current.post(`/api/admin/users/${user.id}/reset-password`, { password: pw.password });
-      toast.success('Password reset successfully');
-      setPw({ password: '', confirm: '' });
-    } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to save settings');
     } finally {
       setSaving(false);
     }
@@ -345,9 +298,9 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
   const isAdmin = basic.role === 'super_admin';
   const isSelf = user.id === me?.id;
   const roleCls = { super_admin: 'b-active', admin: 'b-active', operator: 'b-draft', viewer: 'b-inactive' };
+  const hasOverrides = Object.values(userOverrides).some(v => (v.allow_mask || 0) > 0 || (v.deny_mask || 0) > 0);
 
-  /* ── Render ── */
-  const drawer = (
+  return (
     <>
       <style>{`
         @keyframes drawerSlideIn {
@@ -358,12 +311,12 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
         .udr-tab-btn { display:flex; align-items:center; gap:6px; padding:10px 15px; border:none; background:none; cursor:pointer; font-size:12px; font-weight:600; white-space:nowrap; border-bottom:2px solid transparent; transition:all .14s; }
         .udr-tab-btn:hover { color:var(--brand); }
         .udr-tab-btn.active { color:var(--brand); border-bottom-color:var(--brand); }
-        .udr-perm-th { padding:8px 6px; text-align:center; font-size:10px; font-weight:700; color:var(--g600); text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #D4E8DC; cursor:pointer; user-select:none; min-width:60px; }
-        .udr-perm-th:hover { background:#D6EDE4; }
-        .udr-perm-mod { padding:8px 12px; font-weight:600; font-size:12px; color:var(--g700); cursor:pointer; user-select:none; }
-        .udr-perm-mod:hover { color:var(--brand); }
         .udr-vis-row { display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border:1px solid var(--g200); border-radius:8px; background:#fff; }
         .udr-pref-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; border:1px solid var(--g200); border-radius:8px; }
+        .state-btn { padding: 3px 6px; font-size: 10px; font-weight: 700; border-radius: 4px; border: 1px solid transparent; cursor: pointer; user-select: none; transition: all 0.15s; display: inline-flex; align-items: center; justify-content: center; min-width: 54px; }
+        .state-inherit { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+        .state-allow { background: #dcfce7; color: #15803d; border-color: #86efac; }
+        .state-deny { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
       `}</style>
 
       {/* Overlay */}
@@ -375,7 +328,7 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
       {/* Panel */}
       <div className="udr-panel" style={{
         position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 'min(720px, 100vw)',
+        width: 'min(760px, 100vw)',
         background: '#fff', zIndex: 601,
         display: 'flex', flexDirection: 'column',
         boxShadow: '-6px 0 32px rgba(0,0,0,.16)',
@@ -458,7 +411,19 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                       {isSelf && <span style={{ fontSize: 10, color: 'var(--g400)', marginTop: 2 }}>Cannot change your own role</span>}
                     </div>
                   </div>
-                  <div className="form-row">
+
+                  {hasOverrides && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, border: '1px solid #FFE082', color: '#E65100', fontSize: 12, marginTop: 12 }}>
+                      <div>
+                        This user has custom permission overrides. Overrides remain intact when changing roles.
+                      </div>
+                      <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 8px' }} onClick={resetAllOverrides}>
+                        Reset Overrides
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="form-row" style={{ marginTop: 12 }}>
                     <div className="fg w">
                       <label>Primary Department</label>
                       <SelectDropdown value={basic.department_id} onChange={e => setBasic(b => ({ ...b, department_id: e.target.value }))}>
@@ -493,28 +458,46 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                 </div>
               )}
 
-              {/* ── Permissions ── */}
+              {/* ── Permissions (User-Specific Overrides) ── */}
               {tab === 'permissions' && (
                 <div>
                   {isAdmin ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#E8EAF6', borderRadius: 8, border: '1px solid #C5CAE9', color: '#283593', fontSize: 12, marginBottom: 12 }}>
                       <Shield size={15} style={{ flexShrink: 0 }} />
-                      {basic.role === 'super_admin' ? 'Super Admin' : 'Admin'} — all permissions are granted. Matrix shown for reference.
-                    </div>
-                  ) : assignedRoleIds.length === 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, border: '1px solid #FFE082', color: '#E65100', fontSize: 12, marginBottom: 12 }}>
-                      <Info size={15} style={{ flexShrink: 0 }} />
-                      No RBAC role found for this user's role — showing legacy defaults. Set the Role in the <strong>Basic Info</strong> tab.
+                      {basic.role === 'super_admin' ? 'Super Admin' : 'Admin'} — full unrestricted access granted. Overrides matrix shown for reference.
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#E3F2FD', borderRadius: 8, border: '1px solid #90CAF9', color: '#1565C0', fontSize: 12, marginBottom: 12 }}>
-                      <Info size={15} style={{ flexShrink: 0 }} />
-                      Editing the <strong style={{ textTransform: 'capitalize' }}>{basic.role}</strong> role permissions. Changes apply to all users with this role.
-                      {permsDirty && <span style={{ marginLeft: 'auto', background: '#1565C0', color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>Unsaved changes</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 14px', background: '#E3F2FD', borderRadius: 8, border: '1px solid #90CAF9', color: '#1565C0', fontSize: 12, marginBottom: 12 }}>
+                      <div>
+                        Editing <strong>{basic.full_name} ({basic.username})</strong> User Overrides. This changes only this user. Operator role defaults and other users are not modified.
+                        {permsDirty && <span style={{ marginLeft: 8, background: '#1565C0', color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>Unsaved changes</span>}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: 11, padding: '4px 8px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
+                        onClick={resetAllOverrides}
+                      >
+                        <RotateCcw size={12} /> Reset Overrides
+                      </button>
                     </div>
                   )}
 
-                  <div style={{ border: '1px solid var(--g200)', borderRadius: 8, overflow: 'auto', maxHeight: 'calc(100vh - 320px)' }}>
+                  {/* Tri-state Legend */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 11, marginBottom: 10, padding: '6px 12px', background: 'var(--g50)', borderRadius: 6, border: '1px solid var(--g200)' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--g700)' }}>Override State Legend:</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span className="state-btn state-inherit">—</span> Inherit (Role Baseline)
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span className="state-btn state-allow">✓ ALLOW</span> Explicit Allow
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span className="state-btn state-deny">✕ DENY</span> Explicit Deny
+                    </span>
+                  </div>
+
+                  <div style={{ border: '1px solid var(--g200)', borderRadius: 8, overflow: 'auto', maxHeight: 'calc(100vh - 360px)' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: 'var(--table-header)', position: 'sticky', top: 0, zIndex: 2 }}>
@@ -522,7 +505,7 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                             Module / Submodule
                           </th>
                           {PERM_ACTIONS.map(a => (
-                            <th key={a.id} style={{ minWidth: 60, padding: '8px 4px', textAlign: 'center', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--g600)', borderBottom: '2px solid #D4E8DC' }}>
+                            <th key={a.id} style={{ minWidth: 64, padding: '8px 4px', textAlign: 'center', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--g600)', borderBottom: '2px solid #D4E8DC' }}>
                               {a.label}
                             </th>
                           ))}
@@ -530,12 +513,7 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                       </thead>
                       <tbody>
                         {MODULE_TREE.map(mod => {
-                          const isExpanded = expanded[mod.module] !== false; // default open
-
-                          // Compute module-level summary: any submodule has the bit set?
-                          const modMaskSummary = (mod.submodules || []).reduce(
-                            (acc, sm) => acc | (effectivePerms[`${mod.module}:${sm.key}`] || 0), 0
-                          );
+                          const isExpanded = expanded[mod.module] !== false;
 
                           return (
                             <tr key={mod.module}>
@@ -555,26 +533,10 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                                   <span style={{ fontSize: 10, color: 'var(--g400)' }}>
                                     {(mod.submodules || []).length} submodules
                                   </span>
-                                  {/* Quick summary dots */}
-                                  <div style={{ display: 'flex', gap: 3 }}>
-                                    {PERM_ACTIONS.map(a => {
-                                      const has = (modMaskSummary & PERM_BITS[a.id]) === PERM_BITS[a.id];
-                                      return (
-                                        <div key={a.id} title={a.label} style={{
-                                          width: 8, height: 8, borderRadius: '50%',
-                                          background: has ? 'var(--brand)' : 'var(--g300)',
-                                        }} />
-                                      );
-                                    })}
-                                  </div>
                                 </div>
 
                                 {/* Submodule rows */}
                                 {isExpanded && (mod.submodules || []).map((sm, si) => {
-                                  const key = `${mod.module}:${sm.key}`;
-                                  const mask = isAdmin ? FULL_ACCESS : (effectivePerms[key] || 0);
-                                  const allOn = PERM_ACTIONS.every(a => (mask & PERM_BITS[a.id]) === PERM_BITS[a.id]);
-
                                   return (
                                     <div key={sm.key} style={{
                                       display: 'flex', alignItems: 'center',
@@ -583,29 +545,26 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                                     }}>
                                       <div style={{
                                         flex: 1, padding: '6px 8px 6px 32px',
-                                        fontSize: 12, fontWeight: allOn ? 600 : 400,
-                                        color: allOn ? 'var(--brand-dark)' : 'var(--g700)',
+                                        fontSize: 12, fontWeight: 500, color: 'var(--g700)',
                                         minWidth: 160,
                                       }}>
                                         {sm.label}
                                       </div>
                                       {PERM_ACTIONS.map(a => {
-                                        const checked = (mask & PERM_BITS[a.id]) === PERM_BITS[a.id];
-                                        const editable = !isAdmin && assignedRoleIds.length === 1;
+                                        const state = getOverrideState(mod.module, sm.key, a.id);
+                                        const editable = !isAdmin;
+
                                         return (
-                                          <div key={a.id} style={{ minWidth: 60, textAlign: 'center', padding: '5px 4px' }}>
-                                            <input
-                                              type="checkbox"
-                                              checked={checked}
+                                          <div key={a.id} style={{ minWidth: 64, textAlign: 'center', padding: '5px 4px' }}>
+                                            <button
+                                              type="button"
                                               disabled={!editable}
-                                              onChange={() => togglePerm(mod.module, sm.key, a.id)}
-                                              style={{
-                                                width: 15, height: 15,
-                                                accentColor: 'var(--brand)',
-                                                cursor: editable ? 'pointer' : 'default',
-                                                opacity: !editable && !isAdmin ? 0.5 : 1,
-                                              }}
-                                            />
+                                              className={`state-btn ${state === 'ALLOW' ? 'state-allow' : state === 'DENY' ? 'state-deny' : 'state-inherit'}`}
+                                              onClick={() => editable && cycleOverrideState(mod.module, sm.key, a.id)}
+                                              title={`Click to toggle: Inherit -> Allow -> Deny`}
+                                            >
+                                              {state === 'ALLOW' ? '✓ ALLOW' : state === 'DENY' ? '✕ DENY' : '—'}
+                                            </button>
                                           </div>
                                         );
                                       })}
@@ -800,16 +759,11 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
                   <div className="form-row">
                     <div className="fg w">
                       <label>Confirm Password</label>
-                      <input type="password" name="sec-confirm-pw" autoComplete="new-password" value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} placeholder="Repeat new password" />
+                      <input type="password" name="sec-confirm-pw" value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} placeholder="Repeat password" />
                     </div>
                   </div>
-                  <button
-                    className="btn btn-danger"
-                    onClick={handleResetPw}
-                    disabled={saving || !pw.password}
-                    style={{ marginTop: 4 }}
-                  >
-                    <Key size={14} /> {saving ? 'Resetting…' : 'Reset Password'}
+                  <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ marginTop: 12 }}>
+                    {saving ? 'Updating Password...' : 'Update Password'}
                   </button>
                 </div>
               )}
@@ -817,22 +771,17 @@ export default function UserDrawer({ user, onClose, onSaved, onCopySetup }) {
           )}
         </div>
 
-        {/* Footer — hidden on Security tab (has its own action) */}
-        {tab !== 'security' && (
-          <div style={{
-            display: 'flex', justifyContent: 'flex-end', gap: 8,
-            padding: '11px 18px', borderTop: '1px solid var(--g200)',
-            background: 'var(--g50)', flexShrink: 0,
-          }}>
-            <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || fetching}>
-              <Save size={14} /> {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-          </div>
-        )}
+        {/* Footer */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10,
+          padding: '12px 18px', borderTop: '1px solid var(--g200)', background: 'var(--g50)', flexShrink: 0,
+        }}>
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Save size={14} /> {saving ? 'Saving...' : 'Save All Changes'}
+          </button>
+        </div>
       </div>
     </>
   );
-
-  return createPortal(drawer, document.body);
 }

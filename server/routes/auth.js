@@ -264,9 +264,11 @@ router.post('/logout', asyncWrap(async (req, res) => {
   res.json({ message: 'Logged out successfully' });
 }));
 
+const { getAllEffectivePermissionsForUser } = require('../utils/permissions');
+
 // GET /api/auth/me
 router.get('/me', authenticate, asyncWrap(async (req, res) => {
-  const [userR, permsR, prefsR, rolesR, rbacPermsR] = await Promise.all([
+  const [userR, permsR, prefsR, rolesR, rbacPermsR, overridesR] = await Promise.all([
     pool.query(
       'SELECT id, username, email, full_name, role, last_login, mfa_enabled, department_id, department_id AS primary_department_id FROM users WHERE id = $1',
       [req.user.id]
@@ -294,11 +296,20 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
        GROUP BY rp.module, rp.submodule`,
       [req.user.id]
     ).catch(() => ({ rows: [] })),
+    // User permission overrides
+    pool.query(
+      `SELECT module, submodule, allow_mask, deny_mask
+       FROM user_permission_overrides
+       WHERE user_id = $1`,
+      [req.user.id]
+    ).catch(() => ({ rows: [] })),
   ]);
 
   if (userR.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
   const dbUser = userR.rows[0];
+
+  const effectivePermissions = await getAllEffectivePermissionsForUser(dbUser.id, dbUser.role);
 
   // If the DB role differs from the JWT role (e.g. role was changed after login),
   // issue a fresh access token so subsequent API calls use the correct role.
@@ -317,6 +328,8 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
     preferences: prefsR.rows,
     rbac_roles: rolesR.rows,
     rbac_permissions: rbacPermsR.rows,
+    user_overrides: overridesR.rows,
+    effective_permissions: effectivePermissions,
     ...(freshToken ? { token: freshToken } : {}),
   });
 }));
