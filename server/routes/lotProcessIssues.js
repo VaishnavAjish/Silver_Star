@@ -1387,7 +1387,7 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
 
     let allowWeightOverride = false;
     if (req.user) {
-      if (['super_admin', 'superadmin', 'super admin'].includes(String(req.user.role || '').toLowerCase().trim())) {
+      if (['super_admin', 'superadmin', 'super admin', 'operator'].includes(String(req.user.role || '').toLowerCase().trim())) {
         allowWeightOverride = true;
       } else {
         allowWeightOverride = await hasPermission(req.user.id, 'process_return', 'override_weight_variance');
@@ -1754,7 +1754,7 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     }
     let allowWeightOverride = false;
     if (req.user) {
-      if (['super_admin', 'superadmin', 'super admin'].includes(String(req.user.role || '').toLowerCase().trim())) {
+      if (['super_admin', 'superadmin', 'super admin', 'operator'].includes(String(req.user.role || '').toLowerCase().trim())) {
         allowWeightOverride = true;
       } else {
         allowWeightOverride = await hasPermission(req.user.id, 'process_return', 'override_weight_variance');
