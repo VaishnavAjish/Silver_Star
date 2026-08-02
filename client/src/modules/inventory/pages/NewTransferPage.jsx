@@ -138,7 +138,7 @@ export default function NewTransferPage() {
         onTransferComplete={() => {
           setModalOpen(false);
           setSelectedLots(new Set());
-          load();
+          navigate('/inventory/stock-transfer');
         }}
       />
 

@@ -226,6 +226,7 @@ export default function StockTransferModal({ open, onClose, selectedRows = [], o
       window.dispatchEvent(new Event('pending_transfers_updated'));
       toast.success(`${selectedLotIds.length} lot(s) queued for approval.`);
       onTransferComplete();
+      onClose();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Failed to create transfer.');
     } finally {

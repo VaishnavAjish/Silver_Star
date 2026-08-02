@@ -65,8 +65,7 @@ function EntryForm({ mode }) {
         ...(isOpening ? { as_of_date: date } : { date }),
       });
       toast.success(isOpening ? 'Opening stock saved' : 'Closing override saved');
-      setForm({ item_id: '', quantity: '', rate: '' });
-      await load(page);
+      navigate('/inventory');
     } catch (err) {
       toast.error(err.message);
     } finally {
