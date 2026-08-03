@@ -207,7 +207,12 @@ const orderBy = sortMap[sort_by] || `inv.created_at ${d}`;
              LEFT JOIN locations ml ON m.location_id = ml.id
              LEFT JOIN locations mdl ON md.location_id = mdl.id
              LEFT JOIN process_master pm ON pm.process_code = mp.process_type
-             LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = inv.id AND lpi.status = 'OPEN'
+             LEFT JOIN (
+               SELECT process_lot_id, MAX(process_type) as process_type
+               FROM lot_process_issues
+               WHERE status = 'OPEN'
+               GROUP BY process_lot_id
+             ) lpi ON lpi.process_lot_id = inv.id
              LEFT JOIN process_master pm2 ON pm2.process_code = lpi.process_type
              ${scopedWhere}`;
 
