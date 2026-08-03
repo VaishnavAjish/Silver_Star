@@ -275,6 +275,7 @@ export function InvoiceForm() {
         setLines([blankLine()]);
         if (editMode) navigate('/invoices/new');
       } else {
+        if (activeTabId) closeTab(activeTabId);
         navigate('/invoices');
       }
     } catch (err) {

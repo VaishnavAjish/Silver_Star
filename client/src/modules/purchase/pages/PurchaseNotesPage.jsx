@@ -339,6 +339,7 @@ export function PurchaseNoteForm() {
         setLines([{ ...INITIAL_LINE }]);
         navigate('/purchase-notes/new');
       } else if (action === 'close') {
+        if (activeTabId) closeTab(activeTabId);
         navigate('/purchase-notes');
       } else if (action === 'save' && !isExisting) {
         navigate(`/purchase-notes/${r.id}`);

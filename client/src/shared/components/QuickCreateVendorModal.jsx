@@ -23,6 +23,7 @@ export default function QuickCreateVendorModal({ onClose, onCreated, api }) {
       const created = await api.post('/api/vendors', form);
       toast.success('Vendor created');
       onCreated(created);
+      if (onClose) onClose();
     } catch (err) {
       toast.error(err.message || 'Failed to create vendor');
     } finally {

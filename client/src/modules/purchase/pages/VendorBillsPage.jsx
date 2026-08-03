@@ -264,13 +264,19 @@ export const VendorBillForm = () => {
       if (isEdit) {
         await api.put(`/api/expense-bills/${id}`, payload);
         toast.success('Bill updated');
-        if (action === 'new') window.location.href = '/bills/new';
-        else if (action === 'close') navigate('/bills');
+        if (action === 'new') navigate('/bills/new');
+        else if (action === 'close') {
+          if (activeTabId) closeTab(activeTabId);
+          navigate('/bills');
+        }
       } else {
         const res = await api.post('/api/expense-bills', payload);
         toast.success('Bill saved');
-        if (action === 'new') window.location.href = '/bills/new';
-        else if (action === 'close') navigate('/bills');
+        if (action === 'new') navigate('/bills/new');
+        else if (action === 'close') {
+          if (activeTabId) closeTab(activeTabId);
+          navigate('/bills');
+        }
         else if (action === 'save') navigate(`/bills/${res.id}`);
       }
     } catch (err) {

@@ -528,6 +528,7 @@ export function ExpenseForm() {
         setAllocations([]);
         if (editMode) navigate('/expenses/new');
       } else {
+        if (activeTabId) closeTab(activeTabId);
         navigate('/expenses');
       }
     } catch (err) {

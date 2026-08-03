@@ -4,6 +4,7 @@ import Paginator from '../../../shared/components/Paginator';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
 import { useAuth } from '../../../core/context/AuthContext';
+import { useTabs } from '../../../core/tabs';
 import PortalDropdown from '../../../shared/components/PortalDropdown';
 import DatePicker from '../../../shared/components/DatePicker';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
@@ -251,14 +252,16 @@ function BalanceTag({ balanced, diff }) {
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function JournalEntryForm() {
-  const { id }   = useParams();
-  const [searchParams] = useSearchParams();
+  const navigate   = useNavigate();
+  const { id }     = useParams();
+  const [params]   = useSearchParams();
+  const { closeTab, activeTabId } = useTabs();
+
   const isExisting = !!id;
-  const isEdit     = !isExisting || searchParams.get('mode') === 'edit';
+  const isEdit     = !isExisting || params.get('mode') === 'edit';
   const readOnly   = isExisting && !isEdit;
   const api        = useApi();
   const { canEdit } = useAuth();
-  const navigate   = useNavigate();
 
   // ── master data ──────────────────────────────────────────────────────────────
   const [accounts,    setAccounts]    = useState([]);
@@ -518,12 +521,18 @@ export default function JournalEntryForm() {
 
   const handleSaveDraft = async () => {
     const result = await doSave(false);
-    if (result) navigate(typeof result === 'string' ? result : '/journal-entries');
+    if (result) {
+      if (typeof result !== 'string' && activeTabId) closeTab(activeTabId);
+      navigate(typeof result === 'string' ? result : '/journal-entries');
+    }
   };
 
   const handleSaveAndPost = async () => {
     const result = await doSave(true);
-    if (result) navigate(typeof result === 'string' ? result : '/journal-entries');
+    if (result) {
+      if (typeof result !== 'string' && activeTabId) closeTab(activeTabId);
+      navigate(typeof result === 'string' ? result : '/journal-entries');
+    }
   };
 
   const handleSaveAndNew = async () => {
@@ -590,6 +599,7 @@ export default function JournalEntryForm() {
     try {
       await api.del(`/api/journal-entries/${id}`);
       toast.success('Journal entry deleted');
+      if (activeTabId) closeTab(activeTabId);
       navigate('/journal-entries');
     } catch (err) { toast.error(err.message); }
   };
@@ -679,7 +689,10 @@ export default function JournalEntryForm() {
             }
             right={isEdit ? (
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-sm" onClick={() => navigate(isExisting ? `/journal-entries/${id}` : '/journal-entries')}>Cancel</button>
+                <button className="btn btn-sm" onClick={() => {
+                  if (!isExisting && activeTabId) closeTab(activeTabId);
+                  navigate(isExisting ? `/journal-entries/${id}` : '/journal-entries');
+                }}>Cancel</button>
                 <button className="btn btn-sm" onClick={handleSaveDraft} disabled={saving}><Save size={13} /> Save Draft</button>
                 <button className="btn btn-sm btn-primary" onClick={handleSaveAndPost} disabled={saving || !totals.balanced}>
                   <Check size={13} /> {saving ? 'Saving…' : (isExisting ? 'Save Correction' : 'Save & Post')}

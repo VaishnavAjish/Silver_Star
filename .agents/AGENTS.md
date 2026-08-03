@@ -1,0 +1,1 @@
+- Do not push changes to the remote repository automatically. Only commit locally, and wait until the user explicitly tells you to push before doing so.
