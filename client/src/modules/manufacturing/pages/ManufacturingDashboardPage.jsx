@@ -141,7 +141,7 @@ function MiniBar({ value, max, status }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // KPI Card
 // ══════════════════════════════════════════════════════════════════════════════
-function KpiCard({ def, value }) {
+function KpiCard({ def, value, extra }) {
   const Icon = def.icon;
   return (
     <div style={{
@@ -159,7 +159,10 @@ function KpiCard({ def, value }) {
         <div style={{ fontSize: 19, fontWeight: 700, color: '#212121', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
           {value != null ? (typeof value === 'number' && def.unit ? `${value.toFixed(2)} ${def.unit}` : value) : '—'}
         </div>
-        <div style={{ fontSize: 10, color: '#757575', marginTop: 2, whiteSpace: 'nowrap' }}>{def.label}</div>
+        <div style={{ fontSize: 10, color: '#757575', marginTop: 2, whiteSpace: 'nowrap' }}>
+          {def.label}
+          {extra && <div style={{ color: '#9E9E9E', marginTop: 1, fontSize: 9 }}>{extra}</div>}
+        </div>
       </div>
     </div>
   );
@@ -1125,14 +1128,26 @@ export default function ManufacturingDashboard() {
   }, [dismissedAlerts]);
   const [selectedAlert, setSelectedAlert] = useState(null);
 
+  const [filters, setFilters] = usePersistedFilters('mfg_dashboard_filters', {
+    category: '', location: '', dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
+    length_min: '', length_max: '', height_min: '', height_max: '',
+  });
+  const activeFilters = Object.values(filters).some(Boolean);
+
+  const activeMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines]);
+
   const visibleAlerts = useMemo(() => {
     if (!alerts) return null;
     const res = {};
     for (const [k, arr] of Object.entries(alerts)) {
-      res[k] = arr.filter(item => !dismissedAlerts.has(`${k}-${item.process_id || item.id}`));
+      res[k] = arr.filter(item => {
+        if (dismissedAlerts.has(`${k}-${item.process_id || item.id}`)) return false;
+        if (activeFilters && !activeMachineIds.has(item.machine_id)) return false;
+        return true;
+      });
     }
     return res;
-  }, [alerts, dismissedAlerts]);
+  }, [alerts, dismissedAlerts, activeFilters, activeMachineIds]);
 
   const alertCount = useMemo(() => {
     if (!visibleAlerts) return 0;
@@ -1142,6 +1157,48 @@ export default function ManufacturingDashboard() {
       visibleAlerts.maintenance_due?.length, visibleAlerts.yield_risk?.length,
     ].reduce((a, b) => (a || 0) + (b || 0), 0);
   }, [visibleAlerts]);
+
+  // ── Calculated KPI (for active filters) ──────────────────────────────────────
+  const calculatedKpi = useMemo(() => {
+    if (!machines) return null;
+    let running = 0, idle = 0, hold = 0, maintenance = 0, breakdown = 0, completed_today = 0;
+    let expected_yield = 0;
+    
+    const todayStr = new Date().toLocaleDateString();
+
+    for (const m of machines) {
+      const state = m.derived_state || m.status || 'review';
+      if (state === 'running') running++;
+      else if (state === 'idle') idle++;
+      else if (state === 'hold') hold++;
+      else if (state === 'maintenance') maintenance++;
+      else if (state === 'breakdown') breakdown++;
+
+      if (state === 'running' || state === 'hold') {
+        if (m.expected_yield != null) expected_yield += Number(m.expected_yield);
+        else if (m.expected_rough_qty != null) expected_yield += Number(m.expected_rough_qty);
+      }
+
+      if (m.last_completed_run && m.last_completed_run.completed_at) {
+        const compDate = new Date(m.last_completed_run.completed_at);
+        if (compDate.toLocaleDateString() === todayStr) {
+          completed_today++;
+        }
+      }
+    }
+
+    return {
+      total: machines.length,
+      running,
+      idle,
+      hold,
+      maintenance,
+      breakdown,
+      completed_today,
+      expected_yield,
+    };
+  }, [machines]);
+
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [showAlerts, setShowAlerts] = useState(false);
@@ -1168,11 +1225,6 @@ export default function ManufacturingDashboard() {
     localStorage.setItem('mfg_view_mode', mode);
   }, []);
 
-  // ── Shared filters ───────────────────────────────────────────────────────────
-  const [filters, setFilters] = usePersistedFilters('mfg_dashboard_filters', {
-    category: '', location: '', dept: '', status: '', operator: '', process_type: '', overdue: '', search: '',
-    length_min: '', length_max: '', height_min: '', height_max: '',
-  });
   const setFilter = k => v => setFilters(f => ({ ...f, [k]: v }));
 
   // ── Sorted display list — shared by BOTH views ───────────────────────────────
@@ -1326,12 +1378,8 @@ export default function ManufacturingDashboard() {
   }, []);
   const [searchFocused, setSearchFocused] = useState(false);
 
-  const activeFilters = Object.values(filters).some(Boolean);
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#F5F5F5' }} className="animate-in">
-
-      {/* ── Topbar ── */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px',
         background: '#fff', borderBottom: '1px solid #E0E0E0', flexShrink: 0,
@@ -1401,10 +1449,28 @@ export default function ManufacturingDashboard() {
         overflowX: 'auto', flexWrap: 'nowrap',
         background: '#F5F5F5', borderBottom: '1px solid #E0E0E0', flexShrink: 0,
       }}>
-        {KPI_DEFS.map(def => (
-          <KpiCard key={def.key} def={def}
-            value={def.key === 'ready_for_return' ? readyForReturnCount : kpi?.[def.key]} />
-        ))}
+        {KPI_DEFS.map(def => {
+          let val = activeFilters ? calculatedKpi?.[def.key] : kpi?.[def.key];
+          if (def.key === 'ready_for_return') {
+            val = readyForReturnCount;
+          }
+
+          let label = def.label;
+          let extra = null;
+          if (def.key === 'total' && activeFilters) {
+            label = 'Filtered Machines';
+            extra = `of ${kpi?.total || 0} total`;
+          }
+
+          return (
+            <KpiCard 
+              key={def.key} 
+              def={{ ...def, label }} 
+              value={val} 
+              extra={extra} 
+            />
+          );
+        })}
       </div>
 
       {/* ── Filter bar ── */}
