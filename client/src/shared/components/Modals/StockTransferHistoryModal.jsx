@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Modal from '../Modal';
 import Paginator from '../Paginator';
 import { useApi } from '../../hooks/useApi';
+import { useAuth } from '../../../core/context/AuthContext';
 import { exportToCSV, printTable } from '../../utils/exportUtils';
 import {
   Search, X, Download, Printer, RefreshCw, Package, Send,
@@ -25,6 +26,11 @@ const COLUMNS = [
 
 export default function StockTransferHistoryModal({ open, onClose }) {
   const api = useApi();
+  const { hasPermission } = useAuth();
+
+  /* Phase A: usability gating — rows themselves are department-scoped server-side. */
+  const canExport = hasPermission('inventory', 'export', 'stock_transfer');
+  const canPrint  = hasPermission('inventory', 'print',  'stock_transfer');
 
   const [data, setData] = useState([]);
   const [total, setTotal] = useState(0);
@@ -143,12 +149,16 @@ export default function StockTransferHistoryModal({ open, onClose }) {
           <div style={{ flex: 1 }} />
           <span className="grid-count">{total} transfer{total !== 1 ? 's' : ''}</span>
           <div className="grid-toolbar-right">
-            <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('csv')} title="Export CSV">
-              <Download size={13} /> CSV
-            </button>
-            <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('print')} title="Print / PDF">
-              <Printer size={13} /> Print
-            </button>
+            {canExport && (
+              <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('csv')} title="Export CSV">
+                <Download size={13} /> CSV
+              </button>
+            )}
+            {canPrint && (
+              <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('print')} title="Print / PDF">
+                <Printer size={13} /> Print
+              </button>
+            )}
             <button className="icon-btn" title="Refresh" onClick={handleRefresh} disabled={spinning}
               style={spinning ? { animation: 'spin 0.7s linear infinite' } : undefined}>
               <RefreshCw size={16} />

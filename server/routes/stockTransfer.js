@@ -103,7 +103,35 @@ router.post('/preview', authenticate, async (req, res) => {
     if (!payloadLots?.length || !destination_department_id)
       return res.status(400).json({ error: 'lots[] and destination_department_id required' });
 
+    // ── Phase A: effective Stock Transfer VIEW or CREATE is required ───────
+    const [mayView, mayCreate] = await Promise.all([
+      hasPermission(req.user.id, 'inventory', 'view',   'stock_transfer', req.user.role),
+      hasPermission(req.user.id, 'inventory', 'create', 'stock_transfer', req.user.role),
+    ]);
+    if (!mayView && !mayCreate) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    // ── Phase A: every requested lot must be within department scope ──────
+    // The whole request is rejected if any lot is out of scope, and the
+    // generic message leaks nothing about which lot or whether it exists.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone) return res.status(403).json({ error: 'Permission denied' });
+
     const lot_ids = payloadLots.map(l => l.lot_id);
+
+    if (!scope.isAll) {
+      const { rows: scopeRows } = await pool.query(
+        'SELECT id, department_id FROM inventory WHERE id = ANY($1)',
+        [lot_ids]
+      );
+      const visibleIds = new Set(
+        scopeRows.filter(r => isLotVisible(scope, r)).map(r => Number(r.id))
+      );
+      const allVisible = lot_ids.every(id => visibleIds.has(Number(id)));
+      if (!allVisible) return res.status(403).json({ error: 'Permission denied' });
+    }
+
     const { rows: lots } = await pool.query(
       `SELECT inv.id, inv.lot_number, inv.lot_code, inv.qty, inv.weight, inv.unit,
               inv.total_value, inv.rate, inv.status, inv.location_id, inv.department_id,
@@ -148,48 +176,35 @@ router.post('/preview', authenticate, async (req, res) => {
       };
     });
 
-    res.json({
-      lots: previewLots,
+    // Phase A: without inventory_financial VIEW the money keys are REMOVED,
+    // not nulled — stripFinancial deletes rate/total_value/cost/… entirely.
+    const body = {
+      lots: stripFinancial(previewLots, scope.canViewFinancial),
       total_lots: previewLots.length,
-      total_value: previewLots.reduce((s, l) => s + l.total_value, 0),
       source_location_name: lots[0].source_department_name,
-      destination_location_name: dest?.name || 'Unknown',
-    });
+      destination_location_name: dest?.name || 'Unassigned',
+    };
+    if (scope.canViewFinancial) {
+      body.total_value = previewLots.reduce((s, l) => s + l.total_value, 0);
+    }
+
+    res.json(body);
   } catch (err) { logger.error('[stockTransfer] /preview error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
-const { loadInventoryAuthContext } = require('../services/inventoryAuth');
+// Phase A (Department Scope): single canonical scope model — see
+// services/inventoryAuth.js. The previous local resolver narrowed scope_mode
+// ALL down to the user's primary department and treated a *missing* primary
+// department as all-department access; both rules are gone.
+const {
+  loadDeptScope,
+  isLotVisible,
+  stripFinancial,
+  buildMovementScopeClause,
+} = require('../services/inventoryAuth');
+const { hasPermission } = require('../utils/permissions');
 
-async function getTransferDeptScope(userId, userRole) {
-  const normRole = String(userRole || '').toLowerCase().trim();
-  const isSuperAdmin = ['super_admin', 'superadmin', 'super admin', 'admin', 'administrator'].includes(normRole);
-  if (isSuperAdmin) {
-    return { isAll: true, allowedDeptIds: [] };
-  }
-
-  const ctx = await loadInventoryAuthContext(userId, userRole);
-  let allowed = [];
-  if (ctx.scopeMode === 'SELECTED' && ctx.allowedDeptIds?.length) {
-    allowed = ctx.allowedDeptIds.map(Number).filter(Boolean);
-  }
-
-  if (!allowed.length) {
-    const { rows: [u] } = await pool.query('SELECT department_id FROM users WHERE id = $1', [userId]);
-    if (u && u.department_id) {
-      allowed = [parseInt(u.department_id)];
-    }
-  }
-
-  if (allowed.length) {
-    return { isAll: false, isNone: false, allowedDeptIds: allowed };
-  }
-
-  if (ctx.scopeMode === 'ALL') {
-    return { isAll: true, allowedDeptIds: [] };
-  }
-
-  return { isAll: false, isNone: true, allowedDeptIds: [] };
-}
+const getTransferDeptScope = loadDeptScope;
 
 router.post('/pending', authenticate, async (req, res) => {
   const client = await pool.primaryPool.connect();
@@ -258,11 +273,7 @@ router.get('/pending/:id/debug', authenticate, async (req, res) => {
     const { rows: [pt] } = await pool.query(
       `SELECT pt.*, sd.name AS src_name, d.name AS dst_name, u.full_name AS created_by_name
        FROM pending_transfers pt
-       LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, (
-         SELECT inv.department_id FROM pending_transfer_lots ptl
-         JOIN inventory inv ON inv.id = ptl.lot_id
-         WHERE ptl.pending_transfer_id = pt.id LIMIT 1
-       ))
+       LEFT JOIN departments sd ON sd.id = pt.source_department_id
        LEFT JOIN departments d ON d.id = pt.destination_department_id
        LEFT JOIN users u ON u.id = pt.created_by
        WHERE pt.id = $1`,
@@ -295,44 +306,45 @@ router.get('/pending/:id/debug', authenticate, async (req, res) => {
   }
 });
 
-router.get('/pending', authenticate, async (req, res) => {
-  try {
-    const { status } = req.query;
-    const scope = await getTransferDeptScope(req.user.id, req.user.role);
+/**
+ * Single scoped read used by the Stock Transfer list AND by export/print, so
+ * exported rows can never differ from what the list is allowed to show.
+ */
+async function queryScopedTransfers(scope, status) {
+  if (scope.isNone) return [];
 
-    if (scope.isNone) {
-      return res.json({ data: [] });
-    }
+  const whereClauses = [];
+  const params = [];
+  let paramIdx = 1;
 
-    const whereClauses = [];
-    const params = [];
-    let paramIdx = 1;
+  if (status) {
+    whereClauses.push(`pt.status = $${paramIdx}`);
+    params.push(status);
+    paramIdx++;
+  }
 
-    if (status) {
-      whereClauses.push(`pt.status = $${paramIdx}`);
-      params.push(status);
-      paramIdx++;
-    }
+  // Phase A: scope on the stored source/destination departments only.
+  // No primary-department inference, no hardcoded department 3 fallback —
+  // a transfer with neither department resolvable stays hidden.
+  if (!scope.isAll) {
+    whereClauses.push(`(
+      pt.source_department_id = ANY($${paramIdx}::int[])
+      OR
+      pt.destination_department_id = ANY($${paramIdx}::int[])
+    )`);
+    params.push(scope.allowedDeptIds);
+    paramIdx++;
+  }
 
-    if (!scope.isAll) {
-      whereClauses.push(`(
-        COALESCE(pt.source_department_id, u.department_id, 3) = ANY($${paramIdx}::int[])
-        OR
-        pt.destination_department_id = ANY($${paramIdx}::int[])
-      )`);
-      params.push(scope.allowedDeptIds);
-      paramIdx++;
-    }
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    const { rows } = await pool.query(`
+  const { rows } = await pool.query(`
       SELECT
         pt.*,
-        COALESCE(sd.name, sl.name, 'Admin') AS source_location_name,
-        COALESCE(d.name, dl.name, 'Unknown')  AS destination_location_name,
-        COALESCE(sd.name, 'Admin') AS source_department_name,
-        COALESCE(d.name, 'Unknown') AS destination_department_name,
+        COALESCE(sd.name, sl.name, 'Unassigned') AS source_location_name,
+        COALESCE(d.name, dl.name, 'Unassigned')  AS destination_location_name,
+        COALESCE(sd.name, 'Unassigned') AS source_department_name,
+        COALESCE(d.name, 'Unassigned') AS destination_department_name,
         u.full_name AS created_by_name,
         approver.full_name AS approved_by_name,
         (
@@ -358,7 +370,7 @@ router.get('/pending', authenticate, async (req, res) => {
         ) AS lots
       FROM pending_transfers pt
       LEFT JOIN users u ON u.id = pt.created_by
-      LEFT JOIN departments sd ON sd.id = COALESCE(pt.source_department_id, u.department_id, 3)
+      LEFT JOIN departments sd ON sd.id = pt.source_department_id
       LEFT JOIN locations sl ON sl.id = pt.source_location_id
       LEFT JOIN locations dl ON dl.id = pt.destination_location_id
       LEFT JOIN departments d ON d.id = pt.destination_department_id
@@ -367,6 +379,13 @@ router.get('/pending', authenticate, async (req, res) => {
       ORDER BY pt.created_at DESC
     `, params);
 
+  return rows;
+}
+
+router.get('/pending', authenticate, async (req, res) => {
+  try {
+    const scope = await getTransferDeptScope(req.user.id, req.user.role);
+    const rows = await queryScopedTransfers(scope, req.query.status);
     res.json({ data: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -915,13 +934,26 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { page = 1, pageSize = 50 } = req.query;
-    const limit = parseInt(pageSize);
-    const offset = (parseInt(page) - 1) * limit;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.pageSize) || 50, 1), 500);
+    const offset = (page - 1) * limit;
+
+    // Phase A: these rows come from lot_movements, which stores no source or
+    // destination department. Authorise relationally through the linked
+    // inventory lots and fail closed when nothing can be proven.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone) return res.json({ data: [], total: 0 });
+
+    const { clause: scopeClause, params: scopedParams } =
+      buildMovementScopeClause(scope, [], 'lm');
 
     const countR = await pool.query(
-      `SELECT COUNT(*) FROM lot_movements WHERE movement_type = 'transfer'`
+      `SELECT COUNT(*) FROM lot_movements lm
+       WHERE lm.movement_type = 'transfer'${scopeClause}`,
+      scopedParams
     );
+
+    const dataParams = [...scopedParams, limit, offset];
     const { rows } = await pool.query(
       `SELECT lm.*,
               (SELECT name FROM locations WHERE id = ANY(
@@ -931,10 +963,10 @@ router.get('/', authenticate, async (req, res) => {
                       WHERE lmc.movement_id = lm.id)
               )) as destination_name
        FROM lot_movements lm
-       WHERE lm.movement_type = 'transfer'
+       WHERE lm.movement_type = 'transfer'${scopeClause}
        ORDER BY lm.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
+       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
     );
 
     res.json({ data: rows, total: parseInt(countR.rows[0].count) });
@@ -947,6 +979,14 @@ router.get('/history', authenticate, async (req, res) => {
     const limit = Math.min(parseInt(pageSize) || 50, 500);
     const offset = (Math.max(parseInt(page), 1) - 1) * limit;
 
+    // Phase A: relational department scope. lot_movements has no source or
+    // destination department column, so authorisation is proven only through
+    // the linked inventory lots — never by parsing lm.notes.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone) {
+      return res.json({ data: [], total: 0, page: parseInt(page), pageSize: limit });
+    }
+
     let where = "WHERE lm.movement_type = 'transfer'";
     const params = [];
     let idx = 0;
@@ -956,6 +996,13 @@ router.get('/history', authenticate, async (req, res) => {
       where += ` AND (lm.movement_number ILIKE $${idx} OR i.name ILIKE $${idx} OR i.code ILIKE $${idx} OR inv.lot_code ILIKE $${idx})`;
       params.push(`%${search}%`);
     }
+
+    const { clause: scopeClause, params: scopedParams } =
+      buildMovementScopeClause(scope, params, 'lm');
+    where += scopeClause;
+    params.length = 0;
+    params.push(...scopedParams);
+    idx = params.length;
 
     const countSql = `SELECT COUNT(*) FROM lot_movements lm
       JOIN lot_movement_parents lmp ON lmp.movement_id = lm.id
@@ -983,7 +1030,10 @@ router.get('/history', authenticate, async (req, res) => {
         lmp.quantity_consumed AS qty,
         lmp.unit,
         lmp.cost_per_unit,
-        substring(lm.notes FROM '^Transfer from (.+?) to ') AS source_warehouse,
+        -- Phase A: source is NOT derived from lm.notes. lot_movements stores
+        -- no source department, so it is reported as unknown rather than
+        -- guessed. A real source column arrives in Phase D.
+        NULL::text AS source_warehouse,
         dst_loc.name AS destination_warehouse,
         u.full_name AS requested_by
       FROM lot_movements lm
@@ -1012,6 +1062,66 @@ router.get('/history', authenticate, async (req, res) => {
       pageSize: limit,
     });
   } catch (err) { logger.error('[stockTransfer] /history error', { path: req.path, error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// ── EXPORT / PRINT (Phase A — server-authorised) ─────────────────────────────
+// The browser must not build CSV or print output from rows it already holds,
+// because that bypasses the EXPORT/PRINT permission bits. Both formats are
+// produced here, behind the effective Phase 86 permission check, from the
+// SAME scoped query that backs the list — so totals always reconcile.
+
+const EXPORT_HEADERS = Object.freeze([
+  'Transfer ID', 'Material Code', 'Material Name',
+  'Transfer Qty', 'Unit', 'From Department', 'To Department',
+  'Status', 'Transfer Date', 'Approved By', 'Approve Date',
+]);
+
+const asDate = v => (v ? new Date(v).toLocaleDateString('en-IN') : '');
+
+function transferToRow(t) {
+  const lots = t.lots || [];
+  return [
+    t.transfer_id || '',
+    lots.length === 1 ? (lots[0].lot_code || lots[0].lot_number || '') : `${lots.length} lots`,
+    lots.map(l => l.item_name).filter(Boolean).join('; '),
+    String(lots.reduce((s, l) => s + parseFloat(l.transfer_qty || 0), 0)),
+    lots[0]?.unit || '',
+    t.source_location_name || '',
+    t.destination_location_name || '',
+    t.status || '',
+    asDate(t.created_at),
+    t.approved_by_name || '',
+    asDate(t.approved_at),
+  ];
+}
+
+router.get('/export', authenticate, async (req, res) => {
+  try {
+    const format = req.query.format === 'print' ? 'print' : 'csv';
+    const action = format === 'print' ? 'print' : 'export';
+
+    const allowed = await hasPermission(
+      req.user.id, 'inventory', action, 'stock_transfer', req.user.role
+    );
+    if (!allowed) {
+      return res.status(403).json({ error: `Permission denied: ${action} not allowed` });
+    }
+
+    const scope = await getTransferDeptScope(req.user.id, req.user.role);
+    const rows = (await queryScopedTransfers(scope, req.query.status))
+      .map(transferToRow);
+
+    res.json({
+      title: 'Stock Transfers',
+      subtitle: `${rows.length} records · ${new Date().toLocaleString('en-IN')}`,
+      filename: `stock-transfers-${new Date().toISOString().split('T')[0]}.csv`,
+      headers: EXPORT_HEADERS,
+      rows,
+    });
+  } catch (err) {
+    logger.error('[stockTransfer] /export error', { path: req.path, error: err.message });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

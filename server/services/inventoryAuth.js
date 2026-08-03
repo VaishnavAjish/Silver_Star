@@ -207,6 +207,105 @@ function isLotInScope(ctx, lotRow) {
   return ctx.allowedDeptIds.includes(lotDeptId);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase A — canonical department scope shared by Inventory, Lot Movements
+// and Stock Transfer read paths.
+//
+// There is exactly ONE scope model. Do not add a second one:
+//   super_admin         → unrestricted
+//   scope_mode ALL      → unrestricted
+//   scope_mode SELECTED → user_inventory_scope_depts only
+//   scope_mode NONE     → nothing
+//
+// The user's Primary Department (users.department_id) plays NO part in
+// visibility. ALL is never narrowed to the primary department, and a missing
+// primary department never widens access.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SUPER_ADMIN_ROLES = Object.freeze(['super_admin', 'superadmin', 'super admin']);
+
+function isSuperAdminRole(userRole) {
+  return SUPER_ADMIN_ROLES.includes(String(userRole || '').toLowerCase().trim());
+}
+
+/**
+ * Canonical department scope for a request.
+ * @returns {Promise<{isAll:boolean,isNone:boolean,allowedDeptIds:number[],
+ *                    includeUnassigned:boolean,canViewFinancial:boolean}>}
+ */
+async function loadDeptScope(userId, userRole) {
+  if (isSuperAdminRole(userRole)) {
+    return { isAll: true, isNone: false, allowedDeptIds: [], includeUnassigned: true, canViewFinancial: true };
+  }
+
+  const ctx = await loadInventoryAuthContext(userId, userRole);
+  const base = {
+    isAll: false, isNone: false, allowedDeptIds: [],
+    includeUnassigned: false, canViewFinancial: ctx.canViewFinancial,
+  };
+
+  if (ctx.scopeMode === 'ALL')  return { ...base, isAll: true, includeUnassigned: true };
+  if (ctx.scopeMode === 'NONE') return { ...base, isNone: true };
+
+  // SELECTED — fail closed when no department is whitelisted.
+  const allowed = (ctx.allowedDeptIds || []).map(Number).filter(Number.isInteger);
+  if (!allowed.length) return { ...base, isNone: true };
+
+  return { ...base, allowedDeptIds: allowed, includeUnassigned: !!ctx.includeUnassigned };
+}
+
+/** Adapt a canonical scope back to the ctx shape consumed by isLotInScope. */
+function scopeToCtx(scope) {
+  return {
+    scopeMode:         scope.isAll ? 'ALL' : scope.isNone ? 'NONE' : 'SELECTED',
+    allowedDeptIds:    scope.allowedDeptIds,
+    includeUnassigned: scope.includeUnassigned,
+  };
+}
+
+/** True when a lot row (must carry department_id) is visible under `scope`. */
+function isLotVisible(scope, lotRow) {
+  return isLotInScope(scopeToCtx(scope), lotRow);
+}
+
+/**
+ * SQL predicate proving a lot_movements row touches an authorised department.
+ *
+ * A movement is visible when at least one of its parent OR child inventory
+ * lots sits in an allowed department. Purely relational — it never parses
+ * movement notes, creator names or department name strings, and it fails
+ * closed: a movement with no resolvable authorised lot is hidden.
+ *
+ * Returns a bare ` AND (...)` fragment; the caller supplies the WHERE.
+ */
+function buildMovementScopeClause(scope, params, movementAlias = 'lm') {
+  if (scope.isAll)  return { clause: '', params };
+  if (scope.isNone) return { clause: ' AND 1=0', params };
+
+  const newParams = [...params];
+  newParams.push(scope.allowedDeptIds);
+  const pIdx = newParams.length;
+
+  const deptPredicate = scope.includeUnassigned
+    ? `(sinv.department_id = ANY($${pIdx}::int[]) OR sinv.department_id IS NULL)`
+    : `sinv.department_id = ANY($${pIdx}::int[])`;
+
+  const clause = ` AND (
+    EXISTS (
+      SELECT 1 FROM lot_movement_parents slmp
+      JOIN inventory sinv ON sinv.id = slmp.parent_lot_id
+      WHERE slmp.movement_id = ${movementAlias}.id AND ${deptPredicate}
+    )
+    OR EXISTS (
+      SELECT 1 FROM lot_movement_children slmc
+      JOIN inventory sinv ON sinv.id = slmc.child_lot_id
+      WHERE slmc.movement_id = ${movementAlias}.id AND ${deptPredicate}
+    )
+  )`;
+
+  return { clause, params: newParams };
+}
+
 module.exports = {
   FINANCIAL_FIELDS,
   loadInventoryAuthContext,
@@ -214,4 +313,10 @@ module.exports = {
   stripFinancial,
   buildDeptScopeClause,
   isLotInScope,
+  // Phase A canonical scope
+  isSuperAdminRole,
+  loadDeptScope,
+  scopeToCtx,
+  isLotVisible,
+  buildMovementScopeClause,
 };

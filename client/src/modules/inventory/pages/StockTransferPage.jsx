@@ -257,8 +257,12 @@ function TransferDetailModal({ transfer, onClose }) {
 /* ── Main page ───────────────────────────────────────────────────────────── */
 export default function StockTransferPage() {
   const api      = useApi();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { openTab } = useTabs();
+
+  /* Phase A: usability gating only — the server re-checks both bits. */
+  const canExport = hasPermission('inventory', 'export', 'stock_transfer');
+  const canPrint  = hasPermission('inventory', 'print',  'stock_transfer');
   const navigate = useNavigate();
 
   const [transfers,      setTransfers]      = useState([]);
@@ -370,35 +374,27 @@ export default function StockTransferPage() {
     );
   });
 
-  /* ── Export ─────────────────────────────────────────────────────────── */
+  /* ── Export ─────────────────────────────────────────────────────────────
+   * Phase A: rows are produced by the server, behind the effective EXPORT /
+   * PRINT permission bits and the same department scope as the list. The
+   * browser no longer serialises data it already holds, so invoking this
+   * function manually cannot bypass a permission denial.
+   * ---------------------------------------------------------------------- */
   const handleExport = async (format) => {
     setExporting(true);
     try {
-      const headers = [
-        'Transfer ID', 'Material Code', 'Material Name',
-        'Transfer Qty', 'Unit', 'From Location', 'To Location',
-        'Status', 'Transfer Date', 'Approved By', 'Approve Date',
-      ];
-      const rows = filtered.map(t => [
-        t.transfer_id || '',
-        t.lots?.length === 1 ? (t.lots[0].lot_code || t.lots[0].lot_number || '') : `${t.lots?.length || 0} lots`,
-        t.lots?.map(l => l.item_name).filter(Boolean).join('; ') || '',
-        t.lots ? String(t.lots.reduce((s, l) => s + parseFloat(l.transfer_qty || 0), 0)) : '',
-        t.lots?.[0]?.unit || '',
-        t.source_location_name || '',
-        t.destination_location_name || '',
-        t.status || '',
-        t.created_at  ? new Date(t.created_at).toLocaleDateString('en-IN')  : '',
-        t.approved_by_name || '',
-        t.approved_at ? new Date(t.approved_at).toLocaleDateString('en-IN') : '',
-      ]);
-      const subtitle = `${filtered.length} records · ${new Date().toLocaleString('en-IN')}`;
+      const status = tab === 'pending' ? 'Pending' : 'Approved';
+      const p = await api.get(`/api/stock-transfer/export?format=${format}&status=${status}`);
       if (format === 'csv') {
-        exportToCSV(`stock-transfers-${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
+        exportToCSV(p.filename, p.headers, p.rows);
       } else {
-        printTable('Stock Transfers', subtitle, headers, rows);
+        printTable(p.title, p.subtitle, p.headers, p.rows);
       }
     } catch (err) {
+      const msg = err.response?.status === 403
+        ? 'You do not have permission to export or print transfers.'
+        : (err.response?.data?.error || err.message || 'Export failed');
+      toast.error(msg);
       console.error('[StockTransferPage] export failed:', err);
     }
     finally { setExporting(false); }
@@ -408,7 +404,7 @@ export default function StockTransferPage() {
   return (
     <>
       <TransferDetailModal transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
-      <StockTransferChallanPrint transfer={detailTransfer} />
+      {canPrint && <StockTransferChallanPrint transfer={detailTransfer} />}
 
       <div className="grid-page animate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -445,12 +441,16 @@ export default function StockTransferPage() {
             <span className="grid-count">{filtered.length} records</span>
 
             <div className="grid-toolbar-right">
-              <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('csv')}>
-                <Download size={13} /> CSV
-              </button>
-              <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('print')}>
-                <Printer size={13} /> Print
-              </button>
+              {canExport && (
+                <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('csv')}>
+                  <Download size={13} /> CSV
+                </button>
+              )}
+              {canPrint && (
+                <button className="btn btn-sm" disabled={exporting} onClick={() => handleExport('print')}>
+                  <Printer size={13} /> Print
+                </button>
+              )}
               <button 
                 className="btn btn-sm btn-primary" 
                 onClick={() => {

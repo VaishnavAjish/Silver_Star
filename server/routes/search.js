@@ -2,6 +2,8 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
 const { logger } = require('../middleware/logger');
+// Phase A (Department Scope): canonical scope model — see services/inventoryAuth.js
+const { loadDeptScope } = require('../services/inventoryAuth');
 
 const router = express.Router();
 
@@ -16,6 +18,20 @@ router.get('/', authenticate, async (req, res) => {
 
     const limit  = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     const perType = 5; // cap per entity type
+
+    // Phase A: the inventory branch obeys the same department scope as
+    // GET /api/inventory. Other entity types are unchanged.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    const searchParams = [q, perType, limit];
+    let invScopeSql = '';
+    if (scope.isNone) {
+      invScopeSql = 'AND 1=0';
+    } else if (!scope.isAll) {
+      searchParams.push(scope.allowedDeptIds);
+      invScopeSql = scope.includeUnassigned
+        ? `AND (department_id = ANY($${searchParams.length}::int[]) OR department_id IS NULL)`
+        : `AND department_id = ANY($${searchParams.length}::int[])`;
+    }
 
     const sql = `
       SELECT type, id, label, subtitle, url, score
@@ -33,10 +49,13 @@ router.get('/', authenticate, async (req, res) => {
               similarity($1, COALESCE(lot_name, ''))
             )                                                  AS score
           FROM inventory
-          WHERE lot_number ILIKE '%' || $1 || '%'
-             OR lot_name   ILIKE '%' || $1 || '%'
-             OR similarity($1, lot_number)              > 0.1
-             OR similarity($1, COALESCE(lot_name, '')) > 0.1
+          WHERE (
+                  lot_number ILIKE '%' || $1 || '%'
+               OR lot_name   ILIKE '%' || $1 || '%'
+               OR similarity($1, lot_number)              > 0.1
+               OR similarity($1, COALESCE(lot_name, '')) > 0.1
+                )
+            ${invScopeSql}
           ORDER BY score DESC
           LIMIT $2
         ) inv
@@ -168,7 +187,7 @@ router.get('/', authenticate, async (req, res) => {
       LIMIT $3;
     `;
 
-    const { rows } = await pool.query(sql, [q, perType, limit]);
+    const { rows } = await pool.query(sql, searchParams);
     res.json({ results: rows });
   } catch (err) {
     logger.error('Search error:', { error: err.message });

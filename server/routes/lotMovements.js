@@ -6,8 +6,13 @@ const { resolveMixDimensions, mixDimensionError } = require('../services/lotDime
 // Phase A (Seed Lifecycle): shared attachment rule — see services/manufacturingState.js
 const { attachmentBlockReason } = require('../services/manufacturingState');
 const { dispatchEvent } = require('../services/eventDispatcher');
+// Phase A (Department Scope): canonical scope model — see services/inventoryAuth.js
+const { loadDeptScope, buildMovementScopeClause, isLotVisible } = require('../services/inventoryAuth');
 
 const router = express.Router();
+
+/** Max rows a single Lot Movements page may return (blocks pageSize bypasses). */
+const MAX_MOVEMENT_PAGE_SIZE = 500;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -680,6 +685,13 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
     if (!lotRows.length) return res.status(404).json({ error: 'Lot not found' });
     const lot = lotRows[0];
 
+    // Phase A: the requested (root) lot must itself be visible — same rule as
+    // GET /api/inventory/:id. Out of scope is reported as 404, not 403.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone || !isLotVisible(scope, lot)) {
+      return res.status(404).json({ error: 'Lot not found' });
+    }
+
     // Walk UP: ancestors of this lot
     const { rows: ancestors } = await pool.query(
       `WITH RECURSIVE anc AS (
@@ -706,7 +718,7 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
        SELECT DISTINCT
               a.lot_id, a.movement_id, a.movement_number, a.movement_type, a.depth,
               inv.lot_number, inv.lot_name, inv.qty, inv.weight, inv.rate, inv.unit,
-              inv.status, inv.total_value, inv.source_type,
+              inv.status, inv.total_value, inv.source_type, inv.department_id,
               (COALESCE(inv.qty, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0) + COALESCE((SELECT SUM(issued_qty) FROM lot_process_issues WHERE source_lot_id = inv.id), 0)) AS historical_qty,
               (COALESCE(inv.weight, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0)) AS historical_weight,
               i.name AS item_name, i.category
@@ -743,7 +755,7 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
        SELECT DISTINCT
               d.lot_id, d.movement_id, d.movement_number, d.movement_type, d.depth,
               inv.lot_number, inv.lot_name, inv.qty, inv.weight, inv.rate, inv.unit,
-              inv.status, inv.total_value, inv.source_type,
+              inv.status, inv.total_value, inv.source_type, inv.department_id,
               (COALESCE(inv.qty, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0) + COALESCE((SELECT SUM(issued_qty) FROM lot_process_issues WHERE source_lot_id = inv.id), 0)) AS historical_qty,
               (COALESCE(inv.weight, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0)) AS historical_weight,
               i.name AS item_name, i.category
@@ -784,7 +796,7 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
               pa.operation_type,
               pa.depth,
               inv.lot_number, inv.lot_name, inv.qty, inv.weight, inv.rate, inv.unit,
-              inv.status, inv.total_value, inv.source_type,
+              inv.status, inv.total_value, inv.source_type, inv.department_id,
               (COALESCE(inv.qty, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0) + COALESCE((SELECT SUM(issued_qty) FROM lot_process_issues WHERE source_lot_id = inv.id), 0)) AS historical_qty,
               (COALESCE(inv.weight, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0)) AS historical_weight,
               i.name AS item_name, i.category
@@ -814,7 +826,7 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
        SELECT DISTINCT
               pd.lot_id, pd.operation_type, pd.depth,
               inv.lot_number, inv.lot_name, inv.qty, inv.weight, inv.rate, inv.unit,
-              inv.status, inv.total_value, inv.source_type,
+              inv.status, inv.total_value, inv.source_type, inv.department_id,
               (COALESCE(inv.qty, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0) + COALESCE((SELECT SUM(issued_qty) FROM lot_process_issues WHERE source_lot_id = inv.id), 0)) AS historical_qty,
               (COALESCE(inv.weight, 0) + COALESCE((SELECT SUM(quantity_consumed) FROM lot_movement_parents WHERE parent_lot_id = inv.id), 0)) AS historical_weight,
               i.name AS item_name, i.category
@@ -842,15 +854,20 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
       category: r.category,
     });
 
+    // Phase A: drop every genealogy node whose lot sits outside the caller's
+    // departments, so ancestors, descendants and sibling components cannot
+    // leak another department's lot names, quantities, weights or values.
+    const visible = rows => rows.filter(r => isLotVisible(scope, r));
+
     // Merge: movement-based first, then process-based (skip duplicates)
     const allAncestors = [
-      ...ancestors.map(a => ({
+      ...visible(ancestors).map(a => ({
         lot: lotShape(a),
         via_movement: { id: a.movement_id, movement_number: a.movement_number, movement_type: a.movement_type },
         via_operation: null,
         depth: a.depth,
       })),
-      ...procAncestors
+      ...visible(procAncestors)
         .filter(a => !movAncIds.has(a.lot_id))
         .map(a => ({
           lot: lotShape(a),
@@ -861,13 +878,13 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
     ];
 
     const allDescendants = [
-      ...descendants.map(d => ({
+      ...visible(descendants).map(d => ({
         lot: lotShape(d),
         via_movement: { id: d.movement_id, movement_number: d.movement_number, movement_type: d.movement_type },
         via_operation: null,
         depth: d.depth,
       })),
-      ...procDescendants
+      ...visible(procDescendants)
         .filter(d => !movDescIds.has(d.lot_id))
         .map(d => ({
           lot: lotShape(d),
@@ -889,10 +906,20 @@ router.get('/lineage/:lotId', authenticate, async (req, res) => {
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '1', 10);
-    const pageSize = Math.min(parseInt(req.query.pageSize || '50', 10), 100000);
+    const page = Math.max(parseInt(req.query.page || '1', 10) || 1, 1);
+    const pageSize = Math.min(
+      Math.max(parseInt(req.query.pageSize || '50', 10) || 50, 1),
+      MAX_MOVEMENT_PAGE_SIZE
+    );
     const offset = (page - 1) * pageSize;
     const { type, from, to, lot_id, search } = req.query;
+
+    // Phase A: department scope is resolved before any row is read.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone) {
+      return res.json({ data: [], totalCount: 0, page, pageSize, totalPages: 0 });
+    }
+
     const params = [];
     const filters = [];
 
@@ -914,17 +941,26 @@ router.get('/', authenticate, async (req, res) => {
       filters.push(`lm.movement_number ILIKE $${params.length}`);
     }
 
-    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const countParams = [...params];
+    // Department scope is applied inside SQL so that BOTH the count and the
+    // page are filtered before pagination — never load-then-drop in React.
+    const { clause: scopeClause, params: scopedParams } =
+      buildMovementScopeClause(scope, params, 'lm');
+
+    const baseWhere = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const where = scopeClause
+      ? (baseWhere ? `${baseWhere}${scopeClause}` : `WHERE 1=1${scopeClause}`)
+      : baseWhere;
+
+    const countParams = [...scopedParams];
 
     const { rows: [cr] } = await pool.query(
       `SELECT COUNT(*) FROM lot_movements lm ${where}`,
       countParams
     );
 
-    params.push(pageSize, offset);
-    const limitIdx  = params.length - 1;
-    const offsetIdx = params.length;
+    const dataParams = [...scopedParams, pageSize, offset];
+    const limitIdx  = dataParams.length - 1;
+    const offsetIdx = dataParams.length;
 
     const { rows } = await pool.query(
       `SELECT lm.*, u.full_name AS created_by_name,
@@ -935,7 +971,7 @@ router.get('/', authenticate, async (req, res) => {
        ${where}
        ORDER BY lm.created_at DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      params
+      dataParams
     );
 
     const totalCount = parseInt(cr.count);
@@ -948,11 +984,19 @@ router.get('/', authenticate, async (req, res) => {
 
 router.get('/:id', authenticate, async (req, res) => {
   try {
+    // Phase A: an out-of-scope movement is indistinguishable from a missing
+    // one — always 404, never 403, so existence is not confirmed.
+    const scope = await loadDeptScope(req.user.id, req.user.role);
+    if (scope.isNone) return res.status(404).json({ error: 'Movement not found' });
+
+    const { clause: scopeClause, params: scopedParams } =
+      buildMovementScopeClause(scope, [req.params.id], 'lm');
+
     const { rows: [mv] } = await pool.query(
       `SELECT lm.*, u.full_name AS created_by_name
        FROM lot_movements lm LEFT JOIN users u ON lm.created_by = u.id
-       WHERE lm.id = $1`,
-      [req.params.id]
+       WHERE lm.id = $1${scopeClause}`,
+      scopedParams
     );
     if (!mv) return res.status(404).json({ error: 'Movement not found' });
 
