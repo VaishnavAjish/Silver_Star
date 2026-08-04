@@ -174,6 +174,12 @@ function scopeAndFilters(auth, filters, allow = {}) {
   if (filters.department_id) { p.push(parseInt(filters.department_id)); extra += ` AND inv.department_id = $${p.length}`; }
   if (filters.location_id)   { p.push(parseInt(filters.location_id));   extra += ` AND inv.location_id = $${p.length}`; }
   if (allow.unit && filters.unit) { p.push(filters.unit); extra += ` AND inv.unit = $${p.length}`; }
+  // Legacy rows carry manufacturing_state = NULL and are read as AVAILABLE by
+  // the canonical helper, so they land in "New". This toggle lets the operator
+  // see how much of that bucket is genuinely stated vs merely inherited.
+  if (allow.legacy && filters.include_legacy === 'false') {
+    extra += ' AND inv.manufacturing_state IS NOT NULL';
+  }
   return { sql: clause + extra, params: p };
 }
 
@@ -183,7 +189,7 @@ function scopeAndFilters(auth, filters, allow = {}) {
  * @param {object} filters { department_id, location_id, bucket, min_qty, show_zero, search }
  */
 async function getSeedStock(auth, filters = {}) {
-  const { sql: scope, params } = scopeAndFilters(auth, filters);
+  const { sql: scope, params } = scopeAndFilters(auth, filters, { legacy: true });
 
   const { rows } = await pool.query(`${seedClassificationSql(scope)}
     SELECT dim_major, dim_minor, dim_height, dim_unit, bucket,
@@ -277,7 +283,7 @@ async function getSeedStock(auth, filters = {}) {
 
 /** Drill-down: the individual Seed lots behind one summary cell. */
 async function getSeedLots(auth, filters = {}) {
-  const { sql: scope, params } = scopeAndFilters(auth, filters);
+  const { sql: scope, params } = scopeAndFilters(auth, filters, { legacy: true });
   const p = [...params];
   const where = [];
 

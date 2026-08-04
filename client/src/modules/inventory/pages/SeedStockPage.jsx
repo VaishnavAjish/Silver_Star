@@ -127,7 +127,7 @@ export default function SeedStockPage() {
 
   const [filters, setFilters] = useState({
     search: '', department_id: '', location_id: '', bucket: '',
-    min_qty: '', show_zero: 'false',
+    min_qty: '', show_zero: 'false', include_legacy: 'true',
   });
   const [searchInput, setSearchInput] = useState('');
   const [depts, setDepts] = useState([]);
@@ -248,6 +248,16 @@ export default function SeedStockPage() {
             <select value={filters.show_zero} onChange={e => setF('show_zero', e.target.value)}>
               <option value="false">Hide zero rows</option>
               <option value="true">Show zero rows</option>
+            </select>
+          </div>
+
+          <div className="filter-field" style={{ width: 160 }}>
+            <label className="filter-label">Legacy / Null State</label>
+            <select value={filters.include_legacy}
+              onChange={e => setF('include_legacy', e.target.value)}
+              title="Legacy Seed has no manufacturing_state and is read as AVAILABLE (New)">
+              <option value="true">Include legacy Seed</option>
+              <option value="false">Stated state only</option>
             </select>
           </div>
 
