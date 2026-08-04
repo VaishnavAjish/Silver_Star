@@ -13,6 +13,7 @@ import ExportMenu from '../../../shared/components/ExportMenu';
 import { useTabs } from '../../../core/tabs';
 import DatePicker from '../../../shared/components/DatePicker';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
+import QuickCreateItemModal from '../../../shared/components/QuickCreateItemModal';
 import { Plus, Save, Trash2, FileText, ShoppingCart, RefreshCw, LucideEqual } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -216,6 +217,7 @@ export function PurchaseNoteForm() {
   const [saving, setSaving] = useState(false);
   const [viewData, setViewData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(isExisting);
+  const [showItemModalForLine, setShowItemModalForLine] = useState(null);
 
   const [form, setForm] = useState({
     doc_date: new Date().toISOString().split('T')[0],
@@ -536,8 +538,15 @@ export function PurchaseNoteForm() {
                         />
                       ) : (
                         <>
-                          <SelectDropdown value={line.item_id || ''} onChange={e => updateLine(idx, 'item_id', e.target.value)}>
+                          <SelectDropdown value={line.item_id || ''} onChange={e => {
+                            if (e.target.value === 'NEW_ITEM') {
+                              setShowItemModalForLine(idx);
+                            } else {
+                              updateLine(idx, 'item_id', e.target.value);
+                            }
+                          }}>
                             <option value="">— Item —</option>
+                            <option value="NEW_ITEM">+ Add New Item</option>
                             {filteredItems.map(i => <option key={i.id} value={i.id}>{i.name}{i.is_capital_asset ? ' ★' : ''} ({i.code})</option>)}
                           </SelectDropdown>
                           {isCap && (
@@ -670,6 +679,18 @@ export function PurchaseNoteForm() {
           <div style={{ padding: '10px 14px', background: '#E8F5E9', borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--green)', border: '1px solid #A5D6A7' }}>
             <strong>JE Posted:</strong> Journal Entry linked to this purchase. Inventory created and accounts updated.
           </div>
+        )}
+
+        {showItemModalForLine !== null && (
+          <QuickCreateItemModal
+            api={api}
+            onClose={() => setShowItemModalForLine(null)}
+            onCreated={(item) => {
+              setItems(prev => [...prev, item]);
+              updateLine(showItemModalForLine, 'item_id', item.id);
+              setShowItemModalForLine(null);
+            }}
+          />
         )}
       </div>
     </TransactionPageLayout>
