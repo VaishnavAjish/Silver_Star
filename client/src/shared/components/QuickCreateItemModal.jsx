@@ -36,7 +36,11 @@ export default function QuickCreateItemModal({ onClose, onCreated, api }) {
     }
     setSaving(true);
     try {
-      const created = await api.post('/api/items', form);
+      const payload = { ...form };
+      if (!payload.code) delete payload.code;
+      if (!payload.fixed_asset_category_id) delete payload.fixed_asset_category_id;
+      
+      const created = await api.post('/api/items', payload);
       toast.success('Item created');
       onCreated(created);
       if (onClose) onClose();
