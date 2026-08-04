@@ -29,6 +29,7 @@ export default function QuickCreateItemModal({ onClose, onCreated, api }) {
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSave = async () => {
+    if (!form.code.trim()) { toast.error('Item code is required'); return; }
     if (!form.name.trim()) { toast.error('Item name is required'); return; }
     if (form.is_capital_asset && !form.fixed_asset_category_id) {
       toast.error('Asset Category is required for capital assets');
@@ -61,8 +62,8 @@ export default function QuickCreateItemModal({ onClose, onCreated, api }) {
         <div className="modal-body">
           <div className="form-row">
             <div className="fg">
-              <label>Item Code</label>
-              <input value={form.code} onChange={e => f('code', e.target.value)} placeholder="Auto-generated if blank" />
+              <label>Item Code *</label>
+              <input value={form.code} onChange={e => f('code', e.target.value)} placeholder="e.g. SEED-01" />
             </div>
             <div className="fg w">
               <label>Item Name *</label>
