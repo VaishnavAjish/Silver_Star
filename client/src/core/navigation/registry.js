@@ -33,11 +33,24 @@ export const NAVIGATION = [
   {
     id: 'sec-inventory', label: 'Inventory', icon: Warehouse, actionType: 'group', children: [
       { id: 'all-inventory', label: 'All Inventory', path: '/inventory', icon: Boxes, module: 'inventory', submodule: 'all_inventory', pinnable: true, searchable: true },
-      { id: 'opening-entry', label: 'Opening Entry', path: '/inventory/opening', icon: Package, module: 'inventory', submodule: 'opening_entry', editorOnly: true, pinnable: true, searchable: true },
-      { id: 'closing-entry', label: 'Closing Entry', path: '/inventory/closing', icon: Package, module: 'inventory', submodule: 'closing_entry', editorOnly: true, pinnable: true, searchable: true },
       { id: 'mix-lots', label: 'Mix Lots', path: '/inventory/mix', icon: Layers, module: 'inventory', submodule: 'mix_lots', editorOnly: true, searchable: true },
       { id: 'stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer', icon: Send, module: 'inventory', submodule: 'stock_transfer', editorOnly: true, pinnable: true, searchable: true },
       { id: 'lot-movements', label: 'Lot Movements', path: '/lot-movements', icon: GitBranch, module: 'inventory', submodule: 'lot_movements', pinnable: true, searchable: true },
+    ],
+  },
+
+  // Inventory Management — monthly/stock control, distinct from the operational
+  // lot workspace above. A SIBLING section rather than a nested group: the
+  // sidebar renderer (core/layout/Layout.jsx SidebarItem) supports
+  // section → children only, and making it recurse would affect every section.
+  // Opening/Closing Entry keep their original routes, components and permission
+  // keys — only their sidebar placement moves, so old URLs and bookmarks work.
+  {
+    id: 'sec-inventory-mgmt', label: 'Inventory Management', icon: ClipboardCheck, actionType: 'group', children: [
+      { id: 'seed-stock', label: 'Seed Stock', path: '/inventory/seed-stock', icon: Boxes, module: 'inventory', submodule: 'seed_stock', pinnable: true, searchable: true },
+      { id: 'gas-stock', label: 'Gas Stock', path: '/inventory/gas-stock', icon: Package, module: 'inventory', submodule: 'gas_stock', pinnable: true, searchable: true },
+      { id: 'opening-entry', label: 'Opening Entry', path: '/inventory/opening', icon: Package, module: 'inventory', submodule: 'opening_entry', editorOnly: true, pinnable: true, searchable: true },
+      { id: 'closing-entry', label: 'Closing Entry', path: '/inventory/closing', icon: Package, module: 'inventory', submodule: 'closing_entry', editorOnly: true, pinnable: true, searchable: true },
     ],
   },
 

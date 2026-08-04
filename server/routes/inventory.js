@@ -12,6 +12,31 @@ const {
   buildDeptScopeClause,
   isLotInScope,
 } = require('../services/inventoryAuth');
+// Phase 1 (Inventory Management): canonical Seed/Gas stock aggregation.
+const seedStockService = require('../services/seedStockService');
+const { hasPermission } = require('../utils/permissions');
+const { isSuperAdminRole } = require('../services/inventoryAuth');
+
+/**
+ * Gas authority. Two distinct grants:
+ *   canViewGas        — may see Gas at all (Gas Stock page, ?category=gas)
+ *   canViewCentralGas — may see department-unassigned "central" Gas stock
+ *
+ * Every Gas row is currently department-unassigned, so central authority is
+ * deliberately narrow (Super Admin, or an explicit MANAGE grant on the
+ * gas_stock submodule) until Gas ownership is configured. This fails closed
+ * by design — the NULL department must not become an open door.
+ */
+async function resolveGasAccess(req) {
+  if (isSuperAdminRole(req.user?.role)) {
+    return { canViewGas: true, canViewCentralGas: true };
+  }
+  const [view, manage] = await Promise.all([
+    hasPermission(req.user.id, 'inventory', 'view',   'gas_stock', req.user.role),
+    hasPermission(req.user.id, 'inventory', 'manage', 'gas_stock', req.user.role),
+  ]);
+  return { canViewGas: view, canViewCentralGas: manage };
+}
 const { getUserPermissionBitmask, PERM_BITS } = require('../utils/permissions');
 
 const router = express.Router();
@@ -51,9 +76,27 @@ router.get('/', authenticate, requireInventoryView, async (req, res) => {
       if (category === 'growth_run') {
         where += ` AND i.category IN ('growth_run', 'growth_diamond')`;
       } else {
+        // An explicit ?category=gas must not become a way around the
+        // operational exclusion below — it requires real Gas authority.
+        if (category === 'gas') {
+          const gas = await resolveGasAccess(req);
+          if (!gas.canViewGas) {
+            return res.status(403).json({ error: 'Permission denied: Gas Stock view required' });
+          }
+          if (!gas.canViewCentralGas) where += ' AND inv.department_id IS NOT NULL';
+        }
         params.push(category);
         where += ` AND i.category = $${params.length}`;
       }
+    } else {
+      // Phase 1 (Inventory Management): Gas is a quantity-controlled consumable,
+      // not an operational manufacturing lot — it is excluded from the DEFAULT
+      // All Inventory grid and surfaced on the Gas Stock page instead.
+      // Server-side by design: frontend filtering alone would be bypassable.
+      // Nothing is deleted, archived or revalued; an explicit
+      // ?category=gas request (Gas Stock drill-down, Super Admin audit) still
+      // returns every row.
+      where += ` AND i.category <> 'gas'`;
     }
     if (type_filter)    { params.push(type_filter);    where += ` AND i.type = $${params.length}`; }
     if (operation_type) { params.push(operation_type); where += ` AND inv.operation_type = $${params.length}`; }
@@ -954,6 +997,76 @@ router.get('/summary', authenticate, requireInventoryView, async (req, res) => {
     const out = { total_items: row.total_items, total_qty: row.total_qty };
     if (req.inventoryAuth.canViewFinancial) out.total_value = row.total_value;
     res.json(out);
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// ── Phase 1: Inventory Management (read-only Seed / Gas stock) ──────────────
+// Registered BEFORE '/:id' — otherwise the param route swallows these paths.
+// requireInventoryView supplies req.inventoryAuth, which carries both the
+// department scope and canViewFinancial; the service applies both.
+
+// GET /api/inventory/seed-stock
+router.get('/seed-stock', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const result = await seedStockService.getSeedStock(req.inventoryAuth, req.query);
+    if (result.summary.reconciliation_difference !== 0) {
+      logger.error('[inventory] seed-stock reconciliation mismatch', {
+        difference: result.summary.reconciliation_difference,
+        total_qty: result.summary.total_qty,
+        unclassified_qty: result.summary.unclassified_qty,
+      });
+    }
+    res.json(result);
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/inventory/seed-stock/lots?size_key=&bucket=
+router.get('/seed-stock/lots', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    res.json(await seedStockService.getSeedLots(req.inventoryAuth, req.query));
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/inventory/seed-stock/export?format=csv|print
+router.get('/seed-stock/export', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const action = req.query.format === 'print' ? 'print' : 'export';
+    const ok = await hasPermission(req.user.id, 'inventory', action, 'seed_stock', req.user.role);
+    if (!ok) return res.status(403).json({ error: `Permission denied: ${action} not allowed` });
+    res.json(await seedStockService.buildSeedExport(req.inventoryAuth, req.query));
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/inventory/gas-stock
+router.get('/gas-stock', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const gas = await resolveGasAccess(req);
+    if (!gas.canViewGas) return res.status(403).json({ error: 'Permission denied: Gas Stock view required' });
+    res.json(await seedStockService.getGasStock(
+      req.inventoryAuth, req.query, { includeCentral: gas.canViewCentralGas }));
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/inventory/gas-stock/lots?item_id=&unit=
+router.get('/gas-stock/lots', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const gas = await resolveGasAccess(req);
+    if (!gas.canViewGas) return res.status(403).json({ error: 'Permission denied: Gas Stock view required' });
+    res.json(await seedStockService.getGasLots(
+      req.inventoryAuth, req.query, { includeCentral: gas.canViewCentralGas }));
+  } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/inventory/gas-stock/export?format=csv|print
+router.get('/gas-stock/export', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const gas = await resolveGasAccess(req);
+    if (!gas.canViewGas) return res.status(403).json({ error: 'Permission denied: Gas Stock view required' });
+    const action = req.query.format === 'print' ? 'print' : 'export';
+    const ok = await hasPermission(req.user.id, 'inventory', action, 'gas_stock', req.user.role);
+    if (!ok) return res.status(403).json({ error: `Permission denied: ${action} not allowed` });
+    res.json(await seedStockService.buildGasExport(
+      req.inventoryAuth, req.query, { includeCentral: gas.canViewCentralGas }));
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
 });
 
