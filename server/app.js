@@ -184,6 +184,9 @@ const adminLoggerRoutes = require('./routes/adminLogger');
 app.use('/api/admin/users', userRoutes);
 app.use('/api/admin/permissions', permsRoutes);
 app.use('/api/admin/logger', adminLoggerRoutes);
+// RBAC Brick 1 — read-only canonical permission catalog. Mounted BEFORE the
+// generic '/api/admin' mount below so the path can never be shadowed.
+app.use('/api/admin/permission-catalog', require('./routes/adminPermissionCatalog'));
 const clipboardRoutes = require('./routes/clipboard');
 const createMasterRouter = require('./routes/masterFactory');
 const processMasterRoutes = require('./routes/processMaster');
