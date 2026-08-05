@@ -6,6 +6,7 @@ const { nextLotOpId } = require('../services/seedLotCodeService');
 const { findActiveBiscuitByProcess, applyMeasurements } = require('../services/growthRunService');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const FinancialMappingService = require('../services/FinancialMappingService');
+const { generateLineage } = require('../services/inventoryLineageService');
 
 const router = express.Router();
 
@@ -367,12 +368,9 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       const lotNumber = `RD-${seqRD.rows[0].num}`;
       const lotCost = totalWeight > 0 ? Math.round((parseFloat(line.weight) / totalWeight) * totalCost * 100) / 100 : 0;
 
-      // Phase 33: rough lots ALWAYS descend from the Growth Run (biscuit).
-      // The biscuit is guaranteed to exist (enforced above) so genealogy is
-      // never null — seed → growth_run → rough is preserved on every lot.
+      // Use generateLineage to maintain genealogy
+      const lineage = generateLineage(biscuit);
       const genParentLotId = biscuit.id;
-      const genRootLotId   = biscuit.root_lot_id || biscuit.id;
-      const genPath        = `${biscuit.genealogy_path || biscuit.lot_number}/${lotNumber}`;
 
       // Create rough diamond inventory record
       const roughLotOpId = await nextLotOpId(client);
@@ -380,15 +378,15 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       const invR = await client.query(
         `INSERT INTO inventory (item_id, lot_number, lot_name, qty, unit, weight, rate, total_value,
           location_id, department_id, purchase_date, status, remarks, lot_op_id,
-          parent_lot_id, root_lot_id, genealogy_path, source_type, operation_type, source_module)
-         VALUES ($1,$2,$3,1,'CT',$4,$5,$6,$7,$8,$9,'IN STOCK',$10,$11,$12,$13,$14,'growth','growth_output','Rough Growth')
+          parent_lot_id, root_lot_id, genealogy_path, split_level, source_type, operation_type, source_module)
+         VALUES ($1,$2,$3,1,'CT',$4,$5,$6,$7,$8,$9,'IN STOCK',$10,$11,$12,$13,$14,$15,'growth','growth_output','Rough Growth')
          RETURNING id`,
         [roughItemId, lotNumber, `Rough-CVD-${lotNumber.replace('RD-','')}`,
          line.weight, costPerCarat, lotCost,
          department_id || null, department_id || null, growth_date,
          `From ${growthNumber}, seed ${seedLotNum}, ${line.shape || 'Rough'}`,
          roughLotOpId,
-         genParentLotId, genRootLotId, genPath]
+         genParentLotId, lineage.root_lot_id, lineage.genealogy_path, lineage.split_level]
       );
 
       const lineR = await client.query(

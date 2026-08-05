@@ -5,6 +5,7 @@ const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
 // Phase A (Seed Lifecycle): shared attachment rule — see services/manufacturingState.js
 const { attachmentBlockReason } = require('../services/manufacturingState');
+const { generateLineage } = require('../services/inventoryLineageService');
 
 const router = express.Router();
 
@@ -624,14 +625,27 @@ router.post('/pending/:id/approve', authenticate, async (req, res) => {
         const remaining = available - requestedQty;
         const valReq = parseFloat(lot.total_value || 0) * (requestedQty / available);
         const valRem = parseFloat(lot.total_value || 0) * (remaining / available);
+        
+        // Split Remaining Parent
+        const { root_lot_id: rR, genealogy_path: gR, split_level: sR } = generateLineage(lot);
+        const { rows: [opSeqRem] } = await client.query("SELECT nextval('lot_op_id_seq')");
+        const remCode = `${lot.lot_code || lot.lot_number}-SPLIT${opSeqRem.nextval}`;
+
         await client.query(
-          `UPDATE inventory SET qty = $1, weight = $2, total_value = $3, updated_at = NOW() WHERE id = $4`,
+          `UPDATE inventory SET 
+             qty = $1, weight = $2, total_value = $3, 
+             lot_code = $4, lot_number = $4, genealogy_path = $5, split_level = $6,
+             updated_at = NOW() 
+           WHERE id = $7`,
           [lot.unit === 'CT' ? lot.qty : remaining,
            lot.unit === 'CT' ? remaining : lot.weight,
-           valRem, lot.id]
+           valRem, remCode, gR, sR, lot.id]
         );
+
+        // Create Child Transfer Lot
         const { rows: [opSeq] } = await client.query("SELECT nextval('lot_op_id_seq')");
         const newCode = `${lot.lot_code || lot.lot_number}-ST${opSeq.nextval}`;
+        const { root_lot_id, genealogy_path, split_level } = generateLineage(lot);
         const { rows: [newLot] } = await client.query(
           `INSERT INTO inventory
              (item_id, lot_number, lot_name, batch_no, qty, unit, weight, rate, total_value,
@@ -648,9 +662,9 @@ router.post('/pending/:id/approve', authenticate, async (req, res) => {
            lot.unit === 'CT' ? requestedQty : lot.weight,
            lot.rate, valReq,
            resolvedLocationId, destDepartmentId || lot.department_id, lot.vendor_id, lot.purchase_date,
-           newCode, lot.id, lot.root_lot_id || lot.id,
-           (lot.split_level || 0) + 1,
-           (lot.genealogy_path || String(lot.id)) + '->' + newCode,
+           newCode, lot.id, root_lot_id,
+           split_level,
+           genealogy_path,
            opSeq.nextval,
            lot.dim_length, lot.dim_depth, lot.dim_height, lot.dim_unit]
         );

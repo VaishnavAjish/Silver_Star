@@ -25,6 +25,7 @@ const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../servi
 const { resolveIssueGrowthContext } = require('../services/growthIssueContext');
 const { assessMachineRelease } = require('../services/machineReleaseGuard');
 const { requiresReturnEngineCompletion } = require('../services/completionEngineGuard');
+const { generateLineage } = require('../services/inventoryLineageService');
 
 const router = express.Router();
 
@@ -1687,11 +1688,12 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
             attachedSeeds = [reloaded];
           } else {
             const seedCode = `${processLot.lot_code || processLot.lot_number}-S1`;
+            const { root_lot_id, genealogy_path, split_level } = generateLineage(processLot);
             const { rows: [newSeed] } = await client.query(
-              `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module)
-               VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override')
+              `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module, genealogy_path, split_level)
+               VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override', $10, $11)
                RETURNING *`,
-              [processLot.item_id, seedCode, seedCode, processLot.qty || 9, seedW, seedV > 0 ? seedV / (processLot.qty || 9) : 0, seedV, processLot.id, rootLotId || processLot.id]
+              [processLot.item_id, seedCode, seedCode, processLot.qty || 9, seedW, seedV > 0 ? seedV / (processLot.qty || 9) : 0, seedV, processLot.id, root_lot_id, genealogy_path, split_level]
             );
             seedInvId = newSeed.id;
             attachedSeeds = [newSeed];

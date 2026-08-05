@@ -14,6 +14,8 @@ const {
 } = require('../services/inventoryAuth');
 // Phase 1 (Inventory Management): canonical Seed/Gas stock aggregation.
 const seedStockService = require('../services/seedStockService');
+// Stage 1 (Inventory Correction): in-place Growth Diamond weight correction.
+const correctionService = require('../services/inventoryCorrectionService');
 const { hasPermission } = require('../utils/permissions');
 const { isSuperAdminRole } = require('../services/inventoryAuth');
 
@@ -964,6 +966,20 @@ router.post('/history/reverse', authenticate, requireInventoryView, async (req, 
     if (!canonical_transaction_key || !reason || !lot_id) {
       return res.status(400).json({ error: 'Missing required reversal fields.' });
     }
+
+    // Reversal MUTATES manufacturing history, so a view-level middleware is not
+    // a sufficient gate. requireInventoryView stays only because it supplies
+    // req.inventoryAuth for the department-scope check below; authority now
+    // comes from a dedicated capability that ordinary inventory view/edit does
+    // not confer. Unsupported reversal types still fail safely inside the
+    // orchestrator — this changes the authorization boundary only.
+    const mayReverse = await hasPermission(
+      req.user.id, 'inventory', 'edit', 'history_reversal', req.user.role
+    );
+    if (!mayReverse) {
+      return res.status(403).json({ error: 'Permission denied: history reversal not allowed' });
+    }
+
     const invCheck = await pool.query('SELECT department_id FROM inventory WHERE id = $1', [parseInt(lot_id, 10)]);
     if (invCheck.rows.length === 0 || !isLotInScope(req.inventoryAuth, invCheck.rows[0])) {
       return res.status(404).json({ error: 'Lot not found' });
@@ -1068,6 +1084,50 @@ router.get('/gas-stock/export', authenticate, requireInventoryView, async (req, 
     res.json(await seedStockService.buildGasExport(
       req.inventoryAuth, req.query, { includeCentral: gas.canViewCentralGas }));
   } catch (err) { logger.error('[inventory] ' + req.path, { error: err.message, stack: err.stack }); res.status(500).json({ error: err.message }); }
+});
+
+// ── Stage 1: Growth Diamond weight correction ───────────────────────────────
+// Corrects the existing lot in place. Never creates a replacement lot, never
+// repeats a Process Return, never reverses history. Registered BEFORE '/:id'.
+
+// POST /api/inventory/:id/corrections/weight
+router.post('/:id/corrections/weight', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    const result = await correctionService.correctGrowthDiamondWeight(
+      {
+        userId: req.user.id,
+        userRole: req.user.role,
+        inventoryAuth: req.inventoryAuth,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || null,
+      },
+      parseInt(req.params.id, 10),
+      req.body
+    );
+    res.json(result);
+  } catch (err) {
+    if (err instanceof correctionService.CorrectionError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    logger.error('[inventory] weight correction error', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Weight correction failed.' });
+  }
+});
+
+// GET /api/inventory/:id/corrections
+router.get('/:id/corrections', authenticate, requireInventoryView, async (req, res) => {
+  try {
+    res.json(await correctionService.getWeightCorrectionHistory(
+      { userId: req.user.id, userRole: req.user.role, inventoryAuth: req.inventoryAuth },
+      parseInt(req.params.id, 10)
+    ));
+  } catch (err) {
+    if (err instanceof correctionService.CorrectionError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    logger.error('[inventory] correction history error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/inventory/:id

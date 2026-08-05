@@ -25,6 +25,7 @@ import MixLotsPage from './MixLotsPage';
 import LotReturnPage from './LotReturnPage';
 import EditLotModal from './EditLotModal';
 import CorrectLotNameModal from '../components/CorrectLotNameModal';
+import CorrectGrowthDiamondWeightModal from '../components/CorrectGrowthDiamondWeightModal';
 import { getAllowedActions } from '../utils/actionMatrix';
 import {
   LOCATION_COL, DEPARTMENT_COL, SOURCE_COL,
@@ -850,11 +851,13 @@ export default function InventoryPage() {
     const perms = getAllowedActions(row);
     const isSuperAdmin = hasRole('super_admin', 'superadmin', 'super admin');
     const canEditLot = isSuperAdmin || hasPermission('inventory', 'edit', 'all_inventory');
+    const canCorrectWeight = isSuperAdmin || hasPermission('inventory_correction', 'correct');
     
     return [
       { label: 'Open Workspace', icon: <Package size={11} />, fn: () => navigate(`/inventory/lots/${row.id}`) },
       canEditLot && { label: 'Edit Lot', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'edit_lot', lotId: row.id }), color: 'var(--brand)' },
       canEditLot && { label: 'Correct Lot Name', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'correct_lot_name', lot: row }), color: 'var(--brand)' },
+      canCorrectWeight && row.category === 'Growth Diamond' && { label: 'Correct Weight', icon: <Edit size={11} />, fn: () => setActiveModal({ type: 'correct_weight', lot: row }), color: 'var(--brand)' },
       perms.canViewHistory && { label: 'View History', icon: <History size={11} />, fn: () => navigate(`/inventory/lots/${row.id}?tab=history`) },
       perms.canViewLineage && { label: 'View Lineage', icon: <Share2 size={11} />, fn: () => navigate(`/inventory/${row.id}/lineage`) },
       perms.canIssueProcess && { label: 'Issue to Process', icon: <Send size={11} />, fn: () => setActiveModal({ type: 'issue', lotId: row.id }), color: 'var(--brand)' },
@@ -1330,7 +1333,14 @@ export default function InventoryPage() {
           onUpdated={() => { setActiveModal(null); load(); }}
         />
       )}
-      {activeModal && activeModal.type !== 'edit_lot' && activeModal.type !== 'correct_lot_name' && (
+      {activeModal && activeModal.type === 'correct_weight' && (
+        <CorrectGrowthDiamondWeightModal
+          lot={activeModal.lot}
+          onClose={() => setActiveModal(null)}
+          onComplete={() => { setActiveModal(null); load(); }}
+        />
+      )}
+      {activeModal && activeModal.type !== 'edit_lot' && activeModal.type !== 'correct_lot_name' && activeModal.type !== 'correct_weight' && (
         <div className="modal-overlay" onClick={() => setActiveModal(null)} style={{ zIndex: 1000 }}>
           <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 1300, padding: 0, display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
