@@ -1,33 +1,19 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { Info, AlertTriangle } from 'lucide-react';
 import AccessControlSummary from '../AccessControlSummary';
-import InventoryScopeEditor from '../InventoryScopeEditor';
 import PermissionOverridesMatrix from '../PermissionOverridesMatrix';
 import GroupedPermissionEditor from '../permissions/GroupedPermissionEditor';
+import ViewRestrictionsPanel from '../restrictions/ViewRestrictionsPanel';
 import { validateCatalog } from '../permissions/permissionCatalogModel';
 
 /**
- * The seven stored-but-unenforced financial visibility preferences.
+ * Access Control tab — the read-only summary, the compact View Restrictions
+ * panel (Brick 4) and the permission editor (Brick 3).
  *
- * server/rbac/viewRestrictions.js classifies every one of these as
- * STORED_NOT_ENFORCED: they are written and copied between users, but nothing
- * reads them — not the client, not the server. Presenting them as editable
- * security controls would misrepresent the system, so Brick 2 shows them
- * read-only. The compact editor is Brick 4's job.
- */
-const VIEW_RESTRICTION_KEYS = [
-  { key: 'vis.show_cogs', label: 'Cost of Goods (COGS)' },
-  { key: 'vis.show_purchase_rate', label: 'Purchase Rate' },
-  { key: 'vis.show_sale_rate', label: 'Sale Rate' },
-  { key: 'vis.show_margin', label: 'Margin %' },
-  { key: 'vis.show_gross_profit', label: 'Gross Profit' },
-  { key: 'vis.show_net_profit', label: 'Net Profit' },
-  { key: 'vis.show_balances', label: 'Account Balances' },
-];
-
-/**
- * Access Control tab — the read-only summary, the enforced inventory scope, the
- * read-only unenforced view restrictions, and the permission editor.
+ * The two are deliberately separate sections because they answer different
+ * questions: View Restrictions is "which records may this user see", the
+ * permission editor is "what may this user do". Neither is derived from the
+ * other — department visibility grants no operational and no approval authority.
  *
  * The editor is chosen, not hard-coded. Brick 3's grouped editor needs a catalog
  * it can trust; when the endpoint fails or returns something it cannot map, the
@@ -56,6 +42,17 @@ export default function AccessControlTab({
     [catalog, catalogFailed],
   );
 
+  /* Deep link from the Financial Fields row to the same capability in Brick 3's
+     editor. It only ever moves the viewport and seeds a search — no permission is
+     changed from the restriction summary. */
+  const permissionsRef = useRef(null);
+  const [permissionFocus, setPermissionFocus] = useState(null);
+
+  const openPermission = useCallback((row) => {
+    setPermissionFocus(prev => ({ code: row.code, token: (prev?.token || 0) + 1 }));
+    permissionsRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }, []);
+
   return (
     <div>
       <AccessControlSummary
@@ -69,45 +66,27 @@ export default function AccessControlTab({
       />
 
       <div className="uc-section">
-        <h3 className="uc-section-title">Inventory Department Access</h3>
-        <InventoryScopeEditor
+        <h3 className="uc-section-title">View Restrictions</h3>
+        <p className="uc-section-hint">
+          Which records this user may see. Each row states whether the setting is
+          actually enforced by backend code — a stored value is not a restriction.
+        </p>
+        <ViewRestrictionsPanel
+          catalog={catalog}
+          catalogFailed={catalogFailed}
+          prefs={prefs}
+          overrides={userOverrides}
+          baseline={roleBaseline}
+          role={basic.role}
+          isSuperAdmin={isSuperAdmin}
           inventoryScope={inventoryScope}
           setInventoryScope={setInventoryScope}
           departments={departments}
-          isSuperAdmin={isSuperAdmin}
+          onOpenPermission={openPermission}
         />
       </div>
 
-      <div className="uc-section">
-        <h3 className="uc-section-title">Financial Field Visibility</h3>
-        <div className="uc-notice uc-notice-neutral">
-          <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>
-            These values are stored on the account but no backend API reads them yet,
-            so they are shown read-only. The enforced financial control is the
-            <strong> inventory.inventory_financial </strong>
-            permission in the matrix below. A compact editor arrives in RBAC Brick 4.
-          </span>
-        </div>
-        <div>
-          {VIEW_RESTRICTION_KEYS.map(({ key, label }) => {
-            const on = prefs[key] === 'true' || prefs[key] === true;
-            return (
-              <div key={key} className="uc-row">
-                <div>
-                  <div className="uc-row-label">{label}</div>
-                  <div className="uc-row-desc">
-                    Stored setting — backend enforcement not implemented
-                  </div>
-                </div>
-                <span className="uc-readonly-value">{on ? 'Visible' : 'Hidden'}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="uc-section">
+      <div className="uc-section" ref={permissionsRef}>
         <h3 className="uc-section-title">Permission Overrides</h3>
 
         {!isSuperAdmin && (
@@ -128,6 +107,7 @@ export default function AccessControlTab({
             userLabel={`${basic.full_name} (${basic.username})`}
             overrideRecordCount={overrideRecordCount}
             onResetAllStored={onResetAllStored}
+            focusRequest={permissionFocus}
             busy={busy}
           />
         ) : (

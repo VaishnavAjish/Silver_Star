@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import useDialogFocusTrap from './useDialogFocusTrap';
 
 /**
  * Focus-trapping confirmation dialog used for the unsaved-change warning and the
@@ -7,6 +8,9 @@ import { useEffect, useRef } from 'react';
  * The dialog is deliberately not dismissable by clicking the backdrop: it exists
  * because data is at risk, so leaving requires choosing one of the actions.
  * Escape maps to the cancel action rather than closing silently.
+ *
+ * The trap itself lives in useDialogFocusTrap so Brick 4's dialogs share it
+ * rather than reimplementing it. Behaviour here is unchanged.
  */
 export default function ConfirmDialog({
   title,
@@ -16,46 +20,7 @@ export default function ConfirmDialog({
   labelledBy = 'uc-confirm-title',
 }) {
   const dialogRef = useRef(null);
-  const previouslyFocused = useRef(null);
-
-  useEffect(() => {
-    previouslyFocused.current = document.activeElement;
-
-    const focusables = () => Array.from(
-      dialogRef.current?.querySelectorAll('button:not([disabled])') || [],
-    );
-    focusables()[0]?.focus();
-
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        onCancel?.();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-
-      // Keep Tab inside the dialog so the form behind it cannot be reached
-      // while a decision is pending.
-      const items = focusables();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      previouslyFocused.current?.focus?.();
-    };
-  }, [onCancel]);
+  useDialogFocusTrap({ containerRef: dialogRef, onEscape: onCancel });
 
   return (
     <div className="uc-dialog-overlay">

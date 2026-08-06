@@ -670,9 +670,14 @@ describe('Super Admin', () => {
 describe('Brick 2 behaviour is unchanged', () => {
   it('keeps the inventory department editor functional (test 28)', async () => {
     await openAccessControl();
+
+    // Brick 4 moved the mode radios into the focused dialog. The semantics and
+    // the dirty behaviour they feed are unchanged.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Inventory Departments' }));
     expect(screen.getByRole('radio', { name: 'All Departments' }).checked).toBe(true);
 
     fireEvent.click(screen.getByRole('radio', { name: 'Selected Departments' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(tab('Access Control').textContent).toContain('has unsaved changes');
   });
 

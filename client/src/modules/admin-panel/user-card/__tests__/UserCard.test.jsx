@@ -101,6 +101,15 @@ async function renderCard(props = {}) {
 const tab = (name) => screen.getByRole('tab', { name: new RegExp(`^${name}`) });
 const status = (category) => screen.getByTestId(`uc-status-${category}`).textContent;
 
+/**
+ * Brick 4 moved department selection off the tab and into a focused dialog, so
+ * the scope assertions below reach it through its Edit button rather than
+ * reading a permanently-mounted checkbox list. The assertions are unchanged.
+ */
+const openDeptDialog = () =>
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Inventory Departments' }));
+const applyDeptDialog = () => fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
 beforeEach(() => {
   api = makeApi();
   currentUser = { id: 99, role: 'super_admin', full_name: 'Admin' };
@@ -162,12 +171,18 @@ describe('User Card shell', () => {
     await renderCard();
     fireEvent.click(tab('Access Control'));
 
+    openDeptDialog();
     expect(screen.getByRole('radio', { name: 'Selected Departments' }).checked).toBe(true);
     expect(screen.getByLabelText('Surat HO').checked).toBe(true);
 
     fireEvent.click(screen.getByRole('radio', { name: 'All Departments' }));
     expect(screen.getByRole('radio', { name: 'All Departments' }).checked).toBe(true);
+
+    // Brick 4 addition: the change is pending until Apply, and dirty after it.
+    expect(tab('Access Control').textContent).not.toContain('has unsaved changes');
+    applyDeptDialog();
     expect(tab('Access Control').textContent).toContain('has unsaved changes');
+    expect(screen.getByText('All inventory departments')).toBeTruthy();
   });
 
   it('keeps preferences functional (test 5)', async () => {
@@ -512,7 +527,16 @@ describe('Super Admin handling', () => {
 
     fireEvent.click(tab('Access Control'));
     expect(screen.getByLabelText(/^Dashboard Dashboard VIEW/).disabled).toBe(true);
-    expect(screen.getByText(/Full inventory access — system enforced for Super Admin/)).toBeTruthy();
+
+    // Brick 4 states the same bypass on the View Restrictions panel, and marks the
+    // department row Not applicable rather than offering a control with no effect.
+    expect(screen.getByText(
+      /Super Admin bypasses inventory department scope and financial field checks/,
+    )).toBeTruthy();
+    expect(screen.getByText(
+      /Super Admin bypasses inventory department scope entirely/,
+    )).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit Inventory Departments' })).toBeNull();
   });
 
   it('does not show the bypass message for a non-super-admin', async () => {
@@ -551,7 +575,11 @@ describe('Brick 1 catalog integration', () => {
     // The editor still works.
     fireEvent.click(screen.getByLabelText(/^Dashboard Dashboard VIEW: INHERIT/));
     expect(await screen.findByLabelText(/^Dashboard Dashboard VIEW: ALLOW/)).toBeTruthy();
+
+    // And so does the department scope, through the Brick 4 dialog.
+    openDeptDialog();
     expect(screen.getByRole('radio', { name: 'Selected Departments' })).toBeTruthy();
+    expect(screen.getByLabelText('Surat HO').checked).toBe(true);
   });
 });
 

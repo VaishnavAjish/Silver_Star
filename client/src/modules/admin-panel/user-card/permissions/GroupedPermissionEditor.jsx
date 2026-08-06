@@ -37,7 +37,7 @@ const SEARCH_DEBOUNCE_MS = 200;
  */
 export default function GroupedPermissionEditor({
   catalog, overrides, setOverrides, baseline, roleLabel, editable,
-  userLabel, overrideRecordCount, onResetAllStored, busy,
+  userLabel, overrideRecordCount, onResetAllStored, focusRequest, busy,
 }) {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -50,6 +50,19 @@ export default function GroupedPermissionEditor({
     const timer = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  /* Brick 4 deep link. `token` changes per request so asking for the same
+     capability twice still re-focuses it, and search is applied immediately
+     rather than through the debounce because this is a navigation, not typing.
+     The existing search-reveals-matches effect opens the containing group.
+     PRESENTATION ONLY — no mask is read or written here. */
+  const focusToken = focusRequest?.token;
+  const focusCode = focusRequest?.code;
+  useEffect(() => {
+    if (!focusToken || !focusCode) return;
+    setSearchInput(focusCode);
+    setSearch(focusCode);
+  }, [focusToken, focusCode]);
 
   const groups = useMemo(() => buildGroups(catalog), [catalog]);
   const visibleKeys = useMemo(() => activeStorageKeys(groups), [groups]);

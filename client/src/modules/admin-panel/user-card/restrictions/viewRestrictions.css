@@ -1,0 +1,363 @@
+/**
+ * RBAC Brick 4 — compact View Restrictions styling.
+ *
+ * Uses the existing app tokens (--brand, --g*, --danger) and the Brick 2 dialog
+ * and notice primitives (.uc-dialog, .uc-notice) so this reads as the same product
+ * rather than a third design system. The `.vr-` prefix keeps it clear of the
+ * `.uc-` shell and the `.pe-` permission editor.
+ *
+ * THE STATUS COLOUR CARRIES NO MEANING ON ITS OWN. Every chip below also renders
+ * its label as text (RestrictionStatusBadge), so removing this stylesheet loses
+ * the styling and none of the security information.
+ *
+ * The row is a three-column grid — content / status / action — that collapses to
+ * a stack under the card's own 900px breakpoint. Nothing here scrolls sideways.
+ */
+
+.vr-panel { display: flex; flex-direction: column; gap: 14px; }
+
+.vr-notice { margin: 0; }
+
+/* ── Groups ─────────────────────────────────────────────────── */
+
+.vr-group { display: flex; flex-direction: column; gap: 4px; }
+
+.vr-group-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--g500);
+}
+
+.vr-group-hint {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--g500);
+}
+
+.vr-group-rows {
+  border: 1px solid var(--g200);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* ── Row ────────────────────────────────────────────────────── */
+
+.vr-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'main status action';
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--g100);
+}
+
+.vr-row:first-child { border-top: none; }
+.vr-row:hover { background: var(--g50); }
+
+.vr-row-main { grid-area: main; min-width: 0; }
+
+.vr-row-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--g800);
+}
+
+.vr-row-summary {
+  font-size: 12px;
+  color: var(--g600);
+  overflow-wrap: anywhere;
+}
+
+.vr-row-desc {
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--g500);
+}
+
+.vr-row-status { grid-area: status; }
+.vr-row-action { grid-area: action; }
+
+.vr-row-noaction {
+  font-size: 11px;
+  color: var(--g400);
+  font-style: italic;
+}
+
+.vr-row-warning {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  color: #8a6100;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ── Action button ──────────────────────────────────────────── */
+
+.vr-action-btn {
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--brand);
+  background: #fff;
+  border: 1px solid var(--brand);
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vr-action-btn:hover:not(:disabled) { background: var(--brand-50, #e6f4f1); }
+.vr-action-btn:disabled { opacity: .5; cursor: not-allowed; }
+.vr-action-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+/* ── Status chips ───────────────────────────────────────────── */
+
+.vr-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.vr-badge-enforced   { background: var(--brand-50, #e6f4f1); color: var(--brand-dark, #0a5c46); border-color: var(--brand-light, #7fc9b4); }
+.vr-badge-partial    { background: #fff8e1; color: #8a6100; border-color: #ffe082; }
+.vr-badge-permission { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.vr-badge-stored     { background: var(--g100); color: var(--g600); border-color: var(--g300); }
+.vr-badge-inactive   { background: var(--g50);  color: var(--g500); border-color: var(--g200); }
+.vr-badge-unknown    { background: #fdf2f8; color: #9d174d; border-color: #fbcfe8; }
+
+/* ── Dialogs ────────────────────────────────────────────────── */
+
+.vr-dialog { width: min(560px, 100%); }
+
+.vr-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+}
+
+.vr-mode-set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.vr-mode-legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--g500);
+}
+
+.vr-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.vr-mode-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--g600);
+}
+
+/* ── Department picker ──────────────────────────────────────── */
+
+.vr-picker {
+  border: 1px solid var(--g200);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.vr-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--g50);
+  border-bottom: 1px solid var(--g200);
+}
+
+.vr-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 200px;
+  padding: 0 8px;
+  background: #fff;
+  border: 1px solid var(--g300);
+  border-radius: 5px;
+  color: var(--g500);
+}
+
+.vr-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  padding: 6px 0;
+  font-size: 12px;
+  background: transparent;
+  color: var(--g800);
+}
+
+.vr-selected-count {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.vr-picker-actions {
+  display: flex;
+  gap: 14px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--g200);
+}
+
+.vr-link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.vr-link-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.vr-link-danger { color: var(--danger, #c62828); }
+
+.vr-picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.vr-dept-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.vr-dept-option:hover { background: var(--g50); }
+
+.vr-picker-empty {
+  margin: 0;
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--g400);
+}
+
+.vr-dialog-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  color: #8a6100;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.vr-dialog-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--g500);
+}
+
+/* ── Details dialog ─────────────────────────────────────────── */
+
+.vr-detail-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--g600);
+}
+
+.vr-detail-list { margin: 0; display: flex; flex-direction: column; gap: 7px; }
+
+.vr-detail-field { display: flex; flex-direction: column; gap: 1px; }
+
+.vr-detail-field dt {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--g500);
+}
+
+.vr-detail-field dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--g800);
+  overflow-wrap: anywhere;
+}
+
+.vr-detail-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--g600);
+}
+
+/* ── Narrow / mobile ────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .vr-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'main'
+      'status'
+      'action';
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .vr-row-action { justify-self: stretch; }
+  .vr-action-btn { width: 100%; }
+
+  .vr-dialog { width: 100%; }
+  .vr-dialog-body { max-height: 70vh; }
+  .vr-picker-list { max-height: 45vh; }
+}
