@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
@@ -975,7 +975,7 @@ export default function UsersPage() {
                       </thead>
                       <tbody>
                         {auditLog.map(entry => (
-                          <React.Fragment key={entry.user_id}>
+                          <Fragment key={entry.user_id}>
                             <tr
                               onClick={() => {
                                 if (selectedUserForHistory?.id === entry.user_id) {
@@ -1049,7 +1049,7 @@ export default function UsersPage() {
                                 </td>
                               </tr>
                             )}
-                          </React.Fragment>
+                          </Fragment>
                         ))}
                       </tbody>
                     </table>
@@ -1126,12 +1126,17 @@ export default function UsersPage() {
         </div>
       </Modal>
 
-      {/* ── Edit user drawer ── */}
+      {/* ── Edit user card ── */}
       <UserDrawer
         user={drawerUser}
         onClose={() => setDrawerUser(null)}
         onSaved={loadUsers}
         onCopySetup={setCreatedUserForSetup}
+        onViewAudit={setSelectedUserForHistory}
+        // The card holds a requested user switch while changes are unsaved; if the
+        // admin chooses Continue Editing it hands the original user back so this
+        // page's selection stops disagreeing with what is on screen.
+        onRequestedUserReverted={setDrawerUser}
       />
 
       {/* ── Copy User Setup modal ── */}

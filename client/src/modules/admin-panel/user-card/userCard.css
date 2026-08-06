@@ -1,0 +1,446 @@
+/**
+ * RBAC Brick 2 — compact User Card styling.
+ *
+ * Replaces the inline <style> block the old drawer carried. Uses the existing
+ * app tokens (--brand, --g*, --table-*) so the card matches the rest of the
+ * admin panel rather than introducing a second palette.
+ */
+
+/* ── Shell ──────────────────────────────────────────────────── */
+.uc-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  z-index: 600;
+}
+
+.uc-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(92vw, 1440px);
+  background: #fff;
+  z-index: 601;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -6px 0 32px rgba(0, 0, 0, .18);
+  animation: ucSlideIn .22s cubic-bezier(.4, 0, .2, 1);
+}
+
+@keyframes ucSlideIn {
+  from { transform: translateX(100%); opacity: .6; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* Full-screen on small displays — a side drawer has no room to be compact. */
+@media (max-width: 900px) {
+  .uc-panel {
+    width: 100vw;
+    left: 0;
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uc-panel { animation: none; }
+}
+
+/* ── Identity header ───────────────────────────────────────── */
+.uc-header {
+  flex-shrink: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--g200);
+  background: linear-gradient(135deg, var(--sidebar-start), var(--sidebar-end));
+}
+
+.uc-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.uc-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(13, 124, 95, .3);
+}
+
+.uc-name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--g900);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.uc-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--g500);
+}
+
+.uc-meta-sep { color: var(--g300); }
+
+.uc-chip {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--brand-50);
+  color: var(--brand-dark);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+
+/* ── Summary cards ─────────────────────────────────────────── */
+.uc-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.uc-summary-card {
+  background: #fff;
+  border: 1px solid var(--g200);
+  border-radius: 8px;
+  padding: 8px 11px;
+  min-width: 0;
+}
+
+.uc-summary-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--g500);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.uc-summary-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--g900);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.uc-summary-sub {
+  font-size: 10.5px;
+  color: var(--g500);
+  margin-top: 1px;
+}
+
+/* ── Header actions ────────────────────────────────────────── */
+.uc-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.uc-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--g300);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--g700);
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+
+.uc-action-btn:hover:not(:disabled) {
+  background: var(--brand-50);
+  border-color: var(--brand-light);
+  color: var(--brand-dark);
+}
+
+.uc-action-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.uc-action-btn.uc-danger:hover:not(:disabled) {
+  background: #FFEBEE;
+  border-color: #FFCDD2;
+  color: #C62828;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────── */
+.uc-tablist {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--g200);
+  background: #fff;
+  overflow-x: auto;
+  padding: 0 10px;
+}
+
+.uc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--g500);
+  white-space: nowrap;
+  transition: color .14s, border-color .14s;
+}
+
+.uc-tab:hover { color: var(--brand); }
+
+.uc-tab[aria-selected="true"] {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+.uc-tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+/* Dirty marker. The dot is decorative; the adjacent .uc-sr-only text carries
+   the meaning for screen readers, so nothing is colour-only. */
+.uc-dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #E65100;
+  flex-shrink: 0;
+}
+
+.uc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Body: only the tab panel scrolls ──────────────────────── */
+.uc-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+  min-height: 0;
+}
+
+.uc-section {
+  border: 1px solid var(--g200);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+
+.uc-section-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--g800);
+  margin: 0 0 4px;
+}
+
+.uc-section-hint {
+  font-size: 11.5px;
+  color: var(--g500);
+  margin: 0 0 10px;
+}
+
+/* ── Notices ───────────────────────────────────────────────── */
+.uc-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+
+.uc-notice-info    { background: #E3F2FD; border: 1px solid #90CAF9; color: #1565C0; }
+.uc-notice-warn    { background: #FFF8E1; border: 1px solid #FFE082; color: #E65100; }
+.uc-notice-danger  { background: #FFEBEE; border: 1px solid #FFCDD2; color: #B71C1C; }
+.uc-notice-neutral { background: var(--g50); border: 1px solid var(--g200); color: var(--g600); }
+.uc-notice-admin   { background: #E8EAF6; border: 1px solid #C5CAE9; color: #283593; }
+
+/* ── Rows (preferences / read-only restrictions) ───────────── */
+.uc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--g200);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.uc-row + .uc-row { margin-top: 6px; }
+
+.uc-row-label {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--g800);
+}
+
+.uc-row-desc {
+  font-size: 11px;
+  color: var(--g500);
+  margin-top: 2px;
+}
+
+.uc-readonly-value {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--g600);
+  background: var(--g100);
+  border: 1px solid var(--g200);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* ── Permission matrix (preserved from the old drawer) ─────── */
+.uc-matrix-wrap {
+  border: 1px solid var(--g200);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 52vh;
+}
+
+.uc-state-btn {
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: all .15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+}
+
+.uc-state-btn:disabled { cursor: not-allowed; opacity: .6; }
+.uc-state-inherit { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+.uc-state-allow   { background: #dcfce7; color: #15803d; border-color: #86efac; }
+.uc-state-deny    { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+
+/* ── Footer ────────────────────────────────────────────────── */
+.uc-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 18px;
+  border-top: 1px solid var(--g200);
+  background: var(--g50);
+}
+
+.uc-save-report {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.uc-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border: 1px solid var(--g200);
+  background: #fff;
+  color: var(--g600);
+}
+
+.uc-status-saving { border-color: #90CAF9; background: #E3F2FD; color: #1565C0; }
+.uc-status-saved  { border-color: #A5D6A7; background: #E8F5E9; color: #2E7D32; }
+.uc-status-failed { border-color: #EF9A9A; background: #FFEBEE; color: #C62828; }
+
+/* ── Confirmation dialogs ──────────────────────────────────── */
+.uc-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .5);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.uc-dialog {
+  background: #fff;
+  border-radius: 12px;
+  width: min(480px, 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+  padding: 20px;
+}
+
+.uc-dialog-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--g900);
+}
+
+.uc-dialog-body {
+  font-size: 12.5px;
+  color: var(--g600);
+  line-height: 1.5;
+}
+
+.uc-dialog-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--g700);
+}
+
+.uc-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
