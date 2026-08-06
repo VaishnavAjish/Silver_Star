@@ -536,7 +536,13 @@ router.delete('/:id', authenticate, authorize('admin', 'operator', 'finance'), a
     if (!jeR.rows.length) throw new Error('Journal entry not found');
     const je = jeR.rows[0];
 
-    // 2. Removed manual check as requested by user
+    // 2. Containment patch: Block deletion of posted or system-generated JEs
+    if (je.status === 'posted') {
+      throw new Error('Cannot delete a posted journal entry. Please reverse it instead.');
+    }
+    if (je.source_type) {
+      throw new Error('Cannot delete a system-generated journal entry.');
+    }
 
     // 3. Revert balances if posted
     if (je.status === 'posted') {

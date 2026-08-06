@@ -619,8 +619,8 @@ export default function JournalEntryForm() {
     viewData?.status === 'posted' && canEdit() && !isReversedEntry && !isReversalEntry && {
       label: 'Reverse Entry', icon: <RotateCcw size={13} />, onClick: reverseEntry,
     },
-    // Allow Delete on all JEs that are not reversed
-    canEdit() && !isReversedEntry && !isReversalEntry && {
+    // Allow Delete only for non-posted, non-system-generated JEs that are not reversed
+    canEdit() && !isReversedEntry && !isReversalEntry && viewData?.status !== 'posted' && !viewData?.source_type && {
       label: 'Delete Entry', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
     },
     // If it's a draft, allow deleting the draft regardless of type
@@ -630,8 +630,8 @@ export default function JournalEntryForm() {
     null,
     { label: 'Print', icon: <Printer size={13} />, onClick: () => window.print() },
   ].filter(Boolean) : [
-    // In edit mode of an existing entry, allow delete
-    isExisting && canEdit() && {
+    // In edit mode of an existing entry, allow delete only if not posted and not system-generated
+    isExisting && canEdit() && viewData?.status !== 'posted' && !viewData?.source_type && {
       label: viewData?.status === 'draft' ? 'Delete Draft' : 'Delete Entry', icon: <Trash2 size={13} />, danger: true, onClick: deleteEntry,
     },
     { label: 'Print', icon: <Printer size={13} />, onClick: () => window.print() },
