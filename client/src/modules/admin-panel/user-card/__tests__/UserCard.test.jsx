@@ -205,11 +205,15 @@ describe('User Card shell', () => {
     expect(screen.queryByRole('switch', { name: 'Margin %' })).toBeNull();
   });
 
-  it('labels the preserved matrix as temporary and points at Brick 3', async () => {
+  it('falls back to the preserved matrix and says why', async () => {
     await renderCard();
     fireEvent.click(tab('Access Control'));
-    expect(screen.getByText('Current Permission Overrides')).toBeTruthy();
-    expect(screen.getByText(/grouped editor will\s+replace this view in RBAC Brick 3/)).toBeTruthy();
+    expect(screen.getByText('Permission Overrides')).toBeTruthy();
+    // This suite's CATALOG stub carries no `permissions` array, so Brick 3's
+    // grouped editor cannot map it and the Brick 2 matrix is shown instead —
+    // which is the fallback path the rest of these tests exercise.
+    expect(screen.getByText(/Grouped permission catalog unavailable/)).toBeTruthy();
+    expect(screen.getByText(/contains no permission entries/)).toBeTruthy();
   });
 });
 

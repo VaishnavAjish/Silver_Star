@@ -319,6 +319,9 @@ export default function UserDrawer({
                   effectiveAccess={card.effectiveAccess}
                   catalog={card.catalog}
                   catalogFailed={card.catalogFailed}
+                  roleBaseline={card.roleBaseline}
+                  onResetAllStored={() => setResetConfirmOpen(true)}
+                  busy={busy || card.resetting}
                 />
               )}
 

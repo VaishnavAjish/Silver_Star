@@ -17,6 +17,7 @@ import {
   computeEffectiveAccess,
   countOverrideRecords,
 } from './userCardModel';
+import { mergeRoleTrees, buildBaseline } from './permissions/permissionEditorModel';
 
 /**
  * Preference keys and their defaults. Kept in the exact order the previous
@@ -69,6 +70,9 @@ export function useUserCard({ user, api, onAfterSave }) {
   const [departments, setDepartments] = useState([]);
   const [allRoles, setAllRoles] = useState([]);
   const [roleTree, setRoleTree] = useState(null);
+  /* True only when the role masks could not be read at all — distinct from a
+     user who legitimately has no role rows. */
+  const [baselineFailed, setBaselineFailed] = useState(false);
 
   /* Brick 1 catalog — diagnostics only, never required for editing. */
   const [catalog, setCatalog] = useState(null);
@@ -94,6 +98,7 @@ export function useUserCard({ user, api, onAfterSave }) {
     setSaveErrors({});
     setPw({ password: '', confirm: '' });
     setRoleTree(null);
+    setBaselineFailed(false);
 
     const nextBasic = {
       username: user.username,
@@ -174,16 +179,48 @@ export function useUserCard({ user, api, onAfterSave }) {
     return () => { cancelled = true; };
   }, [userId]);
 
-  /* ── Role baseline for the effective-access summary (read-only) ── */
-  const primaryRoleId = assignedRoleIds[0];
+  /* ── Role baseline (read-only) ─────────────────────────────
+   * Every assigned role is read and the masks are BIT_ORed, which is what the
+   * server resolver does across user_roles. Picking one role would show a user
+   * with two roles a baseline they do not actually have. One request per role,
+   * never per capability. */
+  const roleIdsKey = assignedRoleIds.join(',');
   useEffect(() => {
-    if (!primaryRoleId) { setRoleTree(null); return undefined; }
+    const ids = roleIdsKey === '' ? [] : roleIdsKey.split(',');
+    if (ids.length === 0) { setRoleTree(null); setBaselineFailed(false); return undefined; }
+
     let cancelled = false;
-    apiRef.current.get(`/api/roles/${primaryRoleId}/permissions`)
-      .then(res => { if (!cancelled) setRoleTree(res?.data || []); })
-      .catch(() => { if (!cancelled) setRoleTree(null); });
+    Promise.all(ids.map(id => apiRef.current.get(`/api/roles/${id}/permissions`)
+      .then(res => (Array.isArray(res?.data) ? res.data : null))
+      .catch(() => null)))
+      .then((trees) => {
+        if (cancelled) return;
+        const merged = mergeRoleTrees(trees);
+        setRoleTree(merged);
+        setBaselineFailed(merged === null);
+      });
     return () => { cancelled = true; };
-  }, [primaryRoleId]);
+  }, [roleIdsKey]);
+
+  /** Role names for the effective-result source line, from the server role list. */
+  const roleNames = useMemo(
+    () => assignedRoleIds
+      .map(id => allRoles.find(r => Number(r.id) === Number(id))?.name)
+      .filter(Boolean),
+    [assignedRoleIds, allRoles],
+  );
+
+  /**
+   * The baseline the grouped editor resolves against. `available: false` means
+   * the masks could not be read, and the editor must say so rather than render
+   * an unearned "Denied". A user with no assigned role has an empty — but
+   * available — baseline, which is genuinely "no baseline configured".
+   */
+  const roleBaseline = useMemo(() => buildBaseline({
+    roleTree,
+    roleNames,
+    available: !baselineFailed,
+  }), [roleTree, roleNames, baselineFailed]);
 
   /* ── Dirty state ──────────────────────────────────────────── */
   const dirty = useMemo(() => computeDirty({
@@ -368,7 +405,7 @@ export function useUserCard({ user, api, onAfterSave }) {
     inventoryScope, setInventoryScope,
     userOverrides, setUserOverrides,
     overrideRecordCount,
-    roleTree, effectiveAccess,
+    roleTree, roleNames, roleBaseline, effectiveAccess,
     catalog, catalogFailed,
     dirty,
     saveState, saveErrors, busy, resetting,

@@ -1,7 +1,10 @@
-import { Info } from 'lucide-react';
+import { useMemo } from 'react';
+import { Info, AlertTriangle } from 'lucide-react';
 import AccessControlSummary from '../AccessControlSummary';
 import InventoryScopeEditor from '../InventoryScopeEditor';
 import PermissionOverridesMatrix from '../PermissionOverridesMatrix';
+import GroupedPermissionEditor from '../permissions/GroupedPermissionEditor';
+import { validateCatalog } from '../permissions/permissionCatalogModel';
 
 /**
  * The seven stored-but-unenforced financial visibility preferences.
@@ -23,9 +26,13 @@ const VIEW_RESTRICTION_KEYS = [
 ];
 
 /**
- * Access Control tab — Brick 2's temporary home for everything permission
- * related: the read-only summary, the enforced inventory scope, the read-only
- * unenforced view restrictions, and the preserved override matrix.
+ * Access Control tab — the read-only summary, the enforced inventory scope, the
+ * read-only unenforced view restrictions, and the permission editor.
+ *
+ * The editor is chosen, not hard-coded. Brick 3's grouped editor needs a catalog
+ * it can trust; when the endpoint fails or returns something it cannot map, the
+ * Brick 2 matrix is rendered instead so user administration never stops because
+ * a diagnostic endpoint did. Exactly one editor is on screen at a time.
  */
 export default function AccessControlTab({
   basic,
@@ -40,7 +47,15 @@ export default function AccessControlTab({
   effectiveAccess,
   catalog,
   catalogFailed,
+  roleBaseline,
+  onResetAllStored,
+  busy,
 }) {
+  const catalogCheck = useMemo(
+    () => (catalogFailed ? { ok: false, reason: 'the catalog endpoint failed' } : validateCatalog(catalog)),
+    [catalog, catalogFailed],
+  );
+
   return (
     <div>
       <AccessControlSummary
@@ -93,35 +108,56 @@ export default function AccessControlTab({
       </div>
 
       <div className="uc-section">
-        <h3 className="uc-section-title">Current Permission Overrides</h3>
-        <div className="uc-notice uc-notice-info">
-          <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>
-            This editor uses the existing permission model. A grouped editor will
-            replace this view in RBAC Brick 3.
-          </span>
-        </div>
+        <h3 className="uc-section-title">Permission Overrides</h3>
 
-        {isSuperAdmin ? (
-          <div className="uc-notice uc-notice-admin">
-            <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>
-              Super Admin — full unrestricted access granted. The matrix is shown for
-              reference and is not editable for this role.
-            </span>
-          </div>
-        ) : (
+        {!isSuperAdmin && (
           <p className="uc-section-hint">
             Editing <strong>{basic.full_name} ({basic.username})</strong> user overrides.
             This changes only this user — the role baseline and other users are untouched.
           </p>
         )}
 
-        <PermissionOverridesMatrix
-          overrides={userOverrides}
-          setOverrides={setUserOverrides}
-          editable={!isSuperAdmin}
-        />
+        {catalogCheck.ok ? (
+          <GroupedPermissionEditor
+            catalog={catalog}
+            overrides={userOverrides}
+            setOverrides={setUserOverrides}
+            baseline={roleBaseline}
+            roleLabel={basic.role}
+            editable={!isSuperAdmin}
+            userLabel={`${basic.full_name} (${basic.username})`}
+            overrideRecordCount={overrideRecordCount}
+            onResetAllStored={onResetAllStored}
+            busy={busy}
+          />
+        ) : (
+          <>
+            <div className="uc-notice uc-notice-warn">
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>
+                Grouped permission catalog unavailable. The legacy permission editor is
+                being shown so user administration can continue.
+                {catalogCheck.reason && <> Reason: {catalogCheck.reason}.</>}
+              </span>
+            </div>
+
+            {isSuperAdmin && (
+              <div className="uc-notice uc-notice-admin">
+                <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Super Admin — full unrestricted access granted. The matrix is shown for
+                  reference and is not editable for this role.
+                </span>
+              </div>
+            )}
+
+            <PermissionOverridesMatrix
+              overrides={userOverrides}
+              setOverrides={setUserOverrides}
+              editable={!isSuperAdmin}
+            />
+          </>
+        )}
       </div>
     </div>
   );
