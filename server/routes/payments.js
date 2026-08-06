@@ -401,4 +401,102 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
   }
 });
 
+// POST /api/payments/:id/reverse (Canonical Reversal Service)
+router.post('/:id/reverse', authenticate, authorize('admin', 'finance'), async (req, res) => {
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+    const fail = async (status, error) => {
+      await client.query('ROLLBACK');
+      return res.status(status).json({ error });
+    };
+
+    const paymentId = parseInt(req.params.id, 10);
+    if (!paymentId || isNaN(paymentId)) return fail(400, 'Invalid payment ID');
+
+    // 1. Lock & fetch payment
+    const payR = await client.query('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
+    if (!payR.rows[0]) return fail(404, 'Payment not found');
+    const payment = payR.rows[0];
+
+    if (payment.status === 'CANCELLED' || payment.status === 'REVERSED') {
+      return fail(400, `Payment ${payment.doc_number} is already ${payment.status.toLowerCase()}`);
+    }
+
+    const { reason } = req.body;
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      return fail(400, 'A valid reason for reversal is required');
+    }
+
+    // 2. Fetch and reverse creation-time allocations
+    const paR = await client.query('SELECT * FROM payment_allocations WHERE payment_id = $1', [paymentId]);
+    for (const pa of paR.rows) {
+      const amt = parseFloat(pa.amount);
+      const pnId = parseInt(pa.purchase_note_id);
+
+      await client.query(
+        'UPDATE purchase_notes SET amount_paid = GREATEST(0, COALESCE(amount_paid, 0) - $1) WHERE id = $2',
+        [amt, pnId]
+      );
+
+      const pnCheck = await client.query('SELECT grand_total, amount_paid FROM purchase_notes WHERE id = $1', [pnId]);
+      if (pnCheck.rows[0]) {
+        const paid = parseFloat(pnCheck.rows[0].amount_paid);
+        const total = parseFloat(pnCheck.rows[0].grand_total);
+        const pStatus = paid >= total - 0.005 ? 'PAID' : paid > 0.005 ? 'PARTIAL' : 'UNPAID';
+        await client.query(
+          'UPDATE purchase_notes SET payment_status = $1, balance_due = GREATEST(0, $2 - $3) WHERE id = $4',
+          [pStatus, total, paid, pnId]
+        );
+      }
+    }
+
+    // Delete creation allocations
+    await client.query('DELETE FROM payment_allocations WHERE payment_id = $1', [paymentId]);
+
+    // 3. Reverse advances linked to this payment
+    const vaR = await client.query('SELECT * FROM vendor_advances WHERE payment_id = $1', [paymentId]);
+    for (const va of vaR.rows) {
+      await client.query("UPDATE vendor_advances SET status = 'CANCELLED', remaining_amount = 0 WHERE id = $1", [va.id]);
+    }
+
+    // 4. Reverse linked Journal Entry if it exists and is posted
+    if (payment.je_id) {
+      const jeR = await client.query('SELECT id, status FROM journal_entries WHERE id = $1', [payment.je_id]);
+      if (jeR.rows[0] && jeR.rows[0].status === 'posted') {
+        if (typeof journalEngine.reverseEntry === 'function') {
+          await journalEngine.reverseEntry(payment.je_id, {
+            reason: `Payment ${payment.doc_number} reversed: ${reason}`,
+            userId: req.user.id,
+            client,
+          });
+        } else {
+          await client.query(
+            "UPDATE journal_entries SET is_reversed = TRUE, reversed_at = NOW(), reversed_by = $1 WHERE id = $2",
+            [req.user.id, payment.je_id]
+          );
+        }
+      }
+    }
+
+    // 5. Update payment status to REVERSED
+    const updatedPayR = await client.query(
+      "UPDATE payments SET status = 'REVERSED', remark = COALESCE(remark, '') || $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+      [` [Reversed: ${reason}]`, paymentId]
+    );
+
+    await client.query('COMMIT');
+    dispatchEvent('payment.reversed', { id: paymentId, doc_number: payment.doc_number, amount: payment.amount, vendor_id: payment.vendor_id, reason });
+
+    res.json({ success: true, message: `Payment ${payment.doc_number} successfully reversed`, payment: updatedPayR.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('[payments POST /:id/reverse]', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message || 'Failed to reverse payment' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
+
