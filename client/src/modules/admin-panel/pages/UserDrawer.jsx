@@ -29,6 +29,11 @@ const STATUS_CLASS = {
   [SAVE_STATE.SAVING]: 'uc-status-chip uc-status-saving',
   [SAVE_STATE.SAVED]: 'uc-status-chip uc-status-saved',
   [SAVE_STATE.FAILED]: 'uc-status-chip uc-status-failed',
+  /* RBAC Brick 7: a stale-write conflict is not a failure. It reuses the failed
+     styling because it is equally an "unsaved" outcome the admin must act on,
+     but its LABEL reads "Changed elsewhere", so the required action — reload
+     rather than retry — is stated in text and never by colour alone. */
+  [SAVE_STATE.CONFLICT]: 'uc-status-chip uc-status-failed',
   [SAVE_STATE.NOT_CHANGED]: 'uc-status-chip',
 };
 
@@ -36,6 +41,7 @@ const STATUS_ICON = {
   [SAVE_STATE.SAVING]: Loader,
   [SAVE_STATE.SAVED]: Check,
   [SAVE_STATE.FAILED]: AlertTriangle,
+  [SAVE_STATE.CONFLICT]: AlertTriangle,
 };
 
 /** Per-category save result. The text always states the state — never colour alone. */
@@ -136,15 +142,38 @@ export default function UserDrawer({
   /* ── Saving ───────────────────────────────────────────────── */
   const reportResults = (outcome) => {
     if (outcome.nothingToSave || outcome.skipped) return;
-    const saved = Object.entries(outcome.results)
+    const savedKeys = Object.entries(outcome.results)
       .filter(([, s]) => s === SAVE_STATE.SAVED)
-      .map(([c]) => CATEGORY_LABELS[c]);
+      .map(([c]) => c);
+    const saved = savedKeys.map(c => CATEGORY_LABELS[c]);
     const failed = outcome.failedCategories?.map(c => CATEGORY_LABELS[c]) || [];
+    /* RBAC Brick 7: reported separately from failures. "Failed" invites a retry;
+       a stale write must invite a RELOAD, because retrying the same payload
+       would either be refused again or, without the check, silently revert
+       whoever changed it. */
+    const conflicted = outcome.conflictCategories?.map(c => CATEGORY_LABELS[c]) || [];
 
-    if (failed.length === 0) {
-      toast.success(`Saved: ${saved.join(', ')}`);
+    if (failed.length === 0 && conflicted.length === 0) {
+      /* Only ever the server's own words about what happened to the sessions.
+         The card does not infer or embellish this — if the backend did not
+         confirm an invalidation, nothing is claimed. */
+      const notice = savedKeys.map(c => card.saveNotices?.[c]).find(Boolean);
+      toast.success(notice ? `Saved: ${saved.join(', ')}. ${notice}` : `Saved: ${saved.join(', ')}`);
       return;
     }
+
+    if (conflicted.length > 0) {
+      toast.error(
+        `${conflicted.join(', ')} was changed by another administrator after you opened `
+        + 'this user, so it was not overwritten. Your unsaved changes are kept — reload to '
+        + 'review the current configuration.'
+        + (saved.length > 0 ? ` Saved: ${saved.join(', ')}.` : '')
+        + (failed.length > 0 ? ` Failed: ${failed.join(', ')}.` : ''),
+        { duration: 9000 },
+      );
+      return;
+    }
+
     // Never a global success message while anything failed.
     toast.error(
       saved.length > 0
@@ -320,6 +349,8 @@ export default function UserDrawer({
                   catalog={card.catalog}
                   catalogFailed={card.catalogFailed}
                   roleBaseline={card.roleBaseline}
+                  overridesFailed={card.overridesFailed}
+                  scopeFailed={card.scopeFailed}
                   onResetAllStored={() => setResetConfirmOpen(true)}
                   busy={busy || card.resetting}
                 />

@@ -34,6 +34,12 @@ export const SAVE_STATE = {
   SAVING: 'saving',
   SAVED: 'saved',
   FAILED: 'failed',
+  /* RBAC Brick 7. A stale-write 409 is NOT the same as a failure: nothing went
+     wrong with the request, and retrying it unchanged would either fail again
+     or — if the check were skipped — silently revert another administrator's
+     newer change. It gets its own state so the footer can say "changed
+     elsewhere" and offer Reload rather than Retry. Edits are kept either way. */
+  CONFLICT: 'conflict',
 };
 
 export const SAVE_STATE_LABELS = {
@@ -41,7 +47,29 @@ export const SAVE_STATE_LABELS = {
   [SAVE_STATE.SAVING]: 'Saving',
   [SAVE_STATE.SAVED]: 'Saved',
   [SAVE_STATE.FAILED]: 'Failed',
+  [SAVE_STATE.CONFLICT]: 'Changed elsewhere',
 };
+
+/** Codes the server sends for a stale administrative write (HTTP 409). */
+export const STALE_WRITE_CODES = Object.freeze([
+  'STALE_PERMISSION_VERSION',
+  'STALE_INVENTORY_SCOPE',
+  'STALE_ROLE_ASSIGNMENT',
+  'STALE_ROLE_PERMISSIONS',
+  'STALE_COPY_PREVIEW',
+]);
+
+/**
+ * True when an error is a stale-write conflict.
+ *
+ * Keyed on the stable code, with the HTTP status as the fallback for a response
+ * that carried no code. Never on the message text, which is free to be reworded.
+ */
+export function isStaleWriteError(err) {
+  if (!err) return false;
+  if (err.code && STALE_WRITE_CODES.includes(err.code)) return true;
+  return err.status === 409;
+}
 
 /* ── Canonicalisation ───────────────────────────────────────── */
 

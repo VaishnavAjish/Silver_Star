@@ -16,6 +16,7 @@ import {
   buildOverridesPayload,
   computeEffectiveAccess,
   countOverrideRecords,
+  isStaleWriteError,
 } from './userCardModel';
 import { mergeRoleTrees, buildBaseline } from './permissions/permissionEditorModel';
 
@@ -74,6 +75,15 @@ export function useUserCard({ user, api, onAfterSave }) {
      user who legitimately has no role rows. */
   const [baselineFailed, setBaselineFailed] = useState(false);
 
+  /* The same distinction for the other two reads whose failures were previously
+     absorbed into a default. A failed override fetch looks exactly like a user
+     with no overrides, and a failed scope fetch looks exactly like "All
+     Departments" — the more permissive reading in both cases. The editors keep
+     those defaults because they are the safe thing to SAVE, but Brick 5 must not
+     report either as a verified fact, so the outage is recorded here. */
+  const [overridesFailed, setOverridesFailed] = useState(false);
+  const [scopeFailed, setScopeFailed] = useState(false);
+
   /* Brick 1 catalog — diagnostics only, never required for editing. */
   const [catalog, setCatalog] = useState(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
@@ -84,6 +94,30 @@ export function useUserCard({ user, api, onAfterSave }) {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [resetting, setResetting] = useState(false);
+
+  /**
+   * RBAC Brick 7 — the server's opaque version token for each replaceable
+   * security domain, as read at load time and re-issued on every successful save.
+   *
+   * It is echoed back as `expected_version` so the server can refuse a save built
+   * on state another administrator has already replaced. The client never parses
+   * these; it only round-trips them.
+   *
+   * `null` means "not known" — an outage on the load, or a backend that predates
+   * this brick. The save then omits `expected_version` and the server skips the
+   * check, which is what keeps the User Card working against both versions during
+   * the deployment window.
+   */
+  const [stateVersions, setStateVersions] = useState({
+    overrides: null, scope: null, roles: null,
+  });
+
+  /**
+   * Server-confirmed notices per category, e.g. what a save actually did to the
+   * user's sessions. Only ever set from the server's own response — the card must
+   * never claim sessions were invalidated on its own initiative.
+   */
+  const [saveNotices, setSaveNotices] = useState({});
 
   const userId = user?.id;
 
@@ -99,6 +133,13 @@ export function useUserCard({ user, api, onAfterSave }) {
     setPw({ password: '', confirm: '' });
     setRoleTree(null);
     setBaselineFailed(false);
+    setOverridesFailed(false);
+    setScopeFailed(false);
+
+    /* Recorded from inside the existing catch handlers so the resolved value
+       stays exactly what it was before — only our knowledge of it improves. */
+    let scopeUnavailable = false;
+    let overridesUnavailable = false;
 
     const nextBasic = {
       username: user.username,
@@ -114,11 +155,33 @@ export function useUserCard({ user, api, onAfterSave }) {
       apiRef.current.get('/api/departments', { limit: 500, offset: 0 })
         .then(r => (Array.isArray(r) ? r : (r?.data || []))).catch(() => []),
       apiRef.current.get('/api/roles').then(r => (r?.data || [])).catch(() => []),
-      apiRef.current.get(`/api/admin/users/${userId}/inventory-scope`).catch(() => null),
+      apiRef.current.get(`/api/admin/users/${userId}/inventory-scope`)
+        .catch(() => { scopeUnavailable = true; return null; }),
+      /* The whole response is kept now, not just `.data`: it also carries the
+         `state_version` this card must echo back on save. */
       apiRef.current.get(`/api/admin/users/${userId}/permission-overrides`)
-        .then(r => r?.data || []).catch(() => []),
-    ]).then(([prefRows, deptData, rolesData, invScopeData, overridesData]) => {
+        .catch(() => { overridesUnavailable = true; return null; }),
+      /* READ-ONLY, and deliberately NOT used to derive `assignedRoleIds`.
+         Brick 2 derives the displayed role selection by matching `user.role`
+         against the role list, and changing that would alter which roles the card
+         shows — a behaviour this brick freezes. This request exists solely to
+         obtain the role-assignment `state_version`, so the role save can be
+         protected from a stale write without moving the displayed value. */
+      apiRef.current.get(`/api/roles/users/${userId}/roles`)
+        .catch(() => null),
+    ]).then(([prefRows, deptData, rolesData, invScopeData, overridesResponse, userRolesResponse]) => {
       if (cancelled) return;
+
+      const overridesData = overridesResponse?.data || [];
+
+      setScopeFailed(scopeUnavailable);
+      setOverridesFailed(overridesUnavailable);
+
+      setStateVersions({
+        overrides: overridesResponse?.state_version ?? null,
+        scope: invScopeData?.state_version ?? null,
+        roles: userRolesResponse?.state_version ?? null,
+      });
 
       setDepartments(deptData || []);
       setAllRoles(rolesData || []);
@@ -272,53 +335,88 @@ export function useUserCard({ user, api, onAfterSave }) {
     const targets = categories.filter(c => dirty.byCategory[c]);
     if (targets.length === 0) return { results: {}, allSaved: false, nothingToSave: true };
 
-    // One category's requests. Each returns the snapshot fragment to adopt when
-    // every request in that category succeeded.
+    /**
+     * One category's requests.
+     *
+     * Each runner receives an accumulator and records progress into it AS EACH
+     * REQUEST SUCCEEDS, rather than returning everything at the end. That matters
+     * for `access`, which issues two independent requests: if the scope save
+     * succeeds and the override save then 409s, the scope really did change on
+     * the server. Returning a single fragment at the end would discard that fact,
+     * leaving the card's scope snapshot and version token stale — and the NEXT
+     * save would then 409 on scope too, against a change this admin made
+     * themselves. Recording per request keeps the card honest about exactly how
+     * far it got.
+     */
     const runners = {
-      general: async () => {
+      general: async (acc) => {
         if (dirty.parts.basicDirty) {
           if (!basic.username.trim() || !basic.full_name.trim()) {
             throw new Error('Username and full name are required');
           }
-          await apiRef.current.put(`/api/admin/users/${userId}`, buildBasicPayload(basic));
+          const res = await apiRef.current.put(`/api/admin/users/${userId}`, buildBasicPayload(basic));
+          acc.snapshot.general = { ...(acc.snapshot.general || {}), basic: canonicalBasic(basic) };
+          if (res?.session_invalidation?.enforced) acc.notices.general = res.session_invalidation.message;
         }
         if (dirty.parts.roleIdsDirty) {
-          await apiRef.current.put(`/api/roles/users/${userId}/roles`, buildRolesPayload(assignedRoleIds));
+          const res = await apiRef.current.put(`/api/roles/users/${userId}/roles`, {
+            ...buildRolesPayload(assignedRoleIds),
+            ...(stateVersions.roles ? { expected_version: stateVersions.roles } : {}),
+          });
+          acc.snapshot.general = {
+            ...(acc.snapshot.general || {}), roleIds: canonicalRoleIds(assignedRoleIds),
+          };
+          if (res?.state_version) acc.versions.roles = res.state_version;
+          if (res?.session_invalidation?.enforced) acc.notices.general = res.session_invalidation.message;
         }
-        return { general: { basic: canonicalBasic(basic), roleIds: canonicalRoleIds(assignedRoleIds) } };
       },
 
-      access: async () => {
+      access: async (acc) => {
         if (dirty.parts.scopeDirty) {
-          await apiRef.current.put(
-            `/api/admin/users/${userId}/inventory-scope`, buildScopePayload(inventoryScope),
+          const res = await apiRef.current.put(
+            `/api/admin/users/${userId}/inventory-scope`,
+            {
+              ...buildScopePayload(inventoryScope),
+              ...(stateVersions.scope ? { expected_version: stateVersions.scope } : {}),
+            },
           );
+          acc.snapshot.access = {
+            ...(acc.snapshot.access || {}), scope: canonicalScope(inventoryScope),
+          };
+          if (res?.state_version) acc.versions.scope = res.state_version;
+          if (res?.session_invalidation?.enforced) acc.notices.access = res.session_invalidation.message;
         }
         if (dirty.parts.overridesDirty) {
-          await apiRef.current.put(
-            `/api/admin/users/${userId}/permission-overrides`, buildOverridesPayload(userOverrides),
+          const res = await apiRef.current.put(
+            `/api/admin/users/${userId}/permission-overrides`,
+            {
+              ...buildOverridesPayload(userOverrides),
+              ...(stateVersions.overrides ? { expected_version: stateVersions.overrides } : {}),
+            },
           );
+          acc.snapshot.access = {
+            ...(acc.snapshot.access || {}), overrides: canonicalOverrides(userOverrides),
+          };
+          if (res?.state_version) acc.versions.overrides = res.state_version;
+          if (res?.session_invalidation?.enforced) acc.notices.access = res.session_invalidation.message;
         }
-        return {
-          access: {
-            overrides: canonicalOverrides(userOverrides),
-            scope: canonicalScope(inventoryScope),
-          },
-        };
       },
 
-      preferences: async () => {
+      preferences: async (acc) => {
         await apiRef.current.put(
           `/api/admin/users/${userId}/preferences`, buildPreferencesPayload(prefs),
         );
-        return { preferences: { prefs: canonicalPrefs(prefs) } };
+        acc.snapshot.preferences = { prefs: canonicalPrefs(prefs) };
+        /* No session notice: a preference save is not a security change and must
+           not invalidate anything. The server does not invalidate here either. */
       },
 
-      security: async () => {
+      security: async (acc) => {
         if (pw.password.length < 6) throw new Error('Password must be at least 6 characters');
         if (pw.password !== pw.confirm) throw new Error('Passwords do not match');
-        await apiRef.current.post(`/api/admin/users/${userId}/reset-password`, { password: pw.password });
-        return { security: { password: '' } };
+        const res = await apiRef.current.post(`/api/admin/users/${userId}/reset-password`, { password: pw.password });
+        acc.snapshot.security = { password: '' };
+        if (res?.session_invalidation?.enforced) acc.notices.security = res.session_invalidation.message;
       },
     };
 
@@ -337,29 +435,53 @@ export function useUserCard({ user, api, onAfterSave }) {
 
     const results = {};
     const errors = {};
-    const snapshotPatch = {};
+    const acc = { snapshot: {}, versions: {}, notices: {} };
 
     // Sequential on purpose: a category-level failure must not leave it
     // ambiguous which requests already went out.
     for (const category of targets) {
       try {
-        Object.assign(snapshotPatch, await runners[category]());
+        await runners[category](acc);
         results[category] = SAVE_STATE.SAVED;
       } catch (err) {
-        results[category] = SAVE_STATE.FAILED;
+        /* A 409 is reported as CONFLICT, not FAILED. Nothing went wrong with the
+           request — the configuration simply moved underneath this editor, and
+           the server refused rather than reverting the newer state. The
+           distinction matters because the remedy differs: a failure invites
+           Retry, a conflict invites Reload. Either way the edits are kept and
+           the category stays dirty, because the snapshot below is only advanced
+           for requests that actually succeeded. */
+        results[category] = isStaleWriteError(err) ? SAVE_STATE.CONFLICT : SAVE_STATE.FAILED;
         errors[category] = err?.message || 'Save failed';
       }
     }
 
-    // Only successful categories advance their baseline; a failed category keeps
-    // its old baseline and therefore stays dirty and retryable.
-    if (Object.keys(snapshotPatch).length > 0) {
-      setSnapshot(prev => (prev ? { ...prev, ...snapshotPatch } : prev));
+    /* Only what actually succeeded advances its baseline — down to the individual
+       request, not the whole category. A category that failed or conflicted keeps
+       its old baseline for the parts that did not save, and therefore stays dirty
+       and retryable. The server never overwrites local edits here. */
+    if (Object.keys(acc.snapshot).length > 0) {
+      setSnapshot(prev => (prev
+        ? {
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(acc.snapshot).map(([key, patch]) => [key, { ...prev[key], ...patch }]),
+          ),
+        }
+        : prev));
+    }
+    if (Object.keys(acc.versions).length > 0) {
+      setStateVersions(prev => ({ ...prev, ...acc.versions }));
     }
     if (results.security === SAVE_STATE.SAVED) setPw({ password: '', confirm: '' });
 
     setSaveState(prev => ({ ...prev, ...results }));
     setSaveErrors(prev => ({ ...prev, ...errors }));
+    setSaveNotices(prev => {
+      const next = { ...prev };
+      targets.forEach(c => { delete next[c]; });
+      return { ...next, ...acc.notices };
+    });
     busyRef.current = false;
     setBusy(false);
 
@@ -369,8 +491,12 @@ export function useUserCard({ user, api, onAfterSave }) {
       results,
       allSaved: targets.every(c => results[c] === SAVE_STATE.SAVED),
       failedCategories: targets.filter(c => results[c] === SAVE_STATE.FAILED),
+      conflictCategories: targets.filter(c => results[c] === SAVE_STATE.CONFLICT),
     };
-  }, [dirty, basic, prefs, userOverrides, inventoryScope, assignedRoleIds, pw, userId, onAfterSave]);
+  }, [
+    dirty, basic, prefs, userOverrides, inventoryScope, assignedRoleIds, pw, userId,
+    onAfterSave, stateVersions,
+  ]);
 
   /**
    * Clears every override for this user through the existing reset endpoint —
@@ -381,15 +507,25 @@ export function useUserCard({ user, api, onAfterSave }) {
     if (busyRef.current || resetting) return { ok: false, skipped: true };
     setResetting(true);
     try {
-      await apiRef.current.del(`/api/admin/users/${userId}/permission-overrides`);
+      const res = await apiRef.current.del(`/api/admin/users/${userId}/permission-overrides`);
       setUserOverrides({});
       setSnapshot(prev => (prev
         ? { ...prev, access: { ...prev.access, overrides: canonicalOverrides({}) } }
         : prev));
+      if (res?.state_version) {
+        setStateVersions(prev => ({ ...prev, overrides: res.state_version }));
+      }
+      if (res?.session_invalidation?.enforced) {
+        setSaveNotices(prev => ({ ...prev, access: res.session_invalidation.message }));
+      }
       onAfterSave?.({ access: SAVE_STATE.SAVED });
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err?.message || 'Failed to reset overrides' };
+      return {
+        ok: false,
+        conflict: isStaleWriteError(err),
+        error: err?.message || 'Failed to reset overrides',
+      };
     } finally {
       setResetting(false);
     }
@@ -407,8 +543,14 @@ export function useUserCard({ user, api, onAfterSave }) {
     overrideRecordCount,
     roleTree, roleNames, roleBaseline, effectiveAccess,
     catalog, catalogFailed,
+    overridesFailed, scopeFailed,
     dirty,
     saveState, saveErrors, busy, resetting,
+    /* RBAC Brick 7. `stateVersions` is exposed for tests and diagnostics — the UI
+       never renders it. `saveNotices` holds only server-confirmed statements
+       about what a save did to the user's sessions, so the card can never claim
+       an invalidation the backend did not report. */
+    stateVersions, saveNotices,
     saveCategories, resetOverrides,
   };
 }

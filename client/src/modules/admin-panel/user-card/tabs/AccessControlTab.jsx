@@ -4,21 +4,31 @@ import AccessControlSummary from '../AccessControlSummary';
 import PermissionOverridesMatrix from '../PermissionOverridesMatrix';
 import GroupedPermissionEditor from '../permissions/GroupedPermissionEditor';
 import ViewRestrictionsPanel from '../restrictions/ViewRestrictionsPanel';
+import EffectiveAccessPreview from '../effective-access/EffectiveAccessPreview';
 import { validateCatalog } from '../permissions/permissionCatalogModel';
 
 /**
  * Access Control tab — the read-only summary, the compact View Restrictions
- * panel (Brick 4) and the permission editor (Brick 3).
+ * panel (Brick 4), the Effective Access Preview (Brick 5) and the permission
+ * editor (Brick 3).
  *
- * The two are deliberately separate sections because they answer different
- * questions: View Restrictions is "which records may this user see", the
- * permission editor is "what may this user do". Neither is derived from the
- * other — department visibility grants no operational and no approval authority.
+ * THE SECTIONS ANSWER DIFFERENT QUESTIONS AND ARE NOT DERIVED FROM EACH OTHER.
+ * View Restrictions is "which records may this user see"; the permission editor
+ * is "what may this user do"; the preview is "what does that actually add up to,
+ * and is it really enforced". Department visibility grants no operational and no
+ * approval authority, and the preview states that rather than implying it.
+ *
+ * ORDER IS DELIBERATE: explain before edit. The preview sits above the editor so
+ * an admin reads the current state and its enforcement caveats before changing
+ * anything, and every "Edit Permission" link in it lands in the editor below
+ * through the same focus mechanism Brick 4 already uses.
  *
  * The editor is chosen, not hard-coded. Brick 3's grouped editor needs a catalog
  * it can trust; when the endpoint fails or returns something it cannot map, the
  * Brick 2 matrix is rendered instead so user administration never stops because
- * a diagnostic endpoint did. Exactly one editor is on screen at a time.
+ * a diagnostic endpoint did. Exactly one editor is on screen at a time, and the
+ * preview degrades to its own unavailable notice without taking the editor down
+ * with it.
  */
 export default function AccessControlTab({
   basic,
@@ -34,6 +44,8 @@ export default function AccessControlTab({
   catalog,
   catalogFailed,
   roleBaseline,
+  overridesFailed,
+  scopeFailed,
   onResetAllStored,
   busy,
 }) {
@@ -81,6 +93,29 @@ export default function AccessControlTab({
           isSuperAdmin={isSuperAdmin}
           inventoryScope={inventoryScope}
           setInventoryScope={setInventoryScope}
+          departments={departments}
+          onOpenPermission={openPermission}
+        />
+      </div>
+
+      <div className="uc-section">
+        <h3 className="uc-section-title">Effective Access Preview</h3>
+        <p className="uc-section-hint">
+          Read-only. What this user can actually do, why each result exists, and whether
+          the backend really enforces it. Nothing on this panel changes any setting —
+          use Edit Permission to open the editor below.
+        </p>
+        <EffectiveAccessPreview
+          catalog={catalog}
+          catalogFailed={catalogFailed}
+          overrides={userOverrides}
+          overridesFailed={overridesFailed}
+          baseline={roleBaseline}
+          isSuperAdmin={isSuperAdmin}
+          prefs={prefs}
+          role={basic.role}
+          inventoryScope={inventoryScope}
+          scopeFailed={scopeFailed}
           departments={departments}
           onOpenPermission={openPermission}
         />
