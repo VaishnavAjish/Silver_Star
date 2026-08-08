@@ -18,6 +18,16 @@ const { authenticate } = require('./middleware/auth');
 const { initTelemetry, shutdownTelemetry } = require('./middleware/tracing');
 const { setRLSContext } = require('./middleware/rls');
 
+// ── RBAC Brick 8 — rollout configuration ──────────────────────────────────
+// Validated before anything is served. An unreadable RBAC_ENFORCE_* value must
+// not quietly mean LEGACY: during a rollout that reads as "enforcement is on and
+// nothing broke". Refusing to start matches config/security.js, which exits when
+// a required secret is missing. Every group defaults to LEGACY, so an untouched
+// environment authorizes exactly as it did before this brick existed.
+const { validateEnforcementConfig } = require('./security/rbac/enforcementConfig');
+const { installRouteEnforcement } = require('./security/rbac/installRouteEnforcement');
+validateEnforcementConfig();
+
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy to allow express-rate-limit to work behind Vite proxy
 
@@ -360,6 +370,14 @@ if (process.env.SERVE_STATIC === 'true' || process.env.NODE_ENV === 'production'
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }
+
+// ── RBAC Brick 8 — bind the route enforcement manifest ───────────────────────
+// Must run after every route registration above and before the 404 handler, so
+// that the walk sees the complete router. Each registered method/path is looked
+// up in server/security/rbac/routeEnforcementManifest.js; anything unclassified
+// is logged loudly (and fails brick8RouteCoverage.test.js). With all groups at
+// LEGACY the installed guards do nothing but call next().
+installRouteEnforcement(app);
 
 // ── Error Handler ────────────────────────────────────────────────────────
 const { errorHandler, notFound } = require('./middleware/errorHandler');

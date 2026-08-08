@@ -1,5 +1,12 @@
 const pool = require('../db/pool');
 
+/* Read lazily, so the switch can be changed for a test without this module
+   having been loaded in a particular order. See the long note at the legacy
+   fallback branch below for why it exists and why it is on by default. */
+function legacyFallbackEnabled() {
+  return require('../security/rbac/enforcementConfig').isLegacyUserPermissionsFallbackEnabled();
+}
+
 /* ── Permission bit values (must match frontend constants) ── */
 const PERM_BITS = {
   view:    1,
@@ -63,7 +70,25 @@ async function resolveEffectivePermission(userId, module, submodule = '', userRo
   }
 
   // 3. Fallback: if no role_permissions AND no overrides exist for user, check legacy user_permissions
-  if (!roleRow?.mask && !overrideRow) {
+  //
+  // RBAC BRICK 8 — WHY THIS IS NOW CONDITIONAL, AND WHY IT IS STILL ON
+  // ────────────────────────────────────────────────────────────────────
+  // Brick 5 could not certify Default Deny while this branch exists: a user with
+  // no role rows and no overrides — which ought to mean "no access" — can still
+  // be granted permissions from a table nothing writes to any more. The intended
+  // end state is that effective access derives only from the Super Admin bypass,
+  // role_permissions and user_permission_overrides.
+  //
+  // It is not removed here because the claim "user_permissions is empty" cannot
+  // be verified from this environment: the development database is unreachable,
+  // so the evidence for deletion does not exist. Deleting the branch on the
+  // strength of a belief would silently revoke access from anybody it is
+  // currently serving.
+  //
+  // So the branch sits behind a switch that defaults to the present behaviour.
+  // Set RBAC_LEGACY_USER_PERMISSIONS_FALLBACK=false once the table is confirmed
+  // empty in production. The table itself is never dropped by this code.
+  if (!roleRow?.mask && !overrideRow && legacyFallbackEnabled()) {
     const { rows: legacyRows } = await pool.query(
       `SELECT permission_key, allowed FROM user_permissions
        WHERE user_id = $1 AND module = $2`,
@@ -117,12 +142,16 @@ async function getAllEffectivePermissionsForUser(userId, userRole = null) {
     [userId]
   );
 
-  // Fetch legacy user permissions
-  const { rows: legacyPerms } = await pool.query(
-    `SELECT module, permission_key, allowed
-     FROM user_permissions WHERE user_id = $1`,
-    [userId]
-  );
+  // Fetch legacy user permissions — same switch as resolveEffectivePermission,
+  // so the /api/auth/me payload and a route decision can never disagree about
+  // whether the legacy table counts.
+  const { rows: legacyPerms } = legacyFallbackEnabled()
+    ? await pool.query(
+      `SELECT module, permission_key, allowed
+       FROM user_permissions WHERE user_id = $1`,
+      [userId]
+    )
+    : { rows: [] };
 
   const map = new Map();
 

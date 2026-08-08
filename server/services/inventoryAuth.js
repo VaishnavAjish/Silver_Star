@@ -46,17 +46,21 @@ const FINANCIAL_FIELDS = Object.freeze([
   'book_value', 'opening_value', 'closing_value',
 ]);
 
-// ── Roles that always see financial fields ────────────────────────────────────
-// ── Roles that always see financial fields and full bypass ────────────────────
-const FINANCIAL_BYPASS_ROLES = Object.freeze([
-  'super_admin', 'superadmin', 'super admin', 'admin', 'administrator',
-  'management', 'manager', 'owner', 'developer'
-]);
+// ── Who bypasses scope — RBAC Brick 8 ─────────────────────────────────────────
+// This file used to carry two role lists that answered the same question
+// differently: a nine-role list here and a three-role list at loadDeptScope
+// below, so an `admin` saw every department on the Inventory page and only their
+// configured departments on Stock Transfer. Both now come from one module, which
+// reproduces that split exactly under its default `compatibility` policy and
+// collapses it to Super Admin alone under `canonical`. See
+// security/rbac/inventoryScopePolicy.js for why the default is not `canonical`.
+const scopePolicy = require('../security/rbac/inventoryScopePolicy');
+
+const { LEGACY_WIDE_BYPASS_ROLES: FINANCIAL_BYPASS_ROLES, CALL_SITES } = scopePolicy;
 
 // ── canViewFinancial: does user have VIEW on 'inventory' / 'inventory_financial'?
 async function resolveCanViewFinancial(userId, userRole) {
-  const normRole = String(userRole || '').toLowerCase().trim();
-  if (FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(userRole)) return true;
+  if (scopePolicy.bypassesFinancialFields(userRole)) return true;
   // Check submodule-level financial permission
   const mask = await getUserPermissionBitmask(userId, 'inventory', 'inventory_financial');
   if ((mask & PERM_BITS.view) === PERM_BITS.view) return true;
@@ -65,8 +69,9 @@ async function resolveCanViewFinancial(userId, userRole) {
 
 // ── Load full authorization context for one request ──────────────────────────
 async function loadInventoryAuthContext(userId, userRole) {
-  const normRole = String(userRole || '').toLowerCase().trim();
-  const isBypass = FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(userRole);
+  const isBypass = scopePolicy.bypassesDepartmentScope(userRole, {
+    callSite: CALL_SITES.INVENTORY_VIEW,
+  });
 
   // 1. Module-level permission bitmask: All authenticated users can view inventory by default
   const invMask = await getUserPermissionBitmask(userId, 'inventory', '');
@@ -78,7 +83,12 @@ async function loadInventoryAuthContext(userId, userRole) {
   const canViewFinancial = await resolveCanViewFinancial(userId, userRole);
 
   // 3. Department scope
-  const defaultScopeMode = userRole === 'operator_restricted' ? 'NONE' : 'ALL';
+  /* One function now answers this for the runtime AND for the Admin scope
+     preview, so the panel can stop reporting ALL for an operator_restricted user
+     the backend is actually giving NONE. The defaults themselves are unchanged;
+     the only difference is that the role string is normalised before comparison,
+     which matters solely for a mis-cased value. */
+  const defaultScopeMode = scopePolicy.defaultScopeModeForRole(userRole);
   let scopeMode         = defaultScopeMode;
   let includeUnassigned = false;
   let allowedDeptIds    = [];
@@ -120,8 +130,9 @@ async function loadInventoryAuthContext(userId, userRole) {
 async function requireInventoryView(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
 
-  const normRole = String(req.user.role || '').toLowerCase().trim();
-  const isSuperAdmin = FINANCIAL_BYPASS_ROLES.includes(normRole) || FINANCIAL_BYPASS_ROLES.includes(req.user.role);
+  const isSuperAdmin = scopePolicy.bypassesDepartmentScope(req.user.role, {
+    callSite: CALL_SITES.INVENTORY_VIEW,
+  });
 
   // super_admin / admin bypass — full access
   if (isSuperAdmin) {
@@ -222,10 +233,15 @@ function isLotInScope(ctx, lotRow) {
 // primary department never widens access.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SUPER_ADMIN_ROLES = Object.freeze(['super_admin', 'superadmin', 'super admin']);
+const { SUPER_ADMIN_ROLES } = scopePolicy;
 
+/* The narrow list. Under the default `compatibility` policy this stays exactly
+   as it was — Super Admin only — which is what makes the Stock Transfer,
+   Lot Movement and search read paths honour a stored scope for an admin while
+   requireInventoryView above does not. Under `canonical` the two agree because
+   requireInventoryView narrows to match this, never the reverse. */
 function isSuperAdminRole(userRole) {
-  return SUPER_ADMIN_ROLES.includes(String(userRole || '').toLowerCase().trim());
+  return scopePolicy.bypassesDepartmentScope(userRole, { callSite: CALL_SITES.DEPT_SCOPE });
 }
 
 /**
