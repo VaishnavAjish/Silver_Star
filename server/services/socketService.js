@@ -1,6 +1,7 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const securityConfig = require('../config/security');
 
 let wss = null;
 const roomSockets = new Map(); // roomName -> Set<socket>
@@ -56,8 +57,26 @@ function initSocket(server) {
         }
 
         try {
-          const secret = process.env.JWT_SECRET || 'dev_secret';
-          const decoded = jwt.verify(token, secret);
+          /* RBAC Brick 8 — the handshake used `process.env.JWT_SECRET ||
+             'dev_secret'`. The fallback was already unreachable in a running
+             server (config/security.js exits at startup when JWT_SECRET is
+             absent), but a literal secret in an authentication path is a hazard
+             waiting for a refactor to make it reachable. This is the same value
+             the HTTP middleware verifies against, so every live token and every
+             open notification stream is unaffected.
+
+             STILL OPEN, DELIBERATELY NOT CHANGED HERE:
+               - the socket does not check the Brick 7 `av` claim, so a session
+                 invalidated over HTTP keeps receiving notifications until the
+                 token expires;
+               - the `subscribe` message accepts any room name, including
+                 `user:<other-id>`, so a client can receive another user's
+                 notifications.
+             Both are read-side notification issues on a channel that executes no
+             privileged command — there are no state-changing socket handlers —
+             so they are recorded as a separate hardening task rather than
+             rewritten inside an authorization brick. */
+          const decoded = jwt.verify(token, securityConfig.jwt.accessSecret);
           ws.userId = decoded.id || decoded.userId;
           ws.role = decoded.role;
           

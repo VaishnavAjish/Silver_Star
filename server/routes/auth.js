@@ -12,6 +12,12 @@ const securityConfig = require('../config/security');
 const { logger } = require('../middleware/logger');
 const { encryptMFASecret, decryptMFASecret, isEncrypted } = require('../utils/mfaEncryption');
 const { dispatchEvent } = require('../services/eventDispatcher');
+const {
+  TOKEN_VERSION_CLAIM,
+  INITIAL_AUTH_VERSION,
+  readAuthVersionForToken,
+  isMissingSchemaError,
+} = require('../services/security/securityVersionService');
 
 const router = express.Router();
 
@@ -20,9 +26,35 @@ const router = express.Router();
  */
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
+/**
+ * RBAC Brick 7 — the security revision to stamp into a token being minted now.
+ *
+ * Both callers (`/login` and `/refresh`) already hold a full `SELECT * FROM
+ * users` row, so after the phase87 migration the value is in hand and no extra
+ * round trip is needed. The query fallback exists for the pre-migration case,
+ * where the column is absent from the row; `readAuthVersionForToken` answers
+ * INITIAL_AUTH_VERSION there rather than throwing, so a backend deployed ahead
+ * of its migration still issues usable tokens.
+ */
+const resolveAuthVersion = async (user) => {
+  if (user && user.auth_version != null) return Number(user.auth_version);
+  if (!user?.id) return INITIAL_AUTH_VERSION;
+  return readAuthVersionForToken(pool, user.id);
+};
+
 const issueTokens = async (res, user) => {
+  const authVersion = await resolveAuthVersion(user);
+
   const accessToken = jwt.sign(
-    { id: user.id, username: user.username, role: user.role, fullName: user.full_name },
+    {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      fullName: user.full_name,
+      /* The claim that makes this token revocable. `authenticate` rejects the
+         token as soon as users.auth_version moves past this value. */
+      [TOKEN_VERSION_CLAIM]: authVersion,
+    },
     securityConfig.jwt.accessSecret,
     { expiresIn: securityConfig.jwt.accessExpiresIn, issuer: securityConfig.jwt.issuer }
   );
@@ -214,18 +246,52 @@ router.post('/refresh', asyncWrap(async (req, res) => {
   try {
     const decoded = jwt.verify(refreshToken, securityConfig.jwt.refreshSecret);
     const tokenHash = hashToken(refreshToken);
-    
-    // Check for token reuse - if token was already used, it's a potential attack
-    const tokenCheck = await pool.query(
-      'SELECT id, used_at FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()',
-      [tokenHash]
-    );
-    
+
+    // Check for token reuse - if token was already used, it's a potential attack.
+    //
+    // RBAC Brick 7: `revoked_at` is read alongside `used_at`. The two are
+    // deliberately different facts — `used_at` means "consumed by a rotation"
+    // and drives the reuse/theft detection below, `revoked_at` means "an
+    // administrator invalidated this session". Conflating them would report
+    // every administrative revocation as a stolen-token incident.
+    //
+    // The fallback keeps a backend that is running ahead of the phase87
+    // migration working: without it, the missing column would throw, be caught
+    // by the handler's catch below, and answer 403 — logging out every user at
+    // their next refresh.
+    let tokenCheck;
+    try {
+      tokenCheck = await pool.query(
+        'SELECT id, used_at, revoked_at FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()',
+        [tokenHash]
+      );
+    } catch (schemaErr) {
+      if (!isMissingSchemaError(schemaErr)) throw schemaErr;
+      tokenCheck = await pool.query(
+        'SELECT id, used_at, NULL::timestamptz AS revoked_at FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()',
+        [tokenHash]
+      );
+    }
+
     if (tokenCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Invalid or expired refresh token' });
     }
-    
+
     const storedToken = tokenCheck.rows[0];
+
+    // An administratively revoked token can never be exchanged. Checked BEFORE
+    // the reuse branch so a revoked-but-unused token is reported as a revocation
+    // rather than as token theft, and so a revoked token cannot be rotated into
+    // a fresh access token — which is what would otherwise let a client answer
+    // the 401 from `authenticate` by silently minting new, valid authority.
+    if (storedToken.revoked_at) {
+      logger.warn('[Auth] Refresh attempted with a revoked token', { userId: decoded.id });
+      return res.status(403).json({
+        error: 'Your access settings changed. Please log in again.',
+        code: 'SESSION_INVALIDATED',
+      });
+    }
+
     if (storedToken.used_at) {
       // Token reuse detected! Revoke all tokens for this user
       await pool.query('UPDATE refresh_tokens SET used_at = NOW() WHERE user_id = $1', [decoded.id]);
@@ -313,10 +379,23 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
 
   // If the DB role differs from the JWT role (e.g. role was changed after login),
   // issue a fresh access token so subsequent API calls use the correct role.
+  //
+  // RBAC Brick 7: this path is now mostly unreachable for an admin-panel role
+  // change, because that change bumps auth_version and `authenticate` rejects
+  // the old token before this handler runs. It is kept for role drift arriving
+  // by any other route (a direct database edit, a data migration), and the fresh
+  // token MUST carry the current `av` — minting one without it would produce a
+  // token that `authenticate` immediately rejects, trapping the user in a loop.
   let freshToken;
   if (dbUser.role !== req.user.role) {
     freshToken = jwt.sign(
-      { id: dbUser.id, username: dbUser.username, role: dbUser.role, fullName: dbUser.full_name },
+      {
+        id: dbUser.id,
+        username: dbUser.username,
+        role: dbUser.role,
+        fullName: dbUser.full_name,
+        [TOKEN_VERSION_CLAIM]: await readAuthVersionForToken(pool, dbUser.id),
+      },
       securityConfig.jwt.accessSecret,
       { expiresIn: securityConfig.jwt.accessExpiresIn, issuer: securityConfig.jwt.issuer }
     );

@@ -2,10 +2,26 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logger } = require('../middleware/logger');
-const { getClientIp } = require('../utils/requestUtils');
 
 const router = express.Router();
 const { dispatchEvent } = require('../services/eventDispatcher');
+
+/* ── RBAC Brick 7 — security services ──────────────────────── */
+const {
+  rolePermissionsFingerprint,
+  roleAssignmentFingerprint,
+  assertExpectedVersion,
+  lockUserRow,
+  lockRoleRow,
+} = require('../services/security/concurrencyService');
+const {
+  invalidateUserSessions,
+  invalidateSessionsForRole,
+  INVALIDATION_REASON,
+  describeInvalidation,
+} = require('../services/security/sessionInvalidationService');
+const { writeSecurityAudit } = require('../services/security/securityAuditService');
+const { sendSecurityError, SECURITY_ERROR_CODES } = require('../services/security/securityErrors');
 
 /* ── Permission bit values ─────────────────────────────────── */
 const PERM_BITS = {
@@ -290,14 +306,29 @@ function requireRoleAuthority(targetRoleIdParam = 'id') {
   }
 })();
 
-/* ── Helper: audit log ─────────────────────────────────────── */
+/* ── Helper: audit log ─────────────────────────────────────────────────────
+ *
+ * RBAC Brick 7: the signature is unchanged, but the body now delegates to the
+ * canonical securityAuditService so there is ONE writer to permission_audit_logs
+ * rather than three open-coded INSERTs that could drift apart.
+ *
+ * Two behaviours change, both deliberately:
+ *   1. The payload is redacted before it is stored. Callers that pass a request
+ *      body can no longer leak a password or a token into the audit table.
+ *   2. Passing a POOL instead of a transaction client is now a hard error. That
+ *      is the point: an audit row written on a different connection is outside
+ *      the mutation's transaction and can survive a rollback, which is exactly
+ *      the defect this brick exists to close.
+ */
 async function auditLog(client, userId, action, targetType, targetId, changes, req) {
-  await client.query(
-    `INSERT INTO permission_audit_logs (user_id, action, target_type, target_id, changes, ip_address, user_agent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [userId, action, targetType, targetId, changes ? JSON.stringify(changes) : null,
-     getClientIp?.(req) || req.ip, req.headers['user-agent'] || null]
-  );
+  await writeSecurityAudit(client, {
+    actorId: userId,
+    action,
+    targetType,
+    targetId,
+    changes,
+    req,
+  });
 }
 
 /* ── Helper: compute bitmask from action array ─────────────── */
@@ -512,7 +543,11 @@ router.get('/:id/permissions', authenticate, authorize('admin'), async (req, res
         };
       }),
     }));
-    res.json({ data: tree });
+    /* RBAC Brick 7: `state_version` digests the STORED role_permissions rows,
+       not the rendered tree. The tree substitutes FULL_ACCESS for the admin
+       role's unstored entries, and fingerprinting that would make the version
+       depend on a display default rather than on what the PUT will replace. */
+    res.json({ data: tree, state_version: rolePermissionsFingerprint(perms) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -520,40 +555,111 @@ router.get('/:id/permissions', authenticate, authorize('admin'), async (req, res
 
 /* ── PUT /roles/:id/permissions ────────────────────────────── */
 router.put('/:id/permissions', authenticate, authorize('admin'), requireRoleAuthority('id'), async (req, res) => {
+  const roleId = parseInt(req.params.id, 10);
+  const { permissions, expected_version: expectedVersion } = req.body; // array of { module, submodule, permissions (bitmask) }
+
   const client = await pool.primaryPool.connect();
   try {
-    const { rows: [role] } = await client.query('SELECT * FROM roles WHERE id = $1', [req.params.id]);
-    if (!role) return res.status(404).json({ error: 'Role not found' });
-
-    const { permissions } = req.body; // array of { module, submodule, permissions (bitmask) }
     if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions array required' });
 
     await client.query('BEGIN');
 
-    // Capture old state for audit
+    /* RBAC Brick 7: the role row is locked before it is read, so two
+       administrators editing the same role's baseline serialise instead of
+       interleaving a read with a write. The SELECT moved inside the transaction
+       for the same reason — reading the role before BEGIN meant the name in the
+       audit row could describe a role that changed before the write landed. */
+    const roleExists = await lockRoleRow(client, roleId);
+    if (!roleExists) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Role not found' });
+    }
+    const { rows: [role] } = await client.query('SELECT * FROM roles WHERE id = $1', [roleId]);
+
+    // Capture old state for audit AND for the staleness check.
     const { rows: oldPerms } = await client.query(
       'SELECT module, submodule, permissions FROM role_permissions WHERE role_id = $1',
-      [req.params.id]
+      [roleId]
     );
 
+    const precondition = assertExpectedVersion({
+      expected: expectedVersion,
+      actual: rolePermissionsFingerprint(oldPerms),
+      code: SECURITY_ERROR_CODES.STALE_ROLE_PERMISSIONS,
+      domain: 'role_permissions',
+      message: 'This role\'s permissions were changed by another administrator after '
+        + 'you opened it. Your unsaved changes have been kept — reload to see the '
+        + 'current baseline before saving again.',
+    });
+
     // Replace all permissions for this role
-    await client.query('DELETE FROM role_permissions WHERE role_id = $1', [req.params.id]);
+    await client.query('DELETE FROM role_permissions WHERE role_id = $1', [roleId]);
     for (const p of permissions) {
       await client.query(
         `INSERT INTO role_permissions (role_id, module, submodule, permissions)
          VALUES ($1, $2, $3, $4)`,
-        [parseInt(req.params.id), p.module, p.submodule, p.permissions || 0]
+        [roleId, p.module, p.submodule, p.permissions || 0]
       );
     }
 
-    await auditLog(client, req.user.id, 'update_permissions', 'role', parseInt(req.params.id),
-      { roleName: role.name, before: oldPerms, after: permissions }, req);
+    const { rows: newPerms } = await client.query(
+      'SELECT module, submodule, permissions FROM role_permissions WHERE role_id = $1',
+      [roleId]
+    );
+
+    /* ROLE BASELINE PROPAGATION.
+       A role's permissions are shared: changing them changes the effective
+       access of every user holding the role, none of whom is named in this
+       request. Without this, those users' 8-hour access tokens would keep
+       resolving against the OLD baseline until they happened to expire, and
+       waiting for each user to be edited individually would never come. The
+       membership read runs on this transaction's client, so the affected set is
+       exactly the set visible to the write it accompanies. */
+    const invalidation = await invalidateSessionsForRole(client, {
+      roleId,
+      reason: INVALIDATION_REASON.ROLE_BASELINE_CHANGED,
+      actorId: req.user.id,
+    });
+
+    await writeSecurityAudit(client, {
+      actorId: req.user.id,
+      action: 'update_permissions',
+      targetType: 'role',
+      targetId: roleId,
+      category: 'role_baseline',
+      changes: {
+        roleName: role?.name ?? null,
+        before: oldPerms,
+        after: newPerms,
+        concurrency_checked: precondition.checked,
+      },
+      req,
+      invalidation,
+    });
+
     await client.query('COMMIT');
 
-    logger.info('Permissions updated', { roleId: req.params.id, roleName: role.name, userId: req.user.id });
-    res.json({ success: true });
+    logger.info('Permissions updated', {
+      roleId,
+      roleName: role?.name,
+      userId: req.user.id,
+      affectedUsers: invalidation.affectedUserCount,
+    });
+
+    res.json({
+      success: true,
+      state_version: rolePermissionsFingerprint(newPerms),
+      session_invalidation: {
+        enforced: Boolean(invalidation.enforced),
+        affected_user_count: invalidation.affectedUserCount,
+        refresh_tokens_revoked: invalidation.refreshTokensRevoked,
+        message: describeInvalidation(invalidation),
+      },
+      concurrency_checked: precondition.checked,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (sendSecurityError(res, err)) return;
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -574,7 +680,7 @@ router.get('/users/:id/roles', authenticate, authorize('admin'), async (req, res
        WHERE ur.user_id = $1`,
       [req.params.id]
     );
-    res.json({ data: rows });
+    res.json({ data: rows, state_version: roleAssignmentFingerprint(rows.map(r => r.id)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -582,47 +688,105 @@ router.get('/users/:id/roles', authenticate, authorize('admin'), async (req, res
 
 /* ── PUT /users/:id/roles ──────────────────────────────────── */
 router.put('/users/:id/roles', authenticate, authorize('admin'), async (req, res) => {
+  const targetUserId = parseInt(req.params.id, 10);
+  const { role_ids, expected_version: expectedVersion } = req.body; // array of role IDs
+
   const client = await pool.primaryPool.connect();
   try {
-    const { role_ids } = req.body; // array of role IDs
     if (!Array.isArray(role_ids)) return res.status(400).json({ error: 'role_ids array required' });
 
     await client.query('BEGIN');
 
-    // Get old roles for audit
+    const userExists = await lockUserRow(client, targetUserId);
+    if (!userExists) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get old roles for audit AND for the staleness check.
     const { rows: oldRoles } = await client.query(
       'SELECT role_id FROM user_roles WHERE user_id = $1',
-      [req.params.id]
+      [targetUserId]
     );
 
-    const oldIds = oldRoles.map(r => r.role_id).sort((a,b) => a - b);
-    const newIds = [...role_ids].sort((a,b) => a - b);
+    const oldIds = oldRoles.map(r => r.role_id).sort((a, b) => a - b);
+    const newIds = [...role_ids].sort((a, b) => a - b);
     const changed = oldIds.length !== newIds.length || oldIds.some((v, i) => v !== newIds[i]);
+
+    /* Role assignment is replacement-based, so it carries the same stale-write
+       risk as the override editor: an administrator holding an old view would
+       otherwise silently strip a role another administrator just granted. */
+    const precondition = assertExpectedVersion({
+      expected: expectedVersion,
+      actual: roleAssignmentFingerprint(oldIds),
+      code: SECURITY_ERROR_CODES.STALE_ROLE_ASSIGNMENT,
+      domain: 'role_assignment',
+      message: 'This user\'s roles were changed by another administrator after you '
+        + 'opened them. Your unsaved changes have been kept — reload to see the '
+        + 'current roles before saving again.',
+    });
+
+    let invalidation = null;
 
     if (changed) {
       // Replace all roles
-      await client.query('DELETE FROM user_roles WHERE user_id = $1', [req.params.id]);
+      await client.query('DELETE FROM user_roles WHERE user_id = $1', [targetUserId]);
       for (const roleId of role_ids) {
         await client.query(
           'INSERT INTO user_roles (user_id, role_id, assigned_by) VALUES ($1, $2, $3)',
-          [req.params.id, roleId, req.user.id]
+          [targetUserId, roleId, req.user.id]
         );
       }
 
-      await auditLog(client, req.user.id, 'assign_roles', 'user', parseInt(req.params.id),
-        { before: oldRoles.map(r => r.role_id), after: role_ids }, req);
+      /* Only when the assignment actually moved. An idempotent save that changes
+         nothing must not log the user out — the pre-Brick-7 code already guarded
+         the write with `changed`, and the invalidation follows the same rule so
+         "save with no edits" stays free of consequence. */
+      invalidation = await invalidateUserSessions(client, {
+        userId: targetUserId,
+        reason: INVALIDATION_REASON.ROLE_ASSIGNMENT_CHANGED,
+        actorId: req.user.id,
+      });
+
+      await writeSecurityAudit(client, {
+        actorId: req.user.id,
+        action: 'assign_roles',
+        targetType: 'user',
+        targetId: targetUserId,
+        category: 'access',
+        changes: {
+          before: oldIds,
+          after: newIds,
+          concurrency_checked: precondition.checked,
+        },
+        req,
+        invalidation,
+      });
     }
 
     await client.query('COMMIT');
 
-    logger.info('User roles updated', { userId: req.params.id, roles: role_ids });
-    
-    // Real-Time Sync Engine: Emit targeted event for cache invalidation (permission.changed already handles the targeted user)
-    dispatchEvent('role.assigned', { user_id: parseInt(req.params.id), roles: role_ids }, 'room:admin').catch(e => logger.error('dispatchEvent failed', { error: e.message, stack: e.stack }));
+    logger.info('User roles updated', { userId: targetUserId, roles: role_ids, changed });
 
-    res.json({ success: true });
+    // Real-Time Sync Engine: Emit targeted event for cache invalidation (permission.changed already handles the targeted user)
+    dispatchEvent('role.assigned', { user_id: targetUserId, roles: role_ids }, 'room:admin').catch(e => logger.error('dispatchEvent failed', { error: e.message, stack: e.stack }));
+
+    res.json({
+      success: true,
+      changed,
+      state_version: roleAssignmentFingerprint(newIds),
+      session_invalidation: {
+        enforced: Boolean(invalidation?.enforced),
+        refresh_tokens_revoked: invalidation?.refreshTokensRevoked ?? 0,
+        message: changed
+          ? describeInvalidation(invalidation)
+          : 'No role change was needed, so no session was invalidated.',
+      },
+      concurrency_checked: precondition.checked,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (sendSecurityError(res, err)) return;
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
