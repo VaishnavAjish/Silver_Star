@@ -5,6 +5,12 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { syncBillStatus, syncInvoiceStatus, autoAllocateJE, autoAllocateAllUnallocatedJEs } = require('../services/openDocumentService');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
+// Accounting Phase 0 — shared block-only containment rule (pure, role-agnostic).
+const {
+  CONFLICT,
+  journalDeleteBlockReason,
+  conflictBody,
+} = require('../services/accountingContainment');
 
 const router = express.Router();
 
@@ -531,24 +537,42 @@ router.delete('/:id', authenticate, authorize('admin', 'operator', 'finance'), a
   try {
     await client.query('BEGIN');
 
-    // 1. Fetch existing JE
+    // 1. Fetch and LOCK the existing JE inside the transaction
     const jeR = await client.query('SELECT * FROM journal_entries WHERE id = $1 FOR UPDATE', [req.params.id]);
-    if (!jeR.rows.length) throw new Error('Journal entry not found');
+    if (!jeR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Journal entry not found' });
+    }
     const je = jeR.rows[0];
 
-    // 2. Containment patch: Block deletion of posted or system-generated JEs
-    if (je.status === 'posted') {
-      throw new Error('Cannot delete a posted journal entry. Please reverse it instead.');
-    }
-    if (je.source_type) {
-      throw new Error('Cannot delete a system-generated journal entry.');
+    // 2. ACCOUNTING PHASE 0 — CONTAINMENT (block only; never reverse, never
+    //    recalculate, never repair). This is an INTEGRITY rule evaluated on the
+    //    RECORD, not a permission: it is applied after authorize() with no
+    //    role-based bypass, so a Super Admin is refused exactly like an
+    //    operator. Elevating privilege must not be able to corrupt the ledger.
+    //
+    //    The payments.je_id check closes the PAY-1179 defect shape: deleting a
+    //    payment's posting leaves the payment, its allocations, the bill status
+    //    and the vendor ledger alive with no general-ledger effect.
+    const { rows: [refRow] } = await client.query(
+      'SELECT COUNT(*)::int AS payment_refs FROM payments WHERE je_id = $1',
+      [je.id]
+    );
+    const blockReason = journalDeleteBlockReason({
+      je,
+      paymentRefCount: refRow ? refRow.payment_refs : 0,
+    });
+    if (blockReason) {
+      // Refuse BEFORE any destructive statement: no DELETE is issued and no
+      // account balance is touched. ROLLBACK leaves the transaction clean.
+      await client.query('ROLLBACK');
+      return res.status(CONFLICT).json(conflictBody(blockReason));
     }
 
-    // 3. Revert balances if posted
-    if (je.status === 'posted') {
-      const linesR = await client.query('SELECT account_id as "accountId", debit, credit FROM je_lines WHERE je_id = $1', [je.id]);
-      await updateBalances(client, linesR.rows, -1);
-    }
+    // 3. Only a DRAFT, non-system, payment-unreferenced entry reaches this
+    //    point. A posted entry can no longer arrive here, so the historic
+    //    "revert balances if posted" step is unreachable and has been removed
+    //    rather than left as dead code that implies posted deletion is legal.
 
     // 4. Delete allocations if any (though manual JEs usually don't have them, safe measure)
     await client.query('DELETE FROM je_allocations WHERE je_id = $1', [je.id]);

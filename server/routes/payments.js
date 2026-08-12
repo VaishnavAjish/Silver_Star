@@ -6,6 +6,12 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const FinancialMappingService = require('../services/FinancialMappingService');
 const { getVendorOpenItems } = require('../services/vendorOpenItemsService');
+// Accounting Phase 0 — shared block-only containment rule (pure, role-agnostic).
+const {
+  CONFLICT,
+  paymentAllocationRemovalBlockReason,
+  conflictBody,
+} = require('../services/accountingContainment');
 
 const router = express.Router();
 
@@ -421,6 +427,31 @@ router.post('/:id/reverse', authenticate, authorize('admin', 'finance'), async (
 
     if (payment.status === 'CANCELLED' || payment.status === 'REVERSED') {
       return fail(400, `Payment ${payment.doc_number} is already ${payment.status.toLowerCase()}`);
+    }
+
+    // ── ACCOUNTING PHASE 0 — CONTAINMENT (block only) ────────────────────────
+    // This handler DELETEs payment_allocations and rewrites bill status, but it
+    // cannot restore the general ledger: it calls journalEngine.reverseEntry,
+    // which does not exist, so it silently falls through to a flag-only UPDATE
+    // that creates no compensating entry and reverts no account balance.
+    // Running it would destroy allocation evidence while leaving AP overstated.
+    //
+    // Until a working reversal engine exists (Phase 1) every final /
+    // journal-backed / actively-allocated payment is refused HERE — before the
+    // first destructive statement. Nothing is reversed, no bill is
+    // recalculated, no allocation is removed. Integrity rule on the RECORD:
+    // no role, including Super Admin, bypasses it.
+    const { rows: [allocCountRow] } = await client.query(
+      'SELECT COUNT(*)::int AS alloc_count FROM payment_allocations WHERE payment_id = $1',
+      [paymentId]
+    );
+    const containmentReason = paymentAllocationRemovalBlockReason({
+      payment,
+      allocationCount: allocCountRow ? allocCountRow.alloc_count : 0,
+    });
+    if (containmentReason) {
+      await client.query('ROLLBACK');
+      return res.status(CONFLICT).json(conflictBody(containmentReason));
     }
 
     const { reason } = req.body;

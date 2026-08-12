@@ -8,6 +8,34 @@ const {
 } = require('../services/openDocumentService');
 const { logger } = require('../middleware/logger');
 const { dispatchEvent } = require('../services/eventDispatcher');
+// Accounting Phase 0 — shared block-only containment rule (pure, role-agnostic).
+const {
+  CONFLICT,
+  jeAllocationDeleteBlockReason,
+  conflictBody,
+} = require('../services/accountingContainment');
+
+/**
+ * Accounting Phase 0 helper — resolve and LOCK the parent journal entry of an
+ * allocation, then count the payments it backs. Read-only; the caller decides.
+ *
+ * Returns { je, paymentRefCount }. A missing JE yields je=null, which the
+ * containment rule treats as fail-closed (an allocation whose parent cannot be
+ * verified is refused, never silently deleted).
+ */
+async function loadParentJournal(client, jeId) {
+  const { rows } = await client.query(
+    'SELECT id, je_number, status, source_type FROM journal_entries WHERE id = $1 FOR UPDATE',
+    [jeId]
+  );
+  const je = rows[0] || null;
+  if (!je) return { je: null, paymentRefCount: 0 };
+  const { rows: refRows } = await client.query(
+    'SELECT COUNT(*)::int AS payment_refs FROM payments WHERE je_id = $1',
+    [jeId]
+  );
+  return { je, paymentRefCount: refRows[0] ? refRows[0].payment_refs : 0 };
+}
 
 // ─── GET / ── fetch allocations for a JE or entity ───────────────────────────
 // ?je_id=X                               — allocations for one JE
@@ -165,6 +193,19 @@ router.delete('/by-je/:je_id', authenticate, authorize('admin'), async (req, res
   try {
     await client.query('BEGIN');
 
+    // ACCOUNTING PHASE 0 — CONTAINMENT. Resolve and LOCK the parent JE first.
+    // Removing the allocations of a posted / system-generated / payment-backed
+    // entry re-opens the settled bill while the ledger posting stays in place —
+    // the same split-brain the JE delete guard prevents, reached through a
+    // different endpoint. Integrity rule on the RECORD: no role bypasses it,
+    // and a direct API call is refused exactly like a UI action.
+    const parent = await loadParentJournal(client, jeId);
+    const blockReason = jeAllocationDeleteBlockReason({ ...parent, jeId });
+    if (blockReason) {
+      await client.query('ROLLBACK');
+      return res.status(CONFLICT).json(conflictBody(blockReason));
+    }
+
     // Capture affected documents before deletion
     const affected = await client.query(
       `SELECT DISTINCT target_type, target_id FROM je_allocations WHERE je_id = $1`,
@@ -201,11 +242,24 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     await client.query('BEGIN');
 
     const existing = await client.query(
-      'SELECT * FROM je_allocations WHERE id = $1',
+      'SELECT * FROM je_allocations WHERE id = $1 FOR UPDATE',
       [allocId]
     );
-    if (!existing.rows.length) return res.status(404).json({ error: 'Allocation not found' });
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Allocation not found' });
+    }
     const alloc = existing.rows[0];
+
+    // ACCOUNTING PHASE 0 — CONTAINMENT. Resolve and LOCK the parent JE of THIS
+    // allocation before any destructive statement. Fail-closed: an allocation
+    // whose parent JE cannot be resolved is refused, never silently deleted.
+    const parent = await loadParentJournal(client, alloc.je_id);
+    const blockReason = jeAllocationDeleteBlockReason({ ...parent, jeId: alloc.je_id });
+    if (blockReason) {
+      await client.query('ROLLBACK');
+      return res.status(CONFLICT).json(conflictBody(blockReason));
+    }
 
     await client.query('DELETE FROM je_allocations WHERE id = $1', [allocId]);
 
