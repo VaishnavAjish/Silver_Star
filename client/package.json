@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest run --config vitest.config.js",
-    "build": "vite build && node -e \"const fs=require('fs'); ['../server/public', '/var/www/silverstar'].forEach(d => { try { if(fs.existsSync(d)){ fs.rmSync(d, {recursive: true, force: true}); fs.cpSync('dist', d, {recursive: true}); } } catch(e){} });\"",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
