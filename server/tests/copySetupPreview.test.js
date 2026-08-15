@@ -22,8 +22,17 @@
 
 const path = require('path');
 const fs = require('fs');
-const test = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 
 const ACTOR = { id: 1, role: 'admin' };
 const SOURCE_ID = 2;

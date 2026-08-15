@@ -18,8 +18,17 @@
  * Run: node --test server/tests/brick7SessionSecurity.test.js
  */
 
-const test = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 
 /* config/security.js calls process.exit(1) when these are unset. Test-only
    values, never a real secret, set before the module is first required. */

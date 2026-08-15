@@ -17,9 +17,18 @@
 
 'use strict';
 
-const test   = require('node:test');
-const assert = require('node:assert');
-const Module = require('node:module');
+const { test, after } = require('node:test');
+const assert          = require('node:assert');
+const Module          = require('node:module');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 
 const {
   ACCOUNTING_TRANSACTION_POSTED,

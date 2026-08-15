@@ -24,10 +24,19 @@
  * Run: node --test server/tests/brick7Migration.test.js
  */
 
-const test = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
 const UP_FILE = path.join(MIGRATIONS, 'phase87-session-security-hardening.sql');

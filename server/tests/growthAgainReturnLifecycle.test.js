@@ -2,10 +2,19 @@
 // workspace), atomic machine release guards, and the SSD-100 guarded
 // reconciliation contracts. Pure truth tables + static source contracts
 // (no DB reachable from dev).
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 const { resolveIssueGrowthContext } = require('../services/growthIssueContext');
 const { assessMachineRelease } = require('../services/machineReleaseGuard');
 

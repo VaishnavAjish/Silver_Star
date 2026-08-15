@@ -1,10 +1,19 @@
 // Completion-engine guard — the Return Engine is the ONLY completion path
 // for RETURN_BASED (and all Growth-group) processes. Pure-predicate truth
 // table plus static source contracts on the legacy endpoint.
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 const {
   requiresReturnEngineCompletion,
   RETURN_ENGINE_REQUIRED_MESSAGE,

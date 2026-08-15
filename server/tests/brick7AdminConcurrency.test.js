@@ -21,8 +21,17 @@
  * Run: node --test server/tests/brick7AdminConcurrency.test.js
  */
 
-const test = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+
+after(async () => {
+  try {
+    const poolPath = require.resolve('../db/pool');
+    if (require.cache[poolPath]) {
+      await require(poolPath).end();
+    }
+  } catch (e) {}
+});
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'brick7-test-access-secret';
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'brick7-test-refresh-secret';
