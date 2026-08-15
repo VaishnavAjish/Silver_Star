@@ -150,6 +150,7 @@ module.exports = {
   primaryPool,
   // Backward-compatible alias: some modules call pool.connect() directly
   connect: primaryPool.connect.bind(primaryPool),
+  end: shutdown,
   shutdown,
   rlsContext,
 };
