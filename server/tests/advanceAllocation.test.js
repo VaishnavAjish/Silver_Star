@@ -1,15 +1,6 @@
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert');
 
-after(async () => {
-  try {
-    const poolPath = require.resolve('../db/pool');
-    if (require.cache[poolPath]) {
-      await require(poolPath).end();
-    }
-  } catch (e) {}
-});
-
 const {
   getBillOutstanding,
   getVendorOpenBills,
@@ -24,6 +15,15 @@ const {
 } = require('../services/vendorAdvanceService');
 
 describe('Advance Payment Allocation Engine Tests', () => {
+
+  after(async () => {
+    try {
+      const poolPath = require.resolve('../db/pool');
+      if (require.cache[poolPath]) {
+        await require(poolPath).end();
+      }
+    } catch (e) {}
+  });
 
   test('Phase 1: getBillOutstanding includes payment_allocations, je_allocations, and APPLIED vendor_advance_applications', async () => {
     // Mock db client

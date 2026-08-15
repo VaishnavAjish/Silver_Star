@@ -2,16 +2,15 @@ const { test, describe, after } = require('node:test');
 const assert = require('node:assert');
 const { reverseGrowthReturn } = require('../services/growthReturnReversal');
 
-after(async () => {
-  try {
-    const poolPath = require.resolve('../db/pool');
-    if (require.cache[poolPath]) {
-      await require(poolPath).end();
-    }
-  } catch (e) {}
-});
-
 describe('Growth Return Reversal Constraints and Core Logic', () => {
+  after(async () => {
+    try {
+      const poolPath = require.resolve('../db/pool');
+      if (require.cache[poolPath]) {
+        await require(poolPath).end();
+      }
+    } catch (e) {}
+  });
   const mockClient = (mockRows = {}) => {
     const executedQueries = [];
     return {
