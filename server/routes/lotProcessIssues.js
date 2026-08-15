@@ -539,7 +539,10 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           : null;
         if (transformRule) {
           const requiredCat = transformRule.input_item_category || 'growth_diamond';
-          if (lot.category !== requiredCat)
+          const allowedCats = requiredCat.split(',').map(c => c.trim().toLowerCase());
+          const isAllowed = allowedCats.includes(lot.category.toLowerCase()) ||
+            (allowedCats.some(c => isGrowthCarrierCategory(c)) && isGrowthCarrierCategory(lot.category));
+          if (!isAllowed)
             throw new Error(
               `Process '${processRules.process_name}' transforms ${requiredCat.replace(/_/g, ' ')} ` +
               `lots in place — lot ${lot.lot_number} is '${lot.category}'.`

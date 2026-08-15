@@ -566,8 +566,8 @@ function buildReturnPlan({
       return invalid('Configuration invalid: an in-place transformation must target the rough category.');
     if (lines.length !== 1)
       return invalid('An in-place transformation must be a single usable line returning the full quantity — mixed or multiple lines are not supported.');
-    if (processLot.category !== 'growth_diamond')
-      return invalid(`In-place transformation requires a Growth Diamond input — this lot is '${processLot.category}'.`);
+    if (!isGrowthCarrierCategory(processLot.category))
+      return invalid(`In-place transformation requires a Growth Diamond or Growth Run input — this lot is '${processLot.category}'.`);
     if (remainingAfter > EPS || Math.abs(returnTotal - currentRemaining) > EPS)
       return invalid('An in-place transformation must return the FULL remaining quantity — partial transformation is not supported.');
     const srcQty = processLot.unit === 'CT'
