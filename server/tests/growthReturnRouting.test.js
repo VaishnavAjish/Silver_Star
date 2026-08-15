@@ -539,13 +539,14 @@ test('seed-remove #7: Seed-family quantity mismatch is INVALID', () => {
   assert.match(p.error, /seed outputs total/);
 });
 
-test('seed-remove #8 (Example F): Seed output beyond reference tolerance is INVALID', () => {
+test('seed-remove #8 (Example F): Seed output beyond reference tolerance warns but is valid', () => {
   const p = buildReturnPlan({ ...base24, lines: [
     { type: 'reprocess', qty: 24, weight: 24.00 }, // 24.00 > 23.52 + EPS
     { type: 'usable',    qty: 24, weight: 298.56 },
   ] });
-  assert.equal(p.valid, false);
-  assert.match(p.error, /Seed reference weight/);
+  assert.equal(p.valid, true);
+  assert.equal(p.warnings.length, 1);
+  assert.match(p.warnings[0], /exceeds the Seed reference weight/);
 });
 
 test('seed-remove #9: Seed loss is computed independently of Growth weight', () => {
