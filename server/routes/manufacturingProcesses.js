@@ -573,7 +573,7 @@ router.get('/lookup/awaiting-output', authenticate, async (req, res) => {
              u.full_name AS operator_name,
              ${RUNTIME_SQL} AS runtime_hours
       FROM machine_processes mp
-      JOIN machines m ON m.id = mp.machine_id
+      LEFT JOIN machines m ON m.id = mp.machine_id
       LEFT JOIN users u ON u.id = mp.operator_id
       WHERE mp.status = 'running'
         AND m.status::text = 'awaiting_output'
