@@ -9,7 +9,7 @@
  * FOR UPDATE row images — an earlier preflight response is never trusted.
  */
 
-const { resolveCarrierCategory } = require('./growthCarrier');
+const { resolveCarrierCategory, isGrowthCarrierCategory } = require('./growthCarrier');
 
 const EPS = 0.0001;
 

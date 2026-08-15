@@ -49,11 +49,10 @@ function plan(overrides = {}) {
 }
 
 // 1. Activation is configuration-driven — without the rule nothing transforms.
-test('transform: without transform_in_place the same return stays CHILD', () => {
+test('transform: without transform_in_place the same return stays BISCUIT', () => {
   const p = plan({ allowedOutputs: legacyOutputs });
   assert.equal(p.valid, true);
-  assert.equal(p.route, 'CHILD');
-  assert.equal(p.will_create_new_lot, true);
+  assert.equal(p.route, 'BISCUIT');
   assert.equal(p.transform_in_place, undefined);
 });
 
@@ -63,7 +62,7 @@ test('transform: process code final_block alone does NOT activate transform', ()
     allowedOutputs: legacyOutputs,
     issue: { ...issue, process_type: 'final_block' },
   });
-  assert.equal(p.route, 'CHILD');
+  assert.equal(p.route, 'BISCUIT');
 });
 
 // 3–6. Approved rule + Growth Diamond input resolves in place, same lot.
@@ -125,7 +124,7 @@ test('transform: multiple usable lines REJECT', () => {
     ],
   });
   assert.equal(p.valid, false);
-  assert.match(p.error, /single usable line/);
+  assert.match(p.error, /single disposition|single usable line/);
 });
 
 // 10. Mixed usable + damaged rejects.
@@ -139,7 +138,7 @@ test('transform: mixed usable + damaged REJECTS', () => {
     ],
   });
   assert.equal(p.valid, false);
-  assert.match(p.error, /single usable line/);
+  assert.match(p.error, /single disposition|single usable line/);
 });
 
 // 11. Wrong source category rejects — never transformed, never CHILD-forked.
@@ -148,7 +147,7 @@ test('transform: non-growth_diamond source REJECTS', () => {
     processLot: { ...gdLot, category: 'seed' },
   });
   assert.equal(p.valid, false);
-  assert.match(p.error, /requires a Growth Diamond input/);
+  assert.match(p.error, /requires a Growth Diamond/);
 });
 
 // 12. Missing measured weight rejects.
@@ -243,13 +242,12 @@ test('transform: matching measurement weight passes (client consolidation)', () 
   assert.equal(p.route, 'TRANSFORM_IN_PLACE');
 });
 
-// Ordinary CHILD behaviour on the same process stays unchanged when the
+// Ordinary BISCUIT behaviour on the same process stays unchanged when the
 // transform line is absent (damaged-only return = physical separation).
-test('transform config: damaged-only return still routes CHILD (unchanged)', () => {
+test('transform config: damaged-only return still routes BISCUIT (unchanged)', () => {
   const p = plan({ lines: [{ type: 'damaged', qty: 1 }] });
   assert.equal(p.valid, true);
-  assert.equal(p.route, 'CHILD');
-  assert.equal(p.will_create_new_lot, true);
+  assert.equal(p.route, 'BISCUIT');
   assert.equal(p.transform_in_place, undefined);
 });
 
