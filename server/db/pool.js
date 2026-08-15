@@ -9,7 +9,7 @@ const DB_CONFIG = {
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   max: parseInt(process.env.DB_POOL_MAX) || 100,
-  min: parseInt(process.env.DB_POOL_MIN) || 5,
+  min: parseInt(process.env.DB_POOL_MIN) || (process.env.NODE_ENV === 'test' ? 0 : 5),
   idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000,
   connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT) || 10000,
   statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT) || 25000,
