@@ -1,13 +1,7 @@
+const { describe, it } = require('node:test');
 const { expect } = require('chai');
 
-describe('Stranded Growth Machine Recovery - Phase 65 & 66', function() {
-  
-  before(function() {
-    // Note: Environment-gated PostgreSQL contract tests are skipped locally 
-    // based on owner's accepted decision for this release.
-    // They rely on specific PR-01 return structures not present in the local CI DB yet.
-    this.skip();
-  });
+describe('Stranded Growth Machine Recovery - Phase 65 & 66', { skip: 'Skipped locally - relies on PR-01 return structures' }, function() {
 
   describe('Phase 65 - Completion Mode Update', () => {
     it('Requires exactly one pr-01 row and updates completion mode to RETURN_BASED', () => {

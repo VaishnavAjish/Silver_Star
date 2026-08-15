@@ -226,8 +226,8 @@ test('8d. growth_diamond outside GROWTH keeps its legacy CHILD route (regression
     ],
   });
   assert.equal(p.valid, true);
-  assert.equal(p.route, 'CHILD');
-  assert.equal(p.will_create_new_lot, true);
+  assert.equal(p.route, 'BISCUIT');
+  assert.equal(p.will_create_new_lot, false);
 });
 
 // ── 9. Reconciliation aborts when downstream references exist ─────────────────

@@ -46,6 +46,7 @@ const svc = require('../services/seedStockService');
 const { effectiveManufacturingState } = require('../services/manufacturingState');
 
 async function connectOnce() {
+  if (!process.env.DB_HOST && !process.env.PGHOST) return false;
   if (connectPromise) return connectPromise;
   connectPromise = (async () => {
     try {

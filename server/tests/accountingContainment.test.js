@@ -24,11 +24,10 @@ const Module          = require('node:module');
 after(async () => {
   try {
     const poolPath = require.resolve('../db/pool');
-    if (require.cache[poolPath]) {
-      const p = require(poolPath);
-      if (typeof p.shutdown === 'function') await p.shutdown();
-      else if (p.primaryPool && typeof p.primaryPool.end === 'function') await p.primaryPool.end();
-    }
+    delete require.cache[poolPath];
+    const p = require(poolPath);
+    if (typeof p.shutdown === 'function') await p.shutdown();
+    else if (p.primaryPool && typeof p.primaryPool.end === 'function') await p.primaryPool.end();
   } catch (e) {}
 });
 

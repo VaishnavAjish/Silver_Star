@@ -40,6 +40,7 @@ require.cache[poolPath] = {
 const svc = require('../services/inventoryCorrectionService');
 
 async function connectOnce() {
+  if (!process.env.DB_HOST && !process.env.PGHOST) return false;
   if (connectPromise) return connectPromise;
   connectPromise = (async () => {
     try {

@@ -6,7 +6,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node test_db.js",
-    "test:ci": "export NODE_ENV=test; for f in tests/*.test.js; do case \"$f\" in *.live.test.js) continue ;; esac; node --test \"$f\" || exit 1; done",
+    "test:ci": "node run_tests.js",
     "debug": "node test_api.js",
     "db:indexes": "psql -h localhost -p 5433 -U postgres -d silverstar_grow -f migrations/perf_indexes.sql",
     "db:partition": "psql -h localhost -p 5433 -U postgres -d silverstar_grow -f migrations/enterprise_partitioning.sql",

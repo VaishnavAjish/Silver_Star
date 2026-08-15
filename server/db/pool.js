@@ -133,12 +133,24 @@ async function healthCheck() {
   }
 }
 
+const activePools = new Set([primaryPool]);
+
 // ── Graceful shutdown ─────────────────────────────────────────────────────
 async function shutdown() {
   logger.info('Shutting down database pools...');
-  await primaryPool.end();
-  for (const rp of replicaPools) await rp.end();
+  for (const p of activePools) {
+    try { await p.end(); } catch (e) {}
+  }
+  for (const rp of replicaPools) {
+    try { await rp.end(); } catch (e) {}
+  }
   logger.info('Database pools closed');
+}
+
+if (process.env.NODE_ENV === 'test') {
+  process.on('beforeExit', () => {
+    shutdown().catch(() => {});
+  });
 }
 
 module.exports = {

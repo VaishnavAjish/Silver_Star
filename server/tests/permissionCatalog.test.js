@@ -448,6 +448,10 @@ test('20: the catalog endpoint is admin-protected and exposes no write verbs', a
 
 /* ── Live database reconciliation (auto-skips when unreachable) ────────────── */
 test('live: every role_permissions row maps to a catalog entry', async (t) => {
+  if (!process.env.DB_HOST && !process.env.PGHOST) {
+    t.skip('database not configured — static tests cover catalog');
+    return;
+  }
   const { Client } = require('pg');
   const client = new Client({
     host:     process.env.DB_HOST || 'localhost',

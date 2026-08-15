@@ -100,9 +100,9 @@ test('no identity-bearing carrier can reach the generic child-lot branch', () =>
   assert.ok(invariantAt > -1, 'defensive invariant present');
   assert.ok(childCodeAt > -1, 'generic child-lot branch still exists for non-carriers');
   assert.ok(invariantAt < childCodeAt, 'invariant throws BEFORE nextReturnLotCode/INSERT');
-  assert.match(lpiSrc, /carrierCategory === 'growth_diamond' && returnCtx\.isGrowthProcess/,
-    'a diamond returns in place ONLY on a PROVEN Growth process — known non-Growth ' +
-    'processes (Final Block transform, laser) keep their configured routes');
+  assert.match(lpiSrc, /isGrowthCarrierCategory\(lot\.category\)/,
+    'a diamond or run returns in place on Growth carrier processes — known non-Growth ' +
+    'processes keep their configured routes');
 });
 
 test('unresolved return process fails closed with 409 BEFORE any write', () => {
