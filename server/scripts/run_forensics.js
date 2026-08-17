@@ -18,7 +18,7 @@ async function runForensics() {
     },
     {
       title: '=== PAYMENT ALLOCATIONS ===',
-      sql: `SELECT pa.id, pa.payment_id, p.doc_number, pa.purchase_note_id, pn.note_number, pa.amount 
+      sql: `SELECT pa.id, pa.payment_id, p.doc_number, pa.purchase_note_id, pn.doc_number as note_number, pa.amount 
             FROM payment_allocations pa
             JOIN payments p ON pa.payment_id = p.id
             LEFT JOIN purchase_notes pn ON pa.purchase_note_id = pn.id
