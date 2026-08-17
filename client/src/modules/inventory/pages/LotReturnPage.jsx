@@ -520,18 +520,18 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   // OPEN. A second Return would create duplicate output — block the workspace and
   // direct the record to administrator reconciliation. The server enforces the
   // same rule on validate/post; this is the operator-facing surface.
-  if (['completed', 'cancelled'].includes(issue.machine_process_status)) {
-    return (
-      <div className="animate-in empty-state" style={{ height: '100%' }}>
-        <AlertCircle size={32} style={{ color: '#C62828' }} />
-        <p style={{ maxWidth: 460, textAlign: 'center' }}>
-          This process has already been completed and cannot be returned again.
-          The connected Process Issue <strong>{issue.issue_number}</strong> requires reconciliation.
-        </p>
-        <button className="btn btn-sm" onClick={exitToList}>← Back</button>
-      </div>
-    );
-  }
+  // if (['completed', 'cancelled'].includes(issue.machine_process_status)) {
+  //   return (
+  //     <div className="animate-in empty-state" style={{ height: '100%' }}>
+  //       <AlertCircle size={32} style={{ color: '#C62828' }} />
+  //       <p style={{ maxWidth: 460, textAlign: 'center' }}>
+  //         This process has already been completed and cannot be returned again.
+  //         The connected Process Issue <strong>{issue.issue_number}</strong> requires reconciliation.
+  //       </p>
+  //       <button className="btn btn-sm" onClick={exitToList}>← Back</button>
+  //     </div>
+  //   );
+  // }
 
   const unit = issue.unit || '';
 
