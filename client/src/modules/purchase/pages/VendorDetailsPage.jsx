@@ -610,7 +610,7 @@ export default function VendorDetailsPage() {
                                 <td style={{
                                   textAlign: 'right', fontFamily: 'var(--mono)',
                                   color: t.type === 'Payment'
-                                    ? '#2E7D32'
+                                    ? (['REVERSED', 'CANCELLED'].includes(t.status) ? 'var(--g400)' : '#2E7D32')
                                     : t.type === 'TDS Withheld'
                                       ? (t.status === 'REVERSED' ? 'var(--g400)' : '#7B1FA2')
                                       : t.type === 'JE Adjustment'
@@ -618,7 +618,7 @@ export default function VendorDetailsPage() {
                                             ? 'var(--g400)'
                                             : parseFloat(t.net_effect) >= 0 ? '#7B1FA2' : '#2E7D32')
                                         : 'inherit',
-                                  textDecoration: ((t.type === 'JE Adjustment' && isReversedJe(t)) || (t.type === 'TDS Withheld' && t.status === 'REVERSED')) ? 'line-through' : 'none',
+                                  textDecoration: ((t.type === 'JE Adjustment' && isReversedJe(t)) || (t.type === 'TDS Withheld' && t.status === 'REVERSED') || (t.type === 'Payment' && ['REVERSED', 'CANCELLED'].includes(t.status))) ? 'line-through' : 'none',
                                 }}>
                                   {t.type === 'Payment'
                                     ? <>-{fmt(t.amount)}</>
@@ -736,7 +736,7 @@ export default function VendorDetailsPage() {
                                     </div>
                                   ) : t.type === 'Payment' ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                      {canEdit() && (
+                                      {canEdit() && !['REVERSED', 'CANCELLED'].includes(t.status) && (
                                         <button
                                           className="btn btn-sm"
                                           style={{
