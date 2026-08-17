@@ -11,7 +11,7 @@ async function runForensics() {
   const queries = [
     {
       title: '=== CORRUPT PAYMENTS (PAY-1179, PAY-1240) ===',
-      sql: `SELECT p.id, p.doc_number, p.vendor_id, v.name as vendor_name, p.amount, p.status, p.je_id, p.payment_date 
+      sql: `SELECT p.id, p.doc_number, p.vendor_id, v.name as vendor_name, p.amount, p.status, p.je_id, p.date as payment_date 
             FROM payments p
             LEFT JOIN vendors v ON p.vendor_id = v.id
             WHERE p.doc_number IN ('PAY-1179', 'PAY-1240');`
