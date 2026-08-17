@@ -75,7 +75,6 @@ async function runForensics() {
                        (
                          COALESCE((SELECT SUM(grand_total) FROM purchase_notes WHERE vendor_id = v.vendor_id AND status != 'cancelled'), 0)
                          - COALESCE((SELECT SUM(amount) FROM payments WHERE vendor_id = v.vendor_id AND status IN ('COMPLETED', 'PARTIAL')), 0)
-                         - COALESCE((SELECT SUM(amount) FROM debit_notes WHERE vendor_id = v.vendor_id AND status != 'cancelled'), 0)
                        ) as expected_balance
                 FROM vendor_ids v
             )
