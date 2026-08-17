@@ -21,7 +21,7 @@ const {
 } = require('../services/growthProcessResolver');
 const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
-const { isMachineProcessTerminal, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
+const { isMachineProcessTerminal, isReconciliationCandidate, STALE_COMPLETION_MESSAGE } = require('../services/staleReturnGuard');
 // Growth-Again display context + atomic machine release (SSD-100 defect class):
 // pure services, unit-tested without a DB.
 const { resolveIssueGrowthContext } = require('../services/growthIssueContext');
@@ -1262,12 +1262,12 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     // (e.g. via the retired Control Tower Complete Process path) yet this issue
     // is still OPEN. Returning again would create duplicate physical output.
     // Surface it as a non-returnable reconciliation state, not a valid plan.
-    // if (isMachineProcessTerminal(issue.machine_process_status)) {
-    //   return res.json({
-    //     valid: false, route: 'REJECT', reconciliation_required: true,
-    //     error: STALE_COMPLETION_MESSAGE,
-    //   });
-    // }
+    if (isMachineProcessTerminal(issue.machine_process_status)) {
+      return res.json({
+        valid: false, route: 'REJECT', reconciliation_required: true,
+        error: STALE_COMPLETION_MESSAGE,
+      });
+    }
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
     const targetLotId = issue.process_lot_id || issue.source_lot_id;
@@ -1491,9 +1491,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // Tower Complete Process path could complete the process + release the
     // machine without closing this issue; posting a Return now would create a
     // duplicate output. Such issues must be reconciled, never returned again.
-    // if (isMachineProcessTerminal(issue.machine_process_status)) {
-    //   throw new Error(STALE_COMPLETION_MESSAGE);
-    // }
+    if (isMachineProcessTerminal(issue.machine_process_status)) {
+      throw new Error(STALE_COMPLETION_MESSAGE);
+    }
 
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
@@ -2593,5 +2593,64 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
   } finally { client.release(); }
 });
 
-module.exports = router;
+// ── RECONCILIATION ────────────────────────────────────────────────────────────
+// POST /:id/reconcile — explicitly close a ghost issue stranded by legacy
+// Control Tower completions. A physical return is blocked.
+router.post('/:id/reconcile', authenticate, authorize('admin', 'operator'), async (req, res) => {
+  const issueId = parseInt(req.params.id);
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
 
+    const { rows: issueRows } = await client.query(
+      `SELECT i.id, i.issue_number, i.status, i.remaining_in_process, i.issued_qty,
+              mp.status AS machine_process_status
+       FROM lot_process_issues i
+       LEFT JOIN machine_processes mp ON i.machine_process_id = mp.id
+       WHERE i.id = $1 FOR UPDATE OF i`,
+      [issueId]
+    );
+    if (!issueRows.length) throw new Error('Issue not found');
+    const issue = issueRows[0];
+
+    const candidateParams = {
+      issueStatus: issue.status,
+      remaining: issue.remaining_in_process,
+      issuedQty: issue.issued_qty,
+      machineProcessStatus: issue.machine_process_status
+    };
+
+    if (!isReconciliationCandidate(candidateParams)) {
+      throw new Error('This issue does not meet the criteria for reconciliation. It is either already closed or the machine process is still active.');
+    }
+
+    const { remarks } = req.body || {};
+    const finalRemarks = remarks 
+      ? `Reconciled stranded issue: ${remarks}` 
+      : 'Reconciled stranded issue due to prior process completion.';
+
+    await client.query(
+      `UPDATE lot_process_issues
+       SET status = 'RECONCILED', remaining_in_process = 0, updated_at = NOW(), remarks = COALESCE(remarks, '') || CASE WHEN remarks IS NOT NULL THEN ' | ' ELSE '' END || $1
+       WHERE id = $2`,
+      [finalRemarks, issueId]
+    );
+
+    // Provide a dummy entity ID (0) since there's no actual physical return row created
+    await logOp(client, issueId, 'process_issue_reconciled', 'lot_process_issue', issueId,
+      0, 'RECONCILED',
+      `Force-reconciled stranded Process Issue #${issue.issue_number}. Original remaining: ${issue.remaining_in_process ?? issue.issued_qty}`,
+      req.user.id);
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Issue reconciled successfully.' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Reconciliation Error:', error);
+    res.status(400).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+module.exports = router;
