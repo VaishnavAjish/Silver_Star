@@ -78,61 +78,49 @@ async function runRename() {
       totalUpdates++;
     }
 
-    // 4. Update invoice_lines
-    const invoiceLineRes = await client.query(
-      `SELECT id, lot_number, lot_name FROM invoice_lines WHERE lot_number LIKE '%' || $1 || '%' OR lot_name LIKE '%' || $1 || '%'`,
-      [OLD_NAME]
-    );
-    for (const il of invoiceLineRes.rows) {
-      let ilNum = il.lot_number ? il.lot_number.replace(OLD_NAME, NEW_NAME) : il.lot_number;
-      let ilName = il.lot_name ? il.lot_name.replace(OLD_NAME, NEW_NAME) : il.lot_name;
-      console.log(`[PROPOSED INVOICE LINE UPDATE] ID ${il.id}:`);
-      console.log(`  - lot_number: '${il.lot_number}' -> '${ilNum}'`);
-      console.log(`  - lot_name:   '${il.lot_name}' -> '${ilName}'`);
-      if (!DRY_RUN) {
-        await client.query(
-          `UPDATE invoice_lines SET lot_number = $1, lot_name = $2 WHERE id = $3`,
-          [ilNum, ilName, il.id]
-        );
+    // 4. Update invoice_lines (defensive)
+    try {
+      const invoiceLineRes = await client.query(
+        `SELECT id, lot_number, lot_name FROM invoice_lines WHERE lot_number LIKE '%' || $1 || '%' OR lot_name LIKE '%' || $1 || '%'`,
+        [OLD_NAME]
+      );
+      for (const il of invoiceLineRes.rows) {
+        let ilNum = il.lot_number ? il.lot_number.replace(OLD_NAME, NEW_NAME) : il.lot_number;
+        let ilName = il.lot_name ? il.lot_name.replace(OLD_NAME, NEW_NAME) : il.lot_name;
+        console.log(`[PROPOSED INVOICE LINE UPDATE] ID ${il.id}:`);
+        console.log(`  - lot_number: '${il.lot_number}' -> '${ilNum}'`);
+        console.log(`  - lot_name:   '${il.lot_name}' -> '${ilName}'`);
+        if (!DRY_RUN) {
+          await client.query(
+            `UPDATE invoice_lines SET lot_number = $1, lot_name = $2 WHERE id = $3`,
+            [ilNum, ilName, il.id]
+          );
+        }
+        totalUpdates++;
       }
-      totalUpdates++;
+    } catch (e) {
+      // Table or column optional
     }
 
-    // 5. Update rough_growth
-    const roughRes = await client.query(
-      `SELECT id, seed_lot_code, growth_lot_code FROM rough_growth WHERE seed_lot_code LIKE '%' || $1 || '%' OR growth_lot_code LIKE '%' || $1 || '%'`,
-      [OLD_NAME]
-    );
-    for (const rg of roughRes.rows) {
-      let seedCode = rg.seed_lot_code ? rg.seed_lot_code.replace(OLD_NAME, NEW_NAME) : rg.seed_lot_code;
-      let growthCode = rg.growth_lot_code ? rg.growth_lot_code.replace(OLD_NAME, NEW_NAME) : rg.growth_lot_code;
-      console.log(`[PROPOSED ROUGH GROWTH UPDATE] ID ${rg.id}:`);
-      console.log(`  - seed_lot_code:   '${rg.seed_lot_code}' -> '${seedCode}'`);
-      console.log(`  - growth_lot_code: '${rg.growth_lot_code}' -> '${growthCode}'`);
-      if (!DRY_RUN) {
-        await client.query(
-          `UPDATE rough_growth SET seed_lot_code = $1, growth_lot_code = $2 WHERE id = $3`,
-          [seedCode, growthCode, rg.id]
-        );
+    // 5. Update import_row_lots (defensive)
+    try {
+      const importRes = await client.query(
+        `SELECT id, lot_name FROM import_row_lots WHERE lot_name LIKE '%' || $1 || '%'`,
+        [OLD_NAME]
+      );
+      for (const imp of importRes.rows) {
+        let impName = imp.lot_name ? imp.lot_name.replace(OLD_NAME, NEW_NAME) : imp.lot_name;
+        console.log(`[PROPOSED IMPORT ROW LOT UPDATE] ID ${imp.id}: '${imp.lot_name}' -> '${impName}'`);
+        if (!DRY_RUN) {
+          await client.query(
+            `UPDATE import_row_lots SET lot_name = $1 WHERE id = $2`,
+            [impName, imp.id]
+          );
+        }
+        totalUpdates++;
       }
-      totalUpdates++;
-    }
-
-    // 6. Update import_row_lots
-    const importRes = await client.query(
-      `SELECT id, lot_name FROM import_row_lots WHERE lot_name LIKE '%' || $1 || '%'`,
-      [OLD_NAME]
-    );
-    for (const imp of importRes.rows) {
-      let impName = imp.lot_name ? imp.lot_name.replace(OLD_NAME, NEW_NAME) : imp.lot_name;
-      console.log(`[PROPOSED IMPORT ROW LOT UPDATE] ID ${imp.id}: '${imp.lot_name}' -> '${impName}'`);
-      if (!DRY_RUN) {
-        await client.query(
-          `UPDATE import_row_lots SET lot_name = $1 WHERE id = $2`,
-          [impName, imp.id]
-        );
-      }
-      totalUpdates++;
+    } catch (e) {
+      // Table or column optional
     }
 
     if (DRY_RUN) {
