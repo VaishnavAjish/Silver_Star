@@ -44,6 +44,7 @@ router.get('/', authenticate, async (req, res) => {
             lot_number || COALESCE(' — ' || lot_name, '')     AS label,
             status || COALESCE(' · ' || unit, '')             AS subtitle,
             '/inventory'                                       AS url,
+            (CASE WHEN lot_number ILIKE '%' || $1 || '%' OR lot_name ILIKE '%' || $1 || '%' THEN 1.0 ELSE 0.0 END) +
             GREATEST(
               similarity($1, lot_number),
               similarity($1, COALESCE(lot_name, ''))
@@ -52,8 +53,8 @@ router.get('/', authenticate, async (req, res) => {
           WHERE (
                   lot_number ILIKE '%' || $1 || '%'
                OR lot_name   ILIKE '%' || $1 || '%'
-               OR similarity($1, lot_number)              > 0.1
-               OR similarity($1, COALESCE(lot_name, '')) > 0.1
+               OR (similarity($1, lot_number)              > 0.45 AND char_length($1) < 8)
+               OR (similarity($1, COALESCE(lot_name, '')) > 0.45 AND char_length($1) < 8)
                 )
             ${invScopeSql}
           ORDER BY score DESC
