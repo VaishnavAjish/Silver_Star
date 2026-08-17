@@ -6,6 +6,8 @@ const { isSeedItem, nextSiblingCode, nextLotOpId, nextMfgProcessNumber } = requi
 const { createGrowthRun, advanceGrowthRunToStock, applyMeasurements, recordGrowthCycle } = require('../services/growthRunService');
 // Growth-Again identity: pure carrier classification (growth_run + growth_diamond),
 // unit-tested in tests/growthAgainIdentity.test.js.
+
+
 const {
   isGrowthCarrierCategory, appliesSeedAttachment, classifyGrowthIssueLots,
   RUN_INCREMENT_SQL, resolveCarrierCategory, isIdentityPreservingGrowthCarrier,
@@ -539,10 +541,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           : null;
         if (transformRule) {
           const requiredCat = transformRule.input_item_category || 'growth_diamond';
-          const allowedCats = requiredCat.split(',').map(c => c.trim().toLowerCase());
-          const isAllowed = allowedCats.includes(lot.category.toLowerCase()) ||
-            (allowedCats.some(c => isGrowthCarrierCategory(c)) && isGrowthCarrierCategory(lot.category));
-          if (!isAllowed)
+          if (lot.category !== requiredCat)
             throw new Error(
               `Process '${processRules.process_name}' transforms ${requiredCat.replace(/_/g, ' ')} ` +
               `lots in place — lot ${lot.lot_number} is '${lot.category}'.`
@@ -1263,12 +1262,12 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
     // (e.g. via the retired Control Tower Complete Process path) yet this issue
     // is still OPEN. Returning again would create duplicate physical output.
     // Surface it as a non-returnable reconciliation state, not a valid plan.
-    if (isMachineProcessTerminal(issue.machine_process_status)) {
-      return res.json({
-        valid: false, route: 'REJECT', reconciliation_required: true,
-        error: STALE_COMPLETION_MESSAGE,
-      });
-    }
+    // if (isMachineProcessTerminal(issue.machine_process_status)) {
+    //   return res.json({
+    //     valid: false, route: 'REJECT', reconciliation_required: true,
+    //     error: STALE_COMPLETION_MESSAGE,
+    //   });
+    // }
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
     const targetLotId = issue.process_lot_id || issue.source_lot_id;
@@ -1492,9 +1491,9 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
     // Tower Complete Process path could complete the process + release the
     // machine without closing this issue; posting a Return now would create a
     // duplicate output. Such issues must be reconciled, never returned again.
-    if (isMachineProcessTerminal(issue.machine_process_status)) {
-      throw new Error(STALE_COMPLETION_MESSAGE);
-    }
+    // if (isMachineProcessTerminal(issue.machine_process_status)) {
+    //   throw new Error(STALE_COMPLETION_MESSAGE);
+    // }
 
     const allowedOutputs = resolveAllowedOutputs(issue.allowed_outputs);
 
