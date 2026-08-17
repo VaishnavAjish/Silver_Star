@@ -66,7 +66,7 @@ async function runForensics() {
                 SELECT v.vendor_id, COALESCE(SUM(jl.credit) - SUM(jl.debit), 0) as ap_balance
                 FROM vendor_ids v
                 LEFT JOIN je_lines jl ON jl.entity_type = 'vendor' AND jl.entity_id = v.vendor_id
-                     AND jl.account_id IN (SELECT id FROM accounts WHERE type = 'payable')
+                     AND jl.account_id IN (SELECT id FROM accounts WHERE code = '3001')
                 LEFT JOIN journal_entries je ON jl.je_id = je.id AND je.status = 'posted'
                 GROUP BY v.vendor_id
             ),
