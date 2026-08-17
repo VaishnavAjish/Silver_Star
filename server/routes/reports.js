@@ -697,7 +697,7 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
         FROM purchase_notes pn
         LEFT JOIN (
           SELECT purchase_note_id, SUM(amount) AS payment_allocated
-          FROM payment_allocations GROUP BY purchase_note_id
+          FROM payment_allocations WHERE status = 'ACTIVE' GROUP BY purchase_note_id
         ) pa ON pa.purchase_note_id = pn.id
         LEFT JOIN (
           SELECT target_id, SUM(allocated_amount) AS je_allocated
@@ -752,7 +752,7 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
         FROM purchase_notes pn
         LEFT JOIN (
           SELECT purchase_note_id, SUM(amount) AS payment_allocated
-          FROM payment_allocations GROUP BY purchase_note_id
+          FROM payment_allocations WHERE status = 'ACTIVE' GROUP BY purchase_note_id
         ) pa ON pa.purchase_note_id = pn.id
         LEFT JOIN (
           SELECT target_id, SUM(allocated_amount) AS je_allocated
@@ -804,7 +804,7 @@ router.get('/accounts-payable', authenticate, async (req, res) => {
           FROM purchase_notes pn
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS payment_allocated
-            FROM payment_allocations GROUP BY purchase_note_id
+            FROM payment_allocations WHERE status = 'ACTIVE' GROUP BY purchase_note_id
           ) pa ON pa.purchase_note_id = pn.id
           LEFT JOIN (
             SELECT target_id, SUM(allocated_amount) AS je_allocated

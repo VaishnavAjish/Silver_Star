@@ -228,13 +228,18 @@ export default function VendorDetailsPage() {
     const bills = filteredTxns.filter(t => t.type === 'Bill');
     const payments = filteredTxns.filter(t => t.type === 'Payment');
     const jes = filteredTxns.filter(t => t.type === 'JE Adjustment');
+    // Reversed/cancelled payments stay visible in the list (audit trail)
+    // but must not count as active payments (Accounting Phase 1A).
+    const activePayments = payments.filter(
+      p => !['REVERSED', 'CANCELLED'].includes(String(p.status || '').toUpperCase())
+    );
 
     return {
       transaction_count: filteredTxns.length,
       bill_count: bills.length,
       bills_total: bills.reduce((s, b) => s + parseFloat(b.amount || 0), 0),
-      payment_count: payments.length,
-      payments_total: payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
+      payment_count: activePayments.length,
+      payments_total: activePayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
       je_adjustment_count: jes.length,
       je_adjustments_absolute_total: jes.reduce((s, j) => s + Math.abs(parseFloat(j.net_effect !== undefined && j.net_effect !== null ? j.net_effect : j.amount || 0)), 0),
       unapplied_advance: parseFloat(summaryData?.unapplied_advance ?? vendor?.vendor_advances ?? 0),

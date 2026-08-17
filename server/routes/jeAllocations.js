@@ -114,7 +114,7 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
       if (target_type === 'bill') {
         const r = await client.query(`
           SELECT pn.id, pn.grand_total,
-            COALESCE((SELECT SUM(amount)           FROM payment_allocations WHERE purchase_note_id = pn.id), 0) AS pa,
+            COALESCE((SELECT SUM(amount)           FROM payment_allocations WHERE status = 'ACTIVE' AND purchase_note_id = pn.id), 0) AS pa,
             COALESCE((SELECT SUM(allocated_amount) FROM je_allocations       WHERE target_type='bill' AND target_id = pn.id), 0) AS ja
           FROM purchase_notes pn
           WHERE pn.id = $1 AND pn.vendor_id = $2

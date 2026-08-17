@@ -6,6 +6,8 @@ const { dispatchEvent } = require('../services/eventDispatcher');
 const { logger } = require('../middleware/logger');
 const FinancialMappingService = require('../services/FinancialMappingService');
 const { getVendorOpenItems } = require('../services/vendorOpenItemsService');
+// Accounting Phase 1B — canonical, evidence-preserving payment reversal.
+const { reversePayment } = require('../services/paymentReversalService');
 // Accounting Phase 0 — shared block-only containment rule (pure, role-agnostic).
 const {
   journalDeleteBlockReason,
@@ -61,7 +63,9 @@ router.get('/', authenticate, async (req, res) => {
       LEFT JOIN accounts a ON p.bank_account_id = a.id
       LEFT JOIN (
         SELECT payment_id, SUM(amount) AS creation_applied
-        FROM payment_allocations GROUP BY payment_id
+        FROM payment_allocations
+        WHERE status = 'ACTIVE'
+        GROUP BY payment_id
       ) pa_sum ON pa_sum.payment_id = p.id
       LEFT JOIN (
         SELECT va.payment_id, SUM(vaa.amount) AS advance_applied
@@ -155,7 +159,10 @@ router.get('/:id/allocation', authenticate, async (req, res) => {
       ORDER BY vaa.created_at ASC
     `, [paymentId]);
 
-    const creationTimeApplied = paR.rows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+    // Phase 1A: only ACTIVE allocations contribute economically; REVERSED
+    // rows stay visible as historical evidence but count for nothing.
+    const activeAllocRows = paR.rows.filter(r => (r.status || 'ACTIVE') === 'ACTIVE');
+    const creationTimeApplied = activeAllocRows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
     const advanceApplied = vaaR.rows.filter(r => r.status === 'APPLIED').reduce((s, r) => s + parseFloat(r.amount || 0), 0);
     const totalApplied = creationTimeApplied + advanceApplied;
 
@@ -171,7 +178,7 @@ router.get('/:id/allocation', authenticate, async (req, res) => {
     }
 
     const allocatedBills = [
-      ...paR.rows.map(r => ({ id: r.purchase_note_id, doc_number: r.bill_doc_number, doc_date: r.bill_doc_date, grand_total: parseFloat(r.bill_grand_total), amount: parseFloat(r.amount), source: 'creation' })),
+      ...paR.rows.map(r => ({ id: r.purchase_note_id, doc_number: r.bill_doc_number, doc_date: r.bill_doc_date, grand_total: parseFloat(r.bill_grand_total), amount: parseFloat(r.amount), source: 'creation', status: r.status || 'ACTIVE' })),
       ...vaaR.rows.filter(r => r.status === 'APPLIED').map(r => ({ id: r.purchase_note_id, doc_number: r.bill_doc_number, doc_date: r.bill_doc_date, grand_total: parseFloat(r.bill_grand_total), amount: parseFloat(r.amount), source: 'advance_application' })),
     ];
 
@@ -405,104 +412,43 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
   }
 });
 
-// POST /api/payments/:id/reverse (Canonical Reversal Service)
+// POST /api/payments/:id/reverse (Phase 1B Canonical Reversal Engine)
+// Document unwind preserves evidence (allocations become REVERSED, bills are
+// recomputed from surviving allocations) and the GL is corrected with a
+// compensating JE. Orphan payments (je_id → deleted JE) are refused and
+// directed to the Phase 1A historical repair.
 router.post('/:id/reverse', authenticate, authorize('admin', 'finance'), async (req, res) => {
-  const client = await pool.primaryPool.connect();
   try {
-    await client.query('BEGIN');
-    const fail = async (status, error) => {
-      await client.query('ROLLBACK');
-      return res.status(status).json({ error });
-    };
+    const result = await reversePayment({
+      paymentId: req.params.id,
+      actorId: req.user.id,
+      reason: req.body ? req.body.reason : undefined,
+    });
 
-    const paymentId = parseInt(req.params.id, 10);
-    if (!paymentId || isNaN(paymentId)) return fail(400, 'Invalid payment ID');
-
-    // 1. Lock & fetch payment
-    const payR = await client.query('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
-    if (!payR.rows[0]) return fail(404, 'Payment not found');
-    const payment = payR.rows[0];
-
-    if (payment.status === 'CANCELLED' || payment.status === 'REVERSED') {
-      return fail(400, `Payment ${payment.doc_number} is already ${payment.status.toLowerCase()}`);
+    if (!result.ok) {
+      return res.status(result.httpStatus).json({ error: result.message, code: result.code });
     }
 
-    // Phase 1 Reversal Engine is active. We can now safely proceed with reversal.
-    // The AP side allocations will be deleted, and the GL side will be properly
-    // reversed via a compensating journal entry.
-
-    const { reason } = req.body;
-    if (!reason || typeof reason !== 'string' || !reason.trim()) {
-      return fail(400, 'A valid reason for reversal is required');
+    if (result.code === 'REVERSED') {
+      dispatchEvent('payment.reversed', {
+        id: result.payment.id,
+        doc_number: result.payment.doc_number,
+        amount: result.payment.amount,
+        vendor_id: result.payment.vendor_id,
+        reason: req.body.reason,
+      });
     }
 
-    // 2. Fetch and reverse creation-time allocations
-    const paR = await client.query('SELECT * FROM payment_allocations WHERE payment_id = $1', [paymentId]);
-    for (const pa of paR.rows) {
-      const amt = parseFloat(pa.amount);
-      const pnId = parseInt(pa.purchase_note_id);
-
-      await client.query(
-        'UPDATE purchase_notes SET amount_paid = GREATEST(0, COALESCE(amount_paid, 0) - $1) WHERE id = $2',
-        [amt, pnId]
-      );
-
-      const pnCheck = await client.query('SELECT grand_total, amount_paid FROM purchase_notes WHERE id = $1', [pnId]);
-      if (pnCheck.rows[0]) {
-        const paid = parseFloat(pnCheck.rows[0].amount_paid);
-        const total = parseFloat(pnCheck.rows[0].grand_total);
-        const pStatus = paid >= total - 0.005 ? 'PAID' : paid > 0.005 ? 'PARTIAL' : 'UNPAID';
-        await client.query(
-          'UPDATE purchase_notes SET payment_status = $1, balance_due = GREATEST(0, $2 - $3) WHERE id = $4',
-          [pStatus, total, paid, pnId]
-        );
-      }
-    }
-
-    // Delete creation allocations
-    await client.query('DELETE FROM payment_allocations WHERE payment_id = $1', [paymentId]);
-
-    // 3. Reverse advances linked to this payment
-    const vaR = await client.query('SELECT * FROM vendor_advances WHERE payment_id = $1', [paymentId]);
-    for (const va of vaR.rows) {
-      await client.query("UPDATE vendor_advances SET status = 'CANCELLED', remaining_amount = 0 WHERE id = $1", [va.id]);
-    }
-
-    // 4. Reverse linked Journal Entry if it exists and is posted
-    if (payment.je_id) {
-      const jeR = await client.query('SELECT id, status FROM journal_entries WHERE id = $1', [payment.je_id]);
-      if (jeR.rows[0] && jeR.rows[0].status === 'posted') {
-        if (typeof journalEngine.reverseEntry === 'function') {
-          await journalEngine.reverseEntry(payment.je_id, {
-            reason: `Payment ${payment.doc_number} reversed: ${reason}`,
-            userId: req.user.id,
-            client,
-          });
-        } else {
-          await client.query(
-            "UPDATE journal_entries SET is_reversed = TRUE, reversed_at = NOW(), reversed_by = $1 WHERE id = $2",
-            [req.user.id, payment.je_id]
-          );
-        }
-      }
-    }
-
-    // 5. Update payment status to REVERSED
-    const updatedPayR = await client.query(
-      "UPDATE payments SET status = 'REVERSED', remark = COALESCE(remark, '') || $1, updated_at = NOW() WHERE id = $2 RETURNING *",
-      [` [Reversed: ${reason}]`, paymentId]
-    );
-
-    await client.query('COMMIT');
-    dispatchEvent('payment.reversed', { id: paymentId, doc_number: payment.doc_number, amount: payment.amount, vendor_id: payment.vendor_id, reason });
-
-    res.json({ success: true, message: `Payment ${payment.doc_number} successfully reversed`, payment: updatedPayR.rows[0] });
+    res.json({
+      success: true,
+      code: result.code,
+      message: result.message,
+      payment: result.payment || null,
+      summary: result.summary || null,
+    });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
     logger.error('[payments POST /:id/reverse]', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message || 'Failed to reverse payment' });
-  } finally {
-    client.release();
   }
 });
 

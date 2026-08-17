@@ -46,7 +46,7 @@ async function getBillOutstanding(billId, client = pool) {
     LEFT JOIN (
       SELECT purchase_note_id, SUM(amount) AS payment_allocated
       FROM   payment_allocations
-      WHERE  purchase_note_id = $1
+      WHERE  status = 'ACTIVE' AND purchase_note_id = $1
       GROUP  BY purchase_note_id
     ) pa ON TRUE
     LEFT JOIN (
@@ -146,6 +146,7 @@ async function getVendorOpenBills(vendorId, client = pool, excludeJeId = null) {
     LEFT JOIN (
       SELECT purchase_note_id, SUM(amount) AS payment_allocated
       FROM   payment_allocations
+      WHERE  status = 'ACTIVE'
       GROUP  BY purchase_note_id
     ) pa ON pa.purchase_note_id = pn.id
     LEFT JOIN (

@@ -45,7 +45,9 @@ async function getBillSettlement(billId, client = pool) {
     LEFT JOIN (
       SELECT purchase_note_id, SUM(amount) AS cash_paid
       FROM   payment_allocations
-      WHERE  purchase_note_id = $1
+      -- Phase 1A: reversed (historically reconciled) allocations are
+      -- evidence, not settlement — canonical active predicate.
+      WHERE  status = 'ACTIVE' AND purchase_note_id = $1
       GROUP  BY purchase_note_id
     ) pa ON TRUE
     LEFT JOIN (
@@ -102,7 +104,7 @@ async function getBillSettlements(billIds, client = pool) {
     LEFT JOIN (
       SELECT purchase_note_id, SUM(amount) AS cash_paid
       FROM   payment_allocations
-      WHERE  purchase_note_id = ANY($1)
+      WHERE  status = 'ACTIVE' AND purchase_note_id = ANY($1)
       GROUP  BY purchase_note_id
     ) pa ON pa.purchase_note_id = pn.id
     LEFT JOIN (

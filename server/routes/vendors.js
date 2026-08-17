@@ -85,7 +85,7 @@ router.get('/summary', authenticate, async (req, res) => {
           FROM purchase_notes pn
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS payment_allocated
-            FROM payment_allocations GROUP BY purchase_note_id
+            FROM payment_allocations WHERE status = 'ACTIVE' GROUP BY purchase_note_id
           ) pa ON pa.purchase_note_id = pn.id
           LEFT JOIN (
             SELECT target_id, SUM(allocated_amount) AS je_allocated
@@ -118,7 +118,9 @@ router.get('/summary', authenticate, async (req, res) => {
                  THEN b.outstanding ELSE 0 END
           ), 0) AS overdue,
           (SELECT unallocated_payments_count FROM unallocated) AS unallocated_payments,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE date >= CURRENT_DATE - INTERVAL '30 days') AS paid_last_30
+          (SELECT COALESCE(SUM(amount), 0) FROM payments
+           WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+             AND status NOT IN ('REVERSED', 'CANCELLED')) AS paid_last_30
         FROM open_bills b
       `);
       const row = r.rows[0] || {};
@@ -169,7 +171,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
         LEFT JOIN LATERAL (
           SELECT SUM(amount) AS total_paid
           FROM payment_allocations
-          WHERE purchase_note_id = pn.id
+          WHERE status = 'ACTIVE' AND purchase_note_id = pn.id
         ) pa_agg ON true
         LEFT JOIN LATERAL (
           SELECT SUM(allocated_amount) AS je_allocated
@@ -300,12 +302,19 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     const jes = all.filter(t => t.type === 'JE Adjustment');
     const tdsRows = all.filter(t => t.type === 'TDS Withheld');
 
+    // Phase 1A: reversed/cancelled payments stay listed (audit trail) but
+    // no longer contribute to active payment totals.
+    const isActivePayment = p => !['REVERSED', 'CANCELLED'].includes(String(p.status || '').toUpperCase());
+    const activePayments = payments.filter(isActivePayment);
+
     const summary = {
       transaction_count: all.length,
       bill_count: bills.length,
       bills_total: bills.reduce((s, b) => s + parseFloat(b.amount || 0), 0),
-      payment_count: payments.length,
-      payments_total: payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
+      payment_count: activePayments.length,
+      payments_total: activePayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0),
+      reversed_payment_count: payments.length - activePayments.length,
+      reversed_payments_total: payments.filter(p => !isActivePayment(p)).reduce((s, p) => s + parseFloat(p.amount || 0), 0),
       je_adjustment_count: jes.length,
       je_adjustments_absolute_total: jes.reduce((s, j) => s + parseFloat(j.amount || 0), 0),
       tds_count: tdsRows.length,
@@ -397,6 +406,7 @@ router.get('/', authenticate, async (req, res) => {
           LEFT JOIN (
             SELECT purchase_note_id, SUM(amount) AS total_paid
             FROM payment_allocations
+            WHERE status = 'ACTIVE'
             GROUP BY purchase_note_id
           ) pa_agg ON pa_agg.purchase_note_id = pn.id
           LEFT JOIN (
@@ -502,6 +512,7 @@ router.get('/:id', authenticate, async (req, res) => {
         LEFT JOIN (
           SELECT purchase_note_id, SUM(amount) AS total_paid
           FROM payment_allocations
+          WHERE status = 'ACTIVE'
           GROUP BY purchase_note_id
         ) pa_agg ON pa_agg.purchase_note_id = pn.id
         LEFT JOIN (
