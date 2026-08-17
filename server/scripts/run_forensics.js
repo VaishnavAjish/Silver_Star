@@ -63,19 +63,19 @@ async function runForensics() {
                 SELECT DISTINCT vendor_id FROM payments WHERE doc_number IN ('PAY-1179', 'PAY-1240')
             ),
             actual_gl AS (
-                SELECT v.id as vendor_id, COALESCE(SUM(jl.credit) - SUM(jl.debit), 0) as ap_balance
+                SELECT v.vendor_id, COALESCE(SUM(jl.credit) - SUM(jl.debit), 0) as ap_balance
                 FROM vendor_ids v
-                JOIN accounts a ON a.entity_type = 'vendor' AND a.entity_id = v.vendor_id
-                LEFT JOIN je_lines jl ON jl.account_id = a.id
+                LEFT JOIN je_lines jl ON jl.entity_type = 'vendor' AND jl.entity_id = v.vendor_id
+                     AND jl.account_id IN (SELECT id FROM accounts WHERE type = 'payable')
                 LEFT JOIN journal_entries je ON jl.je_id = je.id AND je.status = 'posted'
-                GROUP BY v.id
+                GROUP BY v.vendor_id
             ),
             expected_ap AS (
-                SELECT v.id as vendor_id, 
+                SELECT v.vendor_id, 
                        (
-                         COALESCE((SELECT SUM(grand_total) FROM purchase_notes WHERE vendor_id = v.id AND status != 'CANCELLED'), 0)
-                         - COALESCE((SELECT SUM(amount) FROM payments WHERE vendor_id = v.id AND status IN ('COMPLETED', 'PARTIAL')), 0)
-                         - COALESCE((SELECT SUM(amount) FROM debit_notes WHERE vendor_id = v.id AND status != 'CANCELLED'), 0)
+                         COALESCE((SELECT SUM(grand_total) FROM purchase_notes WHERE vendor_id = v.vendor_id AND status != 'CANCELLED'), 0)
+                         - COALESCE((SELECT SUM(amount) FROM payments WHERE vendor_id = v.vendor_id AND status IN ('COMPLETED', 'PARTIAL')), 0)
+                         - COALESCE((SELECT SUM(amount) FROM debit_notes WHERE vendor_id = v.vendor_id AND status != 'CANCELLED'), 0)
                        ) as expected_balance
                 FROM vendor_ids v
             )
