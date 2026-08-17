@@ -228,7 +228,11 @@ router.delete('/:id', authenticate, authorize('admin', 'operator'), async (req, 
     }
 
     // Use Journal Engine to reverse
-    const reverseJE = await journalEngine.reverseEntry(transfer.je_id, client, req.user.id, `Reversal of Transfer ${transfer.transfer_no}`);
+    const reverseJE = await journalEngine.reverseEntry(transfer.je_id, {
+      reason: `Reversal of Transfer ${transfer.transfer_no}`,
+      userId: req.user.id,
+      client,
+    });
 
     // Update status
     await client.query(`UPDATE transfers SET status = 'reversed', updated_at = NOW() WHERE id = $1`, [id]);

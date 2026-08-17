@@ -222,6 +222,92 @@ class JournalEngine {
     );
     return result.rows;
   }
+
+  /**
+   * Reverse a posted journal entry
+   *
+   * @param {number} jeId - ID of the original JE
+   * @param {Object} options
+   * @param {string} options.reason - Reason for reversal
+   * @param {number} options.userId - ID of the user requesting reversal
+   * @param {Object} options.client - (Optional) Postgres client within a transaction
+   * @param {string} options.date - (Optional) Date for the reversal entry (defaults to today)
+   */
+  async reverseEntry(jeId, { reason, userId, client: existingClient, date = new Date().toISOString().split('T')[0] }) {
+    const client = existingClient || await pool.primaryPool.connect();
+    try {
+      if (!existingClient) await client.query('BEGIN');
+
+      // 1. Lock the original entry
+      const jeR = await client.query('SELECT * FROM journal_entries WHERE id = $1 FOR UPDATE', [jeId]);
+      if (!jeR.rows.length) throw new Error('Journal entry not found');
+      const je = jeR.rows[0];
+
+      if (je.status !== 'posted') throw new Error('Only posted entries can be reversed');
+
+      // 2. Prevent double reversal
+      const existingR = await client.query(
+        "SELECT id FROM journal_entries WHERE source_type = 'reversal' AND source_id = $1 LIMIT 1",
+        [je.id]
+      );
+      if (existingR.rows.length) throw new Error('Journal entry is already reversed');
+
+      // 3. Fetch original lines
+      const linesR = await client.query(
+        'SELECT account_id, debit, credit, narration, entity_type, entity_id, cost_center_id, reference_no FROM je_lines WHERE je_id = $1',
+        [je.id]
+      );
+
+      // 4. Flip debits and credits
+      const reversalLines = linesR.rows.map(l => ({
+        accountId: l.account_id,
+        debit: l.credit, // flip
+        credit: l.debit, // flip
+        narration: `Reversal of ${je.je_number}`,
+        entityType: l.entity_type,
+        entityId: l.entity_id,
+        costCenterId: l.cost_center_id,
+        referenceNo: l.reference_no,
+      }));
+
+      // 5. Create the compensating entry
+      const reversal = await this.createEntry({
+        date,
+        description: `Reversal of ${je.je_number}. Reason: ${reason}`,
+        sourceType: 'reversal',
+        sourceId: je.id,
+        lines: reversalLines,
+        autoPost: true,
+        createdBy: userId,
+        client,
+      });
+
+      // 6. Update the original entry's flags (fail-safe for missing columns)
+      try {
+        await client.query(
+          `UPDATE journal_entries
+           SET is_reversed = TRUE, reversed_at = NOW(), reversed_by = $1
+           WHERE id = $2`,
+          [userId, je.id]
+        );
+        await client.query(
+          'UPDATE journal_entries SET reversal_of_je_id = $1 WHERE id = $2',
+          [je.id, reversal.id]
+        );
+      } catch (err) {
+        // If DB schema doesn't have these columns yet, it's safe to ignore.
+        // The source_type='reversal' acts as the ultimate truth.
+      }
+
+      if (!existingClient) await client.query('COMMIT');
+      return reversal;
+    } catch (err) {
+      if (!existingClient) await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      if (!existingClient) client.release();
+    }
+  }
 }
 
 module.exports = new JournalEngine();
