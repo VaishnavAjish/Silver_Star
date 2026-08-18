@@ -541,11 +541,14 @@ router.post('/', authenticate, authorize('admin', 'operator'), async (req, res) 
           : null;
         if (transformRule) {
           const requiredCat = transformRule.input_item_category || 'growth_diamond';
-          if (lot.category !== requiredCat)
+          // Relax strict check: allow 'growth_run' to substitute for 'growth_diamond' 
+          // if the operation needs to be performed on the biscuit prior to seed removal.
+          if (lot.category !== requiredCat && !(requiredCat === 'growth_diamond' && lot.category === 'growth_run')) {
             throw new Error(
               `Process '${processRules.process_name}' transforms ${requiredCat.replace(/_/g, ' ')} ` +
               `lots in place — lot ${lot.lot_number} is '${lot.category}'.`
             );
+          }
         }
         // RULE 7: state-machine enforcement. ONLY IN STOCK (or LOW STOCK) lots may
         // be issued to a process. Anything IN PROCESS is already inside a machine
