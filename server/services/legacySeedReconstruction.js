@@ -75,12 +75,12 @@ async function findGrowthIssueEvidence(db, growthRunId) {
     `SELECT gi.id AS issue_id, gi.issue_number, gi.issued_qty, gi.process_lot_id,
             s.id AS lot_id, s.lot_code AS lot_code, s.lot_number AS lot_number,
             s.status AS lot_status, s.manufacturing_state AS lot_manufacturing_state,
-            s.total_value AS lot_total_value, s.qty AS lot_qty
+            s.total_value AS lot_total_value, s.qty AS lot_qty,
+            i.category AS item_category
      FROM lot_process_issues gi
      LEFT JOIN inventory s ON s.id = gi.process_lot_id
-     LEFT JOIN items i ON i.id = gi.item_id
+     LEFT JOIN items i ON i.id = s.item_id
      WHERE gi.status = 'RETURNED'
-       AND i.category = 'seed'
        AND gi.machine_process_id IN (
          SELECT grc.machine_process_id FROM growth_run_cycles grc
          WHERE grc.growth_run_id = $1 AND grc.machine_process_id IS NOT NULL
@@ -317,7 +317,7 @@ async function resolveOrReconstructLegacyAttachedSeed({
   //      exists in any state, reconstruction would mint a duplicate identity.
   //      If evidence exists and disagrees on quantity, fail closed.
   const evidence = await findGrowthIssueEvidence(client, processLot.id);
-  const existingLots = evidence.filter(e => e.lot_id != null);
+  const existingLots = evidence.filter(e => e.lot_id != null && e.item_category === 'seed');
   if (existingLots.length > 0) {
     throw legacyError(409, 'LEGACY_SEED_ORIGINAL_ROW_EXISTS',
       `Original attached-Seed row(s) still exist for this Growth Run (${existingLots
