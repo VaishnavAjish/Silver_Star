@@ -28,6 +28,14 @@ const { resolveIssueGrowthContext } = require('../services/growthIssueContext');
 const { assessMachineRelease } = require('../services/machineReleaseGuard');
 const { requiresReturnEngineCompletion } = require('../services/completionEngineGuard');
 const { generateLineage } = require('../services/inventoryLineageService');
+// Exceptional Seed Remove repair (Super Admin only): reconstruct the missing
+// intermediate attached Seed for a historical Growth Run. Fully validated,
+// value-provenanced and audited inside the service — see
+// services/legacySeedReconstruction.js.
+const {
+  resolveOrReconstructLegacyAttachedSeed,
+  previewLegacySeedReconstruction,
+} = require('../services/legacySeedReconstruction');
 
 const router = express.Router();
 
@@ -1335,50 +1343,21 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
         [targetLotId]
       );
 
-      // Automatic Reconstruction Fallback: try finding unique Seed via genealogy / root lot / HX0008
-      if (seedRows.length === 0) {
-        const { rows: fallbackSeeds } = await pool.query(
-          `SELECT s.id, s.root_lot_id, s.weight, s.total_value FROM inventory s
-           WHERE s.id = (SELECT parent_lot_id FROM inventory WHERE id = $1)
-              OR s.id = (SELECT root_lot_id FROM inventory WHERE id = $1)
-              OR (s.lot_code ILIKE '%HX0008%' AND s.status IN ('IN STOCK', 'IN PROCESS', 'CONSUMED'))
-           ORDER BY CASE WHEN s.manufacturing_state = 'ATTACHED_TO_GROWTH' THEN 1 WHEN s.status = 'IN PROCESS' THEN 2 ELSE 3 END, s.id
-           LIMIT 5`,
-          [targetLotId]
-        );
-        if (fallbackSeeds.length === 1) {
-          seedRows = fallbackSeeds;
-        }
-      }
-
-      if (req.body && req.body.legacy_seed_override) {
-        const override = req.body.legacy_seed_override;
-        const seedW = parseFloat(override.seed_weight || override.recovered_seed_weight || 0);
-        const seedV = parseFloat(override.seed_value || 0);
-        let rootLotId = override.root_lot_id || (seedRows[0] ? seedRows[0].root_lot_id : null) || processLot.root_lot_id;
-        let seedInvId = override.seed_inventory_id || (seedRows[0] ? seedRows[0].id : null);
-        attachedSeedCtx = {
-          resolved: true,
-          candidateCount: 1,
-          rootCount: 1,
-          rootLotId: rootLotId || processLot.id,
-          inventoryId: seedInvId,
-          refWeight: seedW,
-          refValue: seedV,
-          isLegacyOverride: true,
-        };
-      } else {
-        const seedRoots = [...new Set(seedRows.map(r => r.root_lot_id || r.id))];
-        attachedSeedCtx = {
-          resolved: seedRows.length > 0,
-          candidateCount: seedRows.length,
-          rootCount: seedRoots.length,
-          rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
-          inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
-          refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
-          refValue: seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
-        };
-      }
+      // NO automatic fallback and NO operator-shaped override context here:
+      // the preflight always reports the HONEST canonical resolution. When it
+      // is unresolved the planner REJECTs with legacyResolutionRequired and
+      // the response carries legacy_resolution_preview (server-side value
+      // provenance) — never a fake resolved context built from request input.
+      const seedRoots = [...new Set(seedRows.map(r => r.root_lot_id || r.id))];
+      attachedSeedCtx = {
+        resolved: seedRows.length > 0,
+        candidateCount: seedRows.length,
+        rootCount: seedRoots.length,
+        rootLotId: seedRoots.length === 1 ? seedRoots[0] : null,
+        inventoryId: seedRows.length === 1 ? seedRows[0].id : null,
+        refWeight: seedRows.reduce((s, r) => s + parseFloat(r.weight || 0), 0),
+        refValue: seedRows.reduce((s, r) => s + parseFloat(r.total_value || 0), 0),
+      };
     }
 
     let openSiblingCount = 0;
@@ -1406,7 +1385,37 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
       attachedSeed: attachedSeedCtx,
       allowWeightOverride
     });
-    if (!plan.valid) return res.json(plan);
+    if (!plan.valid) {
+      // Legacy Seed Resolution preview (read-only, display-only): when the
+      // canonical attached Seed cannot be resolved, surface the authoritative
+      // quantity and the server-side value provenance so the client can show
+      // the resolved value + source — or an honest Unresolved/BLOCKED state.
+      // The posting endpoint re-resolves everything under lock regardless.
+      if (plan.legacyResolutionRequired && processLot) {
+        const previewRemaining = issue.remaining_in_process !== null
+          ? parseFloat(issue.remaining_in_process)
+          : parseFloat(issue.issued_qty);
+        const rootRef = req.body && req.body.legacy_seed_override
+          ? req.body.legacy_seed_override.root_lot_id
+          : null;
+        try {
+          const legacyPreview = await previewLegacySeedReconstruction({
+            db: pool, processLot, rootRef, currentRemaining: previewRemaining,
+          });
+          return res.json({ ...plan, legacy_resolution_preview: legacyPreview });
+        } catch (previewErr) {
+          return res.json({
+            ...plan,
+            legacy_resolution_preview: {
+              authoritative_qty: previewRemaining,
+              value_resolution: { resolved: false },
+              blockers: [{ code: 'LEGACY_PREVIEW_FAILED', message: previewErr.message }],
+            },
+          });
+        }
+      }
+      return res.json(plan);
+    }
 
     // Per-line projected identities. CHILD codes are best-effort previews of
     // nextReturnLotCode — the posting transaction regenerates them under lock.
@@ -1630,113 +1639,33 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         [processLot.id]
       );
 
-      // Automatic Reconstruction Fallback: try finding unique Seed via genealogy / root lot / HX0008
-      if (seedRows.length === 0) {
-        const { rows: fallbackSeeds } = await client.query(
-          `SELECT s.* FROM inventory s
-           WHERE s.id = (SELECT parent_lot_id FROM inventory WHERE id = $1)
-              OR s.id = (SELECT root_lot_id FROM inventory WHERE id = $1)
-              OR (s.lot_code ILIKE '%HX0008%' AND s.status IN ('IN STOCK', 'IN PROCESS', 'CONSUMED'))
-           ORDER BY CASE WHEN s.manufacturing_state = 'ATTACHED_TO_GROWTH' THEN 1 WHEN s.status = 'IN PROCESS' THEN 2 ELSE 3 END, s.id
-           FOR UPDATE OF s
-           LIMIT 5`,
-          [processLot.id]
-        );
-        if (fallbackSeeds.length === 1) {
-          seedRows = fallbackSeeds;
-        }
-      }
-
+      // NO automatic fallback: the retired parent/root/HX0008 heuristic could
+      // resolve the HISTORICAL ROOT SEED itself as the "attached Seed", which
+      // the final-return block would then retire (qty/weight/value zeroed) —
+      // a root-immutability violation. Zero candidates now always REJECTs via
+      // the planner unless the explicit Super Admin legacy repair is invoked.
       attachedSeeds = seedRows;
 
-      if (req.body && req.body.legacy_seed_override) {
-        const normRole = String(req.user ? req.user.role : '').toLowerCase().trim();
-        const isSuperAdmin = ['super_admin', 'superadmin', 'super admin', 'admin', 'administrator'].includes(normRole);
-        const hasPerm = isSuperAdmin || (req.user && await hasPermission(req.user.id, 'process_return', 'seed_remove_override'));
-        if (!hasPerm) {
-          throw new Error('Permission denied: legacy seed resolution override requires Super Admin permission.');
-        }
-
-        const override = req.body.legacy_seed_override;
-        if (!override.override_reason || !String(override.override_reason).trim()) {
-          throw new Error('Override reason is required for legacy seed resolution.');
-        }
-
-        const seedW = parseFloat(override.seed_weight || override.recovered_seed_weight || 0);
-        if (!(seedW > 0)) {
-          throw new Error('Authoritative Seed weight must be greater than 0.');
-        }
-        const seedV = parseFloat(override.seed_value || 0);
-
-        let rootLotId = override.root_lot_id || (attachedSeeds[0] ? attachedSeeds[0].root_lot_id : null) || processLot.root_lot_id;
-        if (typeof rootLotId === 'string') {
-          const { rows: [rLot] } = await client.query(
-            'SELECT id FROM inventory WHERE lot_code ILIKE $1 OR lot_number ILIKE $1 LIMIT 1',
-            [rootLotId]
-          );
-          if (rLot) rootLotId = rLot.id;
-        }
-
-        let seedInvId = attachedSeeds[0] ? attachedSeeds[0].id : null;
-
-        if (!seedInvId) {
-          // PROTECT ROOT SEED: Never mutate the historical root seed.
-          // Instead, reconstruct the missing intermediate attached seed.
-          let targetRootId = rootLotId;
-          let seedItemId = processLot.item_id;
-          
-          if (targetRootId) {
-            const { rows: [rInfo] } = await client.query('SELECT item_id FROM inventory WHERE id = $1', [targetRootId]);
-            if (rInfo) seedItemId = rInfo.item_id;
-          }
-
-          const seedCodeBase = `${processLot.lot_code || processLot.lot_number}-S`;
-          const { rows: [existingLegacy] } = await client.query(
-            `SELECT * FROM inventory WHERE lot_number LIKE $1 ORDER BY id DESC LIMIT 1`,
-            [`${seedCodeBase}%`]
-          );
-          
-          const nextSuffix = existingLegacy ? parseInt((existingLegacy.lot_number.split('-S')[1] || '0')) + 1 : 1;
-          const seedCode = `${seedCodeBase}${nextSuffix}`;
-
-          let genealogy_path = processLot.genealogy_path;
-          let split_level = processLot.split_level;
-          // Fallback if generateLineage is needed:
-          if (typeof generateLineage === 'function') {
-            const lin = generateLineage(processLot);
-            genealogy_path = lin.genealogy_path;
-            split_level = lin.split_level;
-          }
-
-          const { rows: [newSeed] } = await client.query(
-            `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module, genealogy_path, split_level)
-             VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override', $10, $11)
-             RETURNING *`,
-            [seedItemId, seedCode, seedCode, processLot.qty || 24, seedW, seedV > 0 ? seedV / (processLot.qty || 24) : 0, seedV, targetRootId, targetRootId, genealogy_path, split_level]
-          );
-          seedInvId = newSeed.id;
-          attachedSeeds = [newSeed];
-        }
-
-        attachedSeedCtx = {
-          resolved: true,
-          candidateCount: 1,
-          rootCount: 1,
-          rootLotId: rootLotId || processLot.id,
-          inventoryId: seedInvId,
-          refWeight: seedW,
-          refValue: seedV,
-          isLegacyOverride: true,
-        };
-
-        await auditLog(client, req.user.id, 'LEGACY_SEED_RESOLUTION_OVERRIDE', 'process_issue', issue.id, {
-          issue_number: issue.issue_number,
-          process_lot: processLot.lot_code || processLot.lot_number,
-          override_reason: override.override_reason,
-          seed_weight: seedW,
-          seed_value: seedV,
-          root_lot: override.root_lot_id || 'HX0008',
-        }, req);
+      if (attachedSeeds.length === 0 && req.body && req.body.legacy_seed_override) {
+        // EXCEPTIONAL legacy repair — Super Admin only. Runs on the SAME
+        // transaction client, after the issue + process-lot locks, and only
+        // because the canonical resolver found ZERO candidates (when it
+        // resolves, the healthy path below is used and the flag is ignored).
+        // All integrity gates, the authoritative value resolver and the
+        // transactional lot_op_log audit live in the service.
+        const seedComponentTypes = allowedOutputs.filter(o => o.component === 'seed').map(o => o.type);
+        const seedLineWeight = lines
+          .filter(l => seedComponentTypes.includes(l.type))
+          .reduce((s, l) => s + (parseFloat(l.weight) || 0), 0);
+        const legacy = await resolveOrReconstructLegacyAttachedSeed({
+          client, issue, processLot, currentRemaining,
+          override: req.body.legacy_seed_override,
+          actor: req.user,
+          seedLineWeight: seedLineWeight > 0 ? seedLineWeight : null,
+          correlationId: (req.headers && req.headers['x-request-id']) || null,
+        });
+        attachedSeeds = [legacy.reconstructedSeed];
+        attachedSeedCtx = legacy.attachedSeedCtx;
       } else {
         const seedRoots = [...new Set(attachedSeeds.map(r => r.root_lot_id || r.id))];
         attachedSeedCtx = {
@@ -2605,7 +2534,15 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
   } catch (err) {
     console.error('[RETURN-ERROR] Issue', issueId, ':', err.message, err.stack);
     await client.query('ROLLBACK');
-    return res.status(400).json({ error: err.message });
+    // Typed business errors (legacy reconstruction) carry their own HTTP
+    // status; a retry against an already-closed issue is a stable 409 so
+    // clients can distinguish "already processed" from a validation failure.
+    const alreadyProcessed = /is already (RETURNED|CANCELLED|RECONCILED)/.test(err.message);
+    const status = err.statusCode || (alreadyProcessed ? 409 : 400);
+    const body = { error: err.message };
+    if (typeof err.code === 'string' && err.code.startsWith('LEGACY_')) body.code = err.code;
+    else if (alreadyProcessed) body.code = 'RETURN_ALREADY_PROCESSED';
+    return res.status(status).json(body);
   } finally { client.release(); }
 });
 

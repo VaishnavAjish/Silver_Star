@@ -113,9 +113,11 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   const planSeqRef = useRef(0);
 
   // Legacy Seed Resolution Override States
-  const [overrideRootSeed, setOverrideRootSeed]   = useState('HX0008');
+  // Legacy Seed Resolution: the root Seed must be explicitly identified —
+  // never defaulted — and the inventory VALUE is resolved server-side from
+  // authoritative history (read-only here; no editable monetary input).
+  const [overrideRootSeed, setOverrideRootSeed]   = useState('');
   const [overrideSeedWeight, setOverrideSeedWeight] = useState('');
-  const [overrideSeedValue, setOverrideSeedValue]   = useState('0.00');
   const [overrideReason, setOverrideReason]       = useState('');
   const [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const [overrideTypedText, setOverrideTypedText] = useState('');
@@ -384,7 +386,12 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     if (!hasActiveLine) { setPlanLoading(false); return; }
     setPlanLoading(true);
     const t = setTimeout(() => {
-      api.post(`/api/lot-process-issues/${issueId}/return/validate`, buildReturnPayload())
+      // The root Seed reference rides along (read-only server-side) so the
+      // legacy_resolution_preview can resolve value provenance for display.
+      const validatePayload = overrideRootSeed.trim()
+        ? { ...buildReturnPayload(), legacy_seed_override: { root_lot_id: overrideRootSeed.trim() } }
+        : buildReturnPayload();
+      api.post(`/api/lot-process-issues/${issueId}/return/validate`, validatePayload)
         .then(res => {
           if (seq !== planSeqRef.current) return; // stale response — discard
           setPlan(res);
@@ -397,7 +404,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         });
     }, PREFLIGHT_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [issueId, issue, lines]);
+  }, [issueId, issue, lines, overrideRootSeed]);
 
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -422,14 +429,19 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
 
   const handleLegacyOverrideSubmit = async () => {
     if (!overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim()) return;
+    if (!overrideRootSeed.trim()) return;
     setSaving(true);
     try {
+      // No seed_value is ever sent: the reconstructed Seed's inventory value
+      // is resolved server-side from authoritative history and the server
+      // rejects/ignores operator currency. The weight here is ONLY the
+      // physical recovered-Seed measurement (cross-checked against the
+      // recovered-Seed line weight) — never a historical reference weight.
       const payload = {
         ...buildReturnPayload(),
         legacy_seed_override: {
-          root_lot_id: overrideRootSeed || 'HX0008',
-          seed_weight: parseFloat(overrideSeedWeight),
-          seed_value: parseFloat(overrideSeedValue) || 0,
+          root_lot_id: overrideRootSeed.trim(),
+          physical_recovered_weight_ct: parseFloat(overrideSeedWeight),
           override_reason: overrideReason.trim(),
         }
       };
@@ -829,7 +841,13 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
           })()}
 
           {/* Legacy Seed Resolution Override UI Card for Super Admin */}
-          {plan && !plan.valid && (plan.legacyResolutionRequired || (plan.error && plan.error.includes('Attached Seed could not be resolved'))) && (
+          {plan && !plan.valid && (plan.legacyResolutionRequired || (plan.error && plan.error.includes('Attached Seed could not be resolved'))) && (() => {
+            const legacyPreview = plan.legacy_resolution_preview || null;
+            const valueRes = legacyPreview && legacyPreview.value_resolution;
+            const valueResolved = !!(valueRes && valueRes.resolved);
+            const blockers = (legacyPreview && legacyPreview.blockers) || [];
+            const legacyReady = valueResolved && blockers.length === 0;
+            return (
             <div style={{
               background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: 8,
               padding: 16, marginBottom: 14, boxShadow: '0 2px 4px rgba(0,0,0,0.04)'
@@ -840,18 +858,21 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
               </div>
               <div style={{ fontSize: 12, color: '#5D4037', marginBottom: 12 }}>
                 This historical Growth Run does not contain a complete attached-Seed link in the database.
-                A controlled Super Admin override is required to complete Seed Remove.
+                A controlled Super Admin override is required to complete Seed Remove. The reconstructed
+                Seed's quantity and inventory value are resolved server-side from authoritative history —
+                they cannot be entered manually.
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                 <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Root Seed Lot</label>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Root Seed Lot (required)</label>
                   <input
                     type="text"
                     className="form-control"
                     style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
                     value={overrideRootSeed}
                     onChange={e => setOverrideRootSeed(e.target.value)}
+                    placeholder="Exact historical root Seed lot code"
                   />
                 </div>
                 <div>
@@ -865,7 +886,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Recovered Seed Weight (ct)</label>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Physical Recovered Seed Weight (ct)</label>
                   <input
                     type="number"
                     step="0.0001"
@@ -873,34 +894,66 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
                     value={overrideSeedWeight}
                     onChange={e => setOverrideSeedWeight(e.target.value)}
+                    placeholder="Measured now — not historical"
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+              {/* Server-resolved provenance — read-only, honest about gaps. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12,
+                padding: '10px 12px', background: '#FFFDF5', border: '1px dashed #FFE082', borderRadius: 6 }}>
                 <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Seed Inventory Value (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="form-control"
-                    style={{ fontSize: 12, fontFamily: 'var(--mono)' }}
-                    value={overrideSeedValue}
-                    onChange={e => setOverrideSeedValue(e.target.value)}
-                    placeholder="e.g. 100.00"
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Seed Reference Weight</div>
+                  <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: '#8D6E63' }}>Unresolved (historical)</div>
                 </div>
                 <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Override Reason (Required)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    style={{ fontSize: 12 }}
-                    value={overrideReason}
-                    onChange={e => setOverrideReason(e.target.value)}
-                    placeholder="Reason for legacy seed resolution..."
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Seed Inventory Value</div>
+                  {valueResolved ? (
+                    <>
+                      <div style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 700, color: '#2E7D32' }}>
+                        ₹{Number(valueRes.value).toLocaleString('en-IN')}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#5D4037' }}>
+                        Value Source: {valueRes.sourceType}{valueRes.explanation ? ` — ${valueRes.explanation}` : ''}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 700, color: '#C62828' }}>Unresolved</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: '#C62828' }}>Legacy completion: BLOCKED</div>
+                    </>
+                  )}
                 </div>
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10.5, color: '#5D4037' }}>
+                    Seed genealogy: {legacyPreview && legacyPreview.root ? `Verified (${legacyPreview.root.lot_code})` : 'Unresolved'}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: '#5D4037' }}>
+                    Seed valuation: {valueResolved ? 'Verified' : 'Unresolved'}
+                  </span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: legacyReady ? '#2E7D32' : '#C62828' }}>
+                    Legacy reconstruction: {legacyReady ? 'Ready' : 'Blocked'}
+                  </span>
+                </div>
+                {blockers.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    {blockers.map((b, i) => (
+                      <div key={i} style={{ fontSize: 10.5, color: '#C62828' }}>• [{b.code}] {b.message}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--g600)', textTransform: 'uppercase' }}>Override Reason (Required)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  style={{ fontSize: 12 }}
+                  value={overrideReason}
+                  onChange={e => setOverrideReason(e.target.value)}
+                  placeholder="Reason for legacy seed resolution..."
+                />
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, borderTop: '1px dashed #FFE082' }}>
@@ -910,7 +963,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                     checked={overrideConfirmed}
                     onChange={e => setOverrideConfirmed(e.target.checked)}
                   />
-                  I confirm these values represent the physical recovered Seed for this historical Growth Run.
+                  I confirm the physical recovered-Seed weight was measured now for this historical Growth Run.
                 </label>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -926,7 +979,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                   <button
                     className="btn btn-sm btn-primary"
                     style={{ background: '#B78103', borderColor: '#9E6B00' }}
-                    disabled={saving || !overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim() || !(parseFloat(overrideSeedWeight) > 0)}
+                    disabled={saving || !legacyReady || !overrideRootSeed.trim() || !overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim() || !(parseFloat(overrideSeedWeight) > 0)}
                     onClick={handleLegacyOverrideSubmit}
                   >
                     Complete Legacy Return Override
@@ -934,7 +987,8 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Return lines table — single output family (all normal processes;
               multiple dispositions like Usable/Damaged stay ONE family). The
@@ -1495,7 +1549,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6,
                   fontSize: 12, fontWeight: 700, color: '#2E7D32', marginBottom: 4 }}>
                   <CheckCircle2 size={14} />
-                  {isComponentMode ? 'Component split — valid' : stillIn > 0.0001 ? 'Partial — balanced' : 'Final — balanced'}
+                  {isComponentMode ? 'Quantity split valid' : stillIn > 0.0001 ? 'Partial — balanced' : 'Final — balanced'}
                 </div>
                 <div style={{ fontSize: 11, color: '#388E3C' }}>
                   {isComponentMode
