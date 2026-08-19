@@ -1680,29 +1680,42 @@ router.post('/:id/return', authenticate, authorize('admin', 'operator'), async (
         let seedInvId = attachedSeeds[0] ? attachedSeeds[0].id : null;
 
         if (!seedInvId) {
-          const { rows: [existingHx] } = await client.query(
-            `SELECT id FROM inventory WHERE (lot_code ILIKE '%HX0008%' OR lot_number ILIKE '%HX0008%') ORDER BY id LIMIT 1`
-          );
-          if (existingHx) {
-            seedInvId = existingHx.id;
-            await client.query(
-              `UPDATE inventory SET weight = $1, total_value = $2, manufacturing_state = 'ATTACHED_TO_GROWTH', status = 'IN PROCESS' WHERE id = $3`,
-              [seedW, seedV, seedInvId]
-            );
-            const { rows: [reloaded] } = await client.query('SELECT * FROM inventory WHERE id = $1', [seedInvId]);
-            attachedSeeds = [reloaded];
-          } else {
-            const seedCode = `${processLot.lot_code || processLot.lot_number}-S1`;
-            const { root_lot_id, genealogy_path, split_level } = generateLineage(processLot);
-            const { rows: [newSeed] } = await client.query(
-              `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module, genealogy_path, split_level)
-               VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override', $10, $11)
-               RETURNING *`,
-              [processLot.item_id, seedCode, seedCode, processLot.qty || 9, seedW, seedV > 0 ? seedV / (processLot.qty || 9) : 0, seedV, processLot.id, root_lot_id, genealogy_path, split_level]
-            );
-            seedInvId = newSeed.id;
-            attachedSeeds = [newSeed];
+          // PROTECT ROOT SEED: Never mutate the historical root seed.
+          // Instead, reconstruct the missing intermediate attached seed.
+          let targetRootId = rootLotId;
+          let seedItemId = processLot.item_id;
+          
+          if (targetRootId) {
+            const { rows: [rInfo] } = await client.query('SELECT item_id FROM inventory WHERE id = $1', [targetRootId]);
+            if (rInfo) seedItemId = rInfo.item_id;
           }
+
+          const seedCodeBase = `${processLot.lot_code || processLot.lot_number}-S`;
+          const { rows: [existingLegacy] } = await client.query(
+            `SELECT * FROM inventory WHERE lot_number LIKE $1 ORDER BY id DESC LIMIT 1`,
+            [`${seedCodeBase}%`]
+          );
+          
+          const nextSuffix = existingLegacy ? parseInt((existingLegacy.lot_number.split('-S')[1] || '0')) + 1 : 1;
+          const seedCode = `${seedCodeBase}${nextSuffix}`;
+
+          let genealogy_path = processLot.genealogy_path;
+          let split_level = processLot.split_level;
+          // Fallback if generateLineage is needed:
+          if (typeof generateLineage === 'function') {
+            const lin = generateLineage(processLot);
+            genealogy_path = lin.genealogy_path;
+            split_level = lin.split_level;
+          }
+
+          const { rows: [newSeed] } = await client.query(
+            `INSERT INTO inventory (item_id, lot_number, lot_code, qty, unit, weight, rate, total_value, status, manufacturing_state, parent_lot_id, root_lot_id, source_module, genealogy_path, split_level)
+             VALUES ($1, $2, $3, $4, 'PCS', $5, $6, $7, 'IN PROCESS', 'ATTACHED_TO_GROWTH', $8, $9, 'Seed Remove Override', $10, $11)
+             RETURNING *`,
+            [seedItemId, seedCode, seedCode, processLot.qty || 24, seedW, seedV > 0 ? seedV / (processLot.qty || 24) : 0, seedV, targetRootId, targetRootId, genealogy_path, split_level]
+          );
+          seedInvId = newSeed.id;
+          attachedSeeds = [newSeed];
         }
 
         attachedSeedCtx = {

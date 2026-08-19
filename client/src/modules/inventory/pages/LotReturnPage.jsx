@@ -114,7 +114,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
 
   // Legacy Seed Resolution Override States
   const [overrideRootSeed, setOverrideRootSeed]   = useState('HX0008');
-  const [overrideSeedWeight, setOverrideSeedWeight] = useState('27.6800');
+  const [overrideSeedWeight, setOverrideSeedWeight] = useState('');
   const [overrideSeedValue, setOverrideSeedValue]   = useState('0.00');
   const [overrideReason, setOverrideReason]       = useState('');
   const [overrideConfirmed, setOverrideConfirmed] = useState(false);
@@ -314,9 +314,10 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
   // Seed Remove weight-summary display — prefer authoritative server plan
   // values; fall back to local family sums for immediate input feedback.
   const wb = plan?.weight_balance || null;
-  const seedRefDisp   = wb?.seed_reference_weight    != null ? Number(wb.seed_reference_weight)    : inputWeight;
+  const seedResolved  = plan?.attachedSeedCtx ? plan.attachedSeedCtx.resolved : true;
+  const seedRefDisp   = wb?.seed_reference_weight    != null ? Number(wb.seed_reference_weight)    : (seedResolved ? inputWeight : null);
   const seedOutDisp   = wb?.seed_output_weight       != null ? Number(wb.seed_output_weight)       : (familyWeights.seed || 0);
-  const seedLossDisp  = wb?.seed_loss_weight         != null ? Number(wb.seed_loss_weight)         : Math.max(0, seedRefDisp - seedOutDisp);
+  const seedLossDisp  = wb?.seed_loss_weight         != null ? Number(wb.seed_loss_weight)         : (seedResolved ? Math.max(0, seedRefDisp - seedOutDisp) : null);
   const growthGenDisp = wb?.growth_generated_weight  != null ? Number(wb.growth_generated_weight)  : (familyWeights.diamond || 0);
   const combinedDisp  = wb?.combined_output_weight   != null ? Number(wb.combined_output_weight)   : outputWeight;
 
@@ -427,7 +428,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
         ...buildReturnPayload(),
         legacy_seed_override: {
           root_lot_id: overrideRootSeed || 'HX0008',
-          seed_weight: parseFloat(overrideSeedWeight) || 27.68,
+          seed_weight: parseFloat(overrideSeedWeight),
           seed_value: parseFloat(overrideSeedValue) || 0,
           override_reason: overrideReason.trim(),
         }
@@ -620,13 +621,13 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                      output. Seed and Growth weights are never summed against the
                      input — combined output weight is informational only. */
                   <>
-                    <BalanceRow label="Seed Reference Weight" value={seedRefDisp.toFixed(4)} unit="ct" bold />
+                    <BalanceRow label="Seed Reference Weight" value={seedRefDisp != null ? seedRefDisp.toFixed(4) : "Unresolved"} unit={seedRefDisp != null ? "ct" : ""} bold />
                     <BalanceRow label="Seed Output Weight" value={seedOutDisp.toFixed(4)} unit="ct" />
                     <BalanceRow
-                      label={seedLossDisp > 0.0001 ? 'Seed Loss' : 'Seed Variance'}
-                      value={seedLossDisp.toFixed(4)}
-                      unit="ct"
-                      color={seedOutDisp > seedRefDisp + 0.0001 ? '#C62828' : 'var(--g600)'}
+                      label={seedLossDisp != null && seedLossDisp > 0.0001 ? 'Seed Loss' : 'Seed Variance'}
+                      value={seedLossDisp != null ? seedLossDisp.toFixed(4) : "Unresolved"}
+                      unit={seedLossDisp != null ? "ct" : ""}
+                      color={seedRefDisp != null && seedOutDisp > seedRefDisp + 0.0001 ? '#C62828' : 'var(--g600)'}
                     />
                     <BalanceRow label="Growth Generated Weight" value={growthGenDisp.toFixed(4)} unit="ct" bold />
                     <BalanceRow label="Total Physical Output (info only)" value={combinedDisp.toFixed(4)} unit="ct" />
