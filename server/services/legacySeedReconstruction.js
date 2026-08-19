@@ -78,7 +78,9 @@ async function findGrowthIssueEvidence(db, growthRunId) {
             s.total_value AS lot_total_value, s.qty AS lot_qty
      FROM lot_process_issues gi
      LEFT JOIN inventory s ON s.id = gi.process_lot_id
+     LEFT JOIN items i ON i.id = gi.item_id
      WHERE gi.status = 'RETURNED'
+       AND i.category = 'seed'
        AND gi.machine_process_id IN (
          SELECT grc.machine_process_id FROM growth_run_cycles grc
          WHERE grc.growth_run_id = $1 AND grc.machine_process_id IS NOT NULL
