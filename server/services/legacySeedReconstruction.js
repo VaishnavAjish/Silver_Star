@@ -316,8 +316,13 @@ async function resolveOrReconstructLegacyAttachedSeed({
   // ── 5. Growth-issue evidence: if the ORIGINAL attached-Seed row still
   //      exists in any state, reconstruction would mint a duplicate identity.
   //      If evidence exists and disagrees on quantity, fail closed.
-  const evidence = await findGrowthIssueEvidence(client, processLot.id);
-  const existingLots = evidence.filter(e => e.lot_id != null && e.item_category === 'seed');
+  let evidence = await findGrowthIssueEvidence(client, processLot.id);
+  // Isolate evidence for the Seed. Biscuits (the carrier) are returned to the machine
+  // for Growth Again, but they are NOT the attached Seed. We also preserve deleted lots
+  // (lot_id == null) because they are the exact missing Seed rows we are looking for.
+  evidence = evidence.filter(e => e.item_category === 'seed' || (e.lot_id == null && e.process_lot_id !== processLot.id));
+  
+  const existingLots = evidence.filter(e => e.lot_id != null);
   if (existingLots.length > 0) {
     throw legacyError(409, 'LEGACY_SEED_ORIGINAL_ROW_EXISTS',
       `Original attached-Seed row(s) still exist for this Growth Run (${existingLots
