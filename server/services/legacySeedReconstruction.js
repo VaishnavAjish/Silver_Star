@@ -324,6 +324,38 @@ async function resolveOrReconstructLegacyAttachedSeed({
   
   const existingLots = evidence.filter(e => e.lot_id != null);
   if (existingLots.length > 0) {
+    // Super Admin with explicit force_existing flag: use the existing seed row
+    // directly instead of reconstructing a duplicate. This is the safe path —
+    // no new identity is minted; we reconcile the original row.
+    if (override && override.force_existing && isCanonicalSuperAdmin(actor.role)) {
+      const seedRow = existingLots[0];
+      console.log(`[LEGACY-SEED] Super Admin override: using existing seed row ${seedRow.lot_code || seedRow.lot_number} (id=${seedRow.lot_id}) instead of reconstructing.`);
+      
+      // Return the existing seed as the "reconstructed" seed — the caller
+      // will use it identically (subtract value, update status, etc.).
+      return {
+        reconstructedSeed: {
+          id:          seedRow.lot_id,
+          lot_code:    seedRow.lot_code,
+          lot_number:  seedRow.lot_number,
+          qty:         parseFloat(seedRow.lot_qty) || currentRemaining,
+          total_value: parseFloat(seedRow.lot_total_value) || 0,
+          status:      seedRow.lot_status,
+          root_lot_id: seedRow.lot_id,
+        },
+        attachedSeedCtx: {
+          resolved: true,
+          candidateCount: existingLots.length,
+          rootCount: 1,
+          rootLotId: seedRow.lot_id,
+          inventoryId: seedRow.lot_id,
+          refWeight: parseFloat(seedRow.lot_qty) || currentRemaining,
+          refValue: parseFloat(seedRow.lot_total_value) || 0,
+          method: 'EXISTING_SEED_SUPERADMIN_OVERRIDE',
+          overrideReason: overrideReason,
+        },
+      };
+    }
     throw legacyError(409, 'LEGACY_SEED_ORIGINAL_ROW_EXISTS',
       `Original attached-Seed row(s) still exist for this Growth Run (${existingLots
         .map(e => e.lot_code || e.lot_number).join(', ')}). Reconcile their state — do not reconstruct a duplicate.`);

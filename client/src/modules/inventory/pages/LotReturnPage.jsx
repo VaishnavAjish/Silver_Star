@@ -443,6 +443,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
           root_lot_id: overrideRootSeed.trim(),
           physical_recovered_weight_ct: parseFloat(overrideSeedWeight),
           override_reason: overrideReason.trim(),
+          force_existing: true,
         }
       };
       const res = await api.post(`/api/lot-process-issues/${issueId}/return`, payload);
