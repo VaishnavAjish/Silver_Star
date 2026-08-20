@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { MODULE_TREE, PERM_BITS, ACTIONS } from '../../../shared/constants/permissions';
 import { overrideKey, getOverrideState, nextOverrideState, applyOverrideState } from './userCardModel';
@@ -101,61 +101,64 @@ export default function PermissionOverridesMatrix({ overrides, setOverrides, edi
               const isExpanded = expanded[mod.module] !== false;
 
               return (
-                <tr key={mod.module}>
-                  <td colSpan={ACTIONS.length + 1} style={{ padding: 0, borderBottom: '1px solid var(--g200)' }}>
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(mod.module)}
-                      aria-expanded={isExpanded}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                        padding: '7px 10px', background: 'var(--g50)', border: 'none',
-                        cursor: 'pointer', userSelect: 'none', textAlign: 'left', font: 'inherit',
-                      }}
-                    >
-                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      <span style={{ fontWeight: 700, fontSize: 12, flex: 1 }}>{mod.label}</span>
-                      <span style={{ fontSize: 10, color: 'var(--g400)' }}>
-                        {(mod.submodules || []).length} submodules
-                      </span>
-                    </button>
-
-                    {isExpanded && (mod.submodules || []).map((sm, si) => (
-                      <div
-                        key={sm.key}
+                <React.Fragment key={mod.module}>
+                  <tr style={{ background: 'var(--g50)', borderBottom: '1px solid var(--g200)' }}>
+                    <td colSpan={ACTIONS.length + 1} style={{ padding: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(mod.module)}
+                        aria-expanded={isExpanded}
                         style={{
-                          display: 'flex', alignItems: 'center',
-                          borderTop: '1px solid var(--g100)',
-                          background: si % 2 === 0 ? '#fff' : 'var(--table-alt)',
+                          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                          padding: '7px 10px', background: 'none', border: 'none',
+                          cursor: 'pointer', userSelect: 'none', textAlign: 'left', font: 'inherit',
                         }}
                       >
-                        <div style={{
-                          flex: 1, padding: '6px 8px 6px 32px', fontSize: 12,
-                          fontWeight: 500, color: 'var(--g700)', minWidth: 160,
-                        }}>
-                          {sm.label}
-                        </div>
-                        {ACTIONS.map(a => {
-                          const state = getOverrideState(overrides, mod.module, sm.key, PERM_BITS[a.id]);
-                          return (
-                            <div key={a.id} style={{ minWidth: 64, textAlign: 'center', padding: '5px 4px' }}>
-                              <button
-                                type="button"
-                                disabled={!editable}
-                                className={STATE_CLASS[state]}
-                                onClick={() => editable && cycle(mod.module, sm.key, a.id)}
-                                aria-label={`${mod.label} ${sm.label} ${a.label}: ${state}. Activate to cycle Inherit, Allow, Deny.`}
-                                title="Click to cycle: Inherit → Allow → Deny"
-                              >
-                                {STATE_TEXT[state]}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </td>
-                </tr>
+                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <span style={{ fontWeight: 700, fontSize: 12, flex: 1 }}>{mod.label}</span>
+                        <span style={{ fontSize: 10, color: 'var(--g400)' }}>
+                          {(mod.submodules || []).length} submodules
+                        </span>
+                      </button>
+                    </td>
+                  </tr>
+
+                  {isExpanded && (mod.submodules || []).map((sm, si) => (
+                    <tr
+                      key={sm.key}
+                      style={{
+                        borderBottom: '1px solid var(--g100)',
+                        background: si % 2 === 0 ? '#fff' : 'var(--table-alt)',
+                      }}
+                    >
+                      <td
+                        style={{
+                          padding: '6px 8px 6px 32px', fontSize: 12,
+                          fontWeight: 500, color: 'var(--g700)', minWidth: 180,
+                        }}
+                      >
+                        {sm.label}
+                      </td>
+                      {ACTIONS.map(a => {
+                        const state = getOverrideState(overrides, mod.module, sm.key, PERM_BITS[a.id]);
+                        return (
+                          <td key={a.id} style={{ minWidth: 64, textAlign: 'center', padding: '5px 4px' }}>
+                            <button
+                              type="button"
+                              disabled={!editable}
+                              className={STATE_CLASS[state]}
+                              onClick={() => editable && cycle(mod.module, sm.key, a.id)}
+                              aria-label={`${mod.label} ${sm.label} ${a.label}: ${state}. Activate to cycle Inherit, Allow, Deny.`}
+                              title="Click to cycle: Inherit → Allow → Deny"
+                            >
+                              {STATE_TEXT[state]}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </React.Fragment>
               );
             })}
           </tbody>

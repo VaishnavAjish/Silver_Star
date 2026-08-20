@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
@@ -815,55 +815,60 @@ export default function UsersPage() {
                           {filteredPermTree.map(mod => {
                             const isExpanded = expanded[mod.module] !== false;
                             return (
-                              <tr key={mod.module} style={{ background: 'var(--g50)' }}>
-                                <td colSpan={ACTIONS.length + 1} style={{ padding: 0, borderBottom: '1px solid var(--g200)' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <button onClick={() => toggleExpand(mod.module)}
-                                      style={{ border: 'none', background: 'none', cursor: 'pointer', padding: '6px 4px 6px 8px' }}>
-                                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                    </button>
-                                    <span onClick={() => toggleModuleRow(mod.module)}
-                                      style={{ fontWeight: 700, fontSize: 13, cursor: 'pointer', userSelect: 'none', padding: '8px 0', flex: 1 }}>
-                                      {mod.label}
-                                    </span>
-                                    <span style={{ fontSize: 10, color: 'var(--g400)', paddingRight: 12 }}>
-                                      {mod.submodules?.length || 0} submodules
-                                    </span>
-                                  </div>
-                                  {isExpanded && (mod.submodules || []).map(sm => {
-                                    const smAllOn = ACTIONS.every(a => (sm.permissions & PERM_BITS[a.id]) === PERM_BITS[a.id]);
-                                    return (
-                                      <div key={sm.key}
+                              <React.Fragment key={mod.module}>
+                                <tr style={{ background: 'var(--g50)', borderBottom: '1px solid var(--g200)' }}>
+                                  <td colSpan={ACTIONS.length + 1} style={{ padding: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <button onClick={() => toggleExpand(mod.module)}
+                                        style={{ border: 'none', background: 'none', cursor: 'pointer', padding: '6px 4px 6px 8px' }}>
+                                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                      </button>
+                                      <span onClick={() => toggleModuleRow(mod.module)}
+                                        style={{ fontWeight: 700, fontSize: 13, cursor: 'pointer', userSelect: 'none', padding: '8px 0', flex: 1 }}>
+                                        {mod.label}
+                                      </span>
+                                      <span style={{ fontSize: 10, color: 'var(--g400)', paddingRight: 12 }}>
+                                        {mod.submodules?.length || 0} submodules
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {isExpanded && (mod.submodules || []).map(sm => {
+                                  const smAllOn = ACTIONS.every(a => (sm.permissions & PERM_BITS[a.id]) === PERM_BITS[a.id]);
+                                  return (
+                                    <tr
+                                      key={sm.key}
+                                      style={{
+                                        borderBottom: '1px solid var(--g100)',
+                                        background: smAllOn ? '#F0FAF6' : undefined,
+                                      }}
+                                    >
+                                      <td
+                                        onClick={() => toggleSubmoduleRow(mod.module, sm.key)}
                                         style={{
-                                          display: 'flex', alignItems: 'center',
-                                          borderTop: '1px solid var(--g100)',
-                                          background: smAllOn ? '#F0FAF6' : undefined,
-                                        }}>
-                                        <div
-                                          onClick={() => toggleSubmoduleRow(mod.module, sm.key)}
-                                          style={{
-                                            flex: 1, padding: '7px 8px 7px 32px', fontSize: 12,
-                                            cursor: 'pointer', userSelect: 'none',
-                                            color: smAllOn ? 'var(--brand)' : 'var(--g700)',
-                                            fontWeight: smAllOn ? 600 : 400,
-                                          }}>
-                                          {sm.label}
-                                        </div>
-                                        {ACTIONS.map(a => {
-                                          const checked = (sm.permissions & PERM_BITS[a.id]) === PERM_BITS[a.id];
-                                          return (
-                                            <div key={a.id} style={{ minWidth: 72, textAlign: 'center', padding: '4px' }}>
-                                              <input type="checkbox" checked={checked}
-                                                onChange={() => setPerm(mod.module, sm.key, a.id, !checked)}
-                                                style={{ width: 15, height: 15, accentColor: 'var(--brand)', cursor: 'pointer' }} />
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  })}
-                                </td>
-                              </tr>
+                                          padding: '7px 8px 7px 32px', fontSize: 12,
+                                          cursor: 'pointer', userSelect: 'none',
+                                          color: smAllOn ? 'var(--brand)' : 'var(--g700)',
+                                          fontWeight: smAllOn ? 600 : 400,
+                                          minWidth: 180,
+                                        }}
+                                      >
+                                        {sm.label}
+                                      </td>
+                                      {ACTIONS.map(a => {
+                                        const checked = (sm.permissions & PERM_BITS[a.id]) === PERM_BITS[a.id];
+                                        return (
+                                          <td key={a.id} style={{ minWidth: 64, textAlign: 'center', padding: '4px' }}>
+                                            <input type="checkbox" checked={checked}
+                                              onChange={() => setPerm(mod.module, sm.key, a.id, !checked)}
+                                              style={{ width: 15, height: 15, accentColor: 'var(--brand)', cursor: 'pointer' }} />
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })}
+                              </React.Fragment>
                             );
                           })}
                         </tbody>
