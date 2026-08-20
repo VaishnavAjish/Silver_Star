@@ -210,6 +210,7 @@ router.put('/:id/permission-overrides', ...adminOnly, async (req, res) => {
     /* A 409 leaves no trace beyond this: the transaction rolled back, so no
        audit row and no session invalidation survive a rejected stale write. */
     if (sendSecurityError(res, err)) return;
+    console.error('Save permission-overrides error:', err);
     logger.error('Save permission-overrides error:', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message || 'Server error' });
   } finally {
