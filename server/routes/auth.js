@@ -417,7 +417,7 @@ router.post('/debug-lot', asyncWrap(async (req, res) => {
   const client = await pool.primaryPool.connect();
   try {
     const { rows } = await client.query(`
-      SELECT i.id, i.lot_number, itm.category AS item_category, p.process_type, lpi.category AS process_lot_category 
+      SELECT i.id, i.lot_number, itm.category AS item_category, p.process_type
       FROM inventory i 
       JOIN items itm ON i.item_id = itm.id 
       LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = i.id 
