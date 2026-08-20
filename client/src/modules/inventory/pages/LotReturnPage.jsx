@@ -431,19 +431,19 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
 
   const handleLegacyOverrideSubmit = async () => {
     if (!overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim()) return;
-    if (!overrideRootSeed.trim()) return;
     setSaving(true);
     try {
-      // No seed_value is ever sent: the reconstructed Seed's inventory value
-      // is resolved server-side from authoritative history and the server
-      // rejects/ignores operator currency. The weight here is ONLY the
-      // physical recovered-Seed measurement (cross-checked against the
-      // recovered-Seed line weight) — never a historical reference weight.
+      // Find recovered seed weight from explicit input or from lines table
+      const seedLine = lines.find(l => l.type === 'seed_usable' || l.type === 'seed_damaged' || l.type === 'seed_qc_hold');
+      const measuredWeight = parseFloat(overrideSeedWeight) > 0
+        ? parseFloat(overrideSeedWeight)
+        : (seedLine && parseFloat(seedLine.weight) > 0 ? parseFloat(seedLine.weight) : 0);
+
       const payload = {
         ...buildReturnPayload(),
         legacy_seed_override: {
-          root_lot_id: overrideRootSeed.trim(),
-          physical_recovered_weight_ct: parseFloat(overrideSeedWeight),
+          root_lot_id: overrideRootSeed.trim() || issue?.root_seed_lot_id || issue?.process_lot_id || (issue?.lot_number || issue?.process_lot_number),
+          physical_recovered_weight_ct: measuredWeight,
           override_reason: overrideReason.trim(),
           force_existing: true,
         }
@@ -982,7 +982,12 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
                   <button
                     className="btn btn-sm btn-primary"
                     style={{ background: '#B78103', borderColor: '#9E6B00' }}
-                    disabled={saving || !legacyReady || !overrideRootSeed.trim() || !overrideConfirmed || overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' || !overrideReason.trim() || !(parseFloat(overrideSeedWeight) > 0)}
+                    disabled={
+                      saving ||
+                      !overrideConfirmed ||
+                      overrideTypedText.trim().toUpperCase() !== 'OVERRIDE SEED RESOLUTION' ||
+                      !overrideReason.trim()
+                    }
                     onClick={handleLegacyOverrideSubmit}
                   >
                     Complete Legacy Return Override
