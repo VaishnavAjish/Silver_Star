@@ -396,6 +396,18 @@ function buildReturnPlan({
       const seedLossWeight = seedVariance != null && seedVariance > 0 ? seedVariance : 0;
       const combinedOutputWeight = seedOutWeight + growthGeneratedWeight;
 
+      const seedLines = lines.filter(l => compOf(l.type) === 'seed');
+      const diaLines  = lines.filter(l => compOf(l.type) === 'diamond');
+      
+      // Prevent partial Seed Remove (missing growth or missing seed).
+      // A Growth Run being component-split MUST yield both its recovered seed and its growth material.
+      if (seedLines.length === 0 || diaLines.length === 0) {
+        return invalid(
+          'Seed Remove requires both a Seed component and a Diamond (Growth/Rough) component to be returned. ' +
+          'Please ensure quantities and weights are provided for both outputs.'
+        );
+      }
+
       // (5) Deterministic two-pool carrying-value allocation (value conservation
       //     unchanged — seed pool and growth pool never merge or duplicate).
       componentPlan = {
