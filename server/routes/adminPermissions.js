@@ -116,25 +116,42 @@ router.put('/:id/permission-overrides', ...adminOnly, async (req, res) => {
 
     await client.query('DELETE FROM user_permission_overrides WHERE user_id = $1', [targetUserId]);
 
-    let insertedCount = 0;
+    // Deduplicate and sanitize overrides by module:submodule
+    const dedupedMap = new Map();
     for (const ov of overrides) {
       const module = String(ov.module || '').trim();
       const submodule = String(ov.submodule || '').trim();
-      const allowMask = (parseInt(ov.allow_mask || 0)) & ALL_PERMISSION_BITS;
-      const denyMask = (parseInt(ov.deny_mask || 0)) & ALL_PERMISSION_BITS;
+      if (!module) continue;
 
-      // Validate check constraint: allow_mask & deny_mask must be 0
-      if ((allowMask & denyMask) !== 0) {
-        throw new Error(`Invalid override for ${module}:${submodule} - allow_mask and deny_mask cannot overlap`);
-      }
+      const rawAllow = (parseInt(ov.allow_mask || 0, 10)) & ALL_PERMISSION_BITS;
+      const rawDeny = (parseInt(ov.deny_mask || 0, 10)) & ALL_PERMISSION_BITS;
 
-      // Only store rows where there is an explicit allow or deny override
-      if (allowMask > 0 || denyMask > 0) {
+      // Ensure no overlap: allow cannot conflict with deny
+      const cleanAllow = rawAllow & ~rawDeny;
+      const cleanDeny = rawDeny;
+
+      dedupedMap.set(`${module}:${submodule}`, {
+        module,
+        submodule,
+        allow_mask: cleanAllow,
+        deny_mask: cleanDeny,
+      });
+    }
+
+    let insertedCount = 0;
+    for (const ov of dedupedMap.values()) {
+      if (ov.allow_mask > 0 || ov.deny_mask > 0) {
         await client.query(
           `INSERT INTO user_permission_overrides
              (user_id, module, submodule, allow_mask, deny_mask, created_by, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $6)`,
-          [targetUserId, module, submodule, allowMask, denyMask, req.user.id]
+           VALUES ($1, $2, $3, $4, $5, $6, $6)
+           ON CONFLICT (user_id, module, submodule)
+           DO UPDATE SET
+             allow_mask = EXCLUDED.allow_mask,
+             deny_mask = EXCLUDED.deny_mask,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+          [targetUserId, ov.module, ov.submodule, ov.allow_mask, ov.deny_mask, req.user.id]
         );
         insertedCount++;
       }
