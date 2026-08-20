@@ -542,7 +542,7 @@ function buildReturnPlan({
   // route must not re-evaluate (or reject) them.
   // Seed lots on a growth process also skip the biscuit-identity enforcement —
   // they return as normal child lots and never reference the Growth Run.
-  const growthRoute = isGrowthCarrier
+  const growthRoute = (isGrowthCarrier || processLot.category === 'seed')
     ? { route: 'CHILD' }
     : resolveGrowthReturnRoute({
         isGrowthGroupIssue, isComponentMode, biscuit,
