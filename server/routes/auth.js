@@ -413,7 +413,7 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
-router.post('/fix-ssd056', require('../utils/asyncWrap')(async (req, res) => {
+router.post('/fix-ssd056', asyncWrap(async (req, res) => {
     const pool = require('../db/pool');
     const client = await pool.primaryPool.connect();
     try {
