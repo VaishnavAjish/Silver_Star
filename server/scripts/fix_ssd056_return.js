@@ -1,16 +1,8 @@
-const { Pool } = require('pg');
-require('dotenv').config();
-
-const pool = new Pool({
-  host: '54.235.46.178',
-  database: 'silverstar_grow',
-  user: 'ssg',
-  password: 'Nidhi',
-  port: 5432
-});
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+const { primaryPool } = require('../db/pool');
 
 async function run() {
-  const client = await pool.connect();
+  const client = await primaryPool.connect();
   try {
     await client.query('BEGIN');
     console.log("Looking up Growth Run SSD056-JUL26-043...");
