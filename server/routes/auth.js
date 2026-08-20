@@ -417,7 +417,7 @@ router.post('/uncomplete-process', asyncWrap(async (req, res) => {
   try {
     const { rowCount } = await client.query(`
       UPDATE machine_processes 
-      SET status = 'in_progress' 
+      SET status = 'running' 
       WHERE id = 278
     `);
     res.json({ message: `SUCCESS! Uncompleted ${rowCount} processes.` });
