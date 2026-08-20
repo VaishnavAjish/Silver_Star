@@ -420,7 +420,7 @@ router.post('/debug-lot', asyncWrap(async (req, res) => {
       SELECT i.id, i.lot_number, i.category, p.process_type, lpi.category AS process_lot_category 
       FROM inventory i 
       LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = i.id 
-      LEFT JOIN machine_processes p ON lpi.process_id = p.id 
+      LEFT JOIN machine_processes p ON lpi.machine_process_id = p.id 
       WHERE i.lot_number = 'SSD013-JUN26-057'
     `);
     res.json({ result: rows });
