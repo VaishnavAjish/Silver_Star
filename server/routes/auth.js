@@ -412,6 +412,26 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
+router.post('/rename-lot', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const client = await pool.primaryPool.connect();
+  try {
+    await client.query('BEGIN');
+    const oldName = 'SSD116-JUN26-057';
+    const newName = 'SSD013-JUN26-057';
+    
+    const { rowCount } = await client.query(`UPDATE inventory SET lot_number = $1, lot_code = $1 WHERE lot_number = $2 OR lot_code = $2`, [newName, oldName]);
+    
+    await client.query('COMMIT');
+    res.json({ message: `SUCCESS! Renamed ${rowCount} records from ${oldName} to ${newName}.` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}));
+
 
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
