@@ -411,18 +411,16 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
     ...(freshToken ? { token: freshToken } : {}),
   });
 }));
-router.post('/debug-process', asyncWrap(async (req, res) => {
+router.post('/uncomplete-process', asyncWrap(async (req, res) => {
   const pool = require('../db/pool');
   const client = await pool.primaryPool.connect();
   try {
-    const { rows } = await client.query(`
-      SELECT p.id, p.status, lpi.id as issue_id, lpi.status as issue_status, p.process_type
-      FROM inventory i 
-      LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = i.id 
-      LEFT JOIN machine_processes p ON lpi.machine_process_id = p.id 
-      WHERE i.lot_number = 'SSD013-JUN26-057'
+    const { rowCount } = await client.query(`
+      UPDATE machine_processes 
+      SET status = 'in_progress' 
+      WHERE id = 278
     `);
-    res.json({ result: rows });
+    res.json({ message: `SUCCESS! Uncompleted ${rowCount} processes.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
