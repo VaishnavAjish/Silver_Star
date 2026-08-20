@@ -413,6 +413,56 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
+router.post('/fix-ssd056', require('../utils/asyncWrap')(async (req, res) => {
+    const pool = require('../db/pool');
+    const client = await pool.primaryPool.connect();
+    try {
+      await client.query('BEGIN');
+      console.log("Looking up Growth Run SSD056-JUL26-043...");
+      const { rows: [gr] } = await client.query(`SELECT * FROM inventory WHERE lot_number = 'SSD056-JUL26-043' OR lot_code = 'SSD056-JUL26-043'`);
+      if (!gr) throw new Error("Growth Run not found.");
+      
+      const { rows: retLines } = await client.query(`SELECT return_id FROM process_return_lines WHERE lot_id = $1`, [gr.id]);
+      if (retLines.length === 0) throw new Error("No return found for this GR.");
+      const returnId = retLines[0].return_id;
+      
+      const { rows: [issue] } = await client.query(`SELECT * FROM lot_process_issues WHERE process_lot_id = $1 ORDER BY id DESC LIMIT 1`, [gr.id]);
+      if (!issue) throw new Error("No issue found.");
+      
+      const { rows: children } = await client.query(`SELECT * FROM inventory WHERE parent_lot_id = $1 AND operation_type = 'return'`, [gr.id]);
+      for (const c of children) {
+        if (c.status !== 'IN STOCK') {
+          throw new Error(`Child lot ${c.lot_number} is not IN STOCK (status: ${c.status}). Cannot safely reverse!`);
+        }
+      }
+      
+      for (const c of children) {
+        await client.query(`DELETE FROM lot_op_log WHERE lot_id = $1`, [c.id]);
+        await client.query(`DELETE FROM process_return_lines WHERE lot_id = $1`, [c.id]);
+        await client.query(`DELETE FROM inventory WHERE id = $1`, [c.id]);
+      }
+      
+      const { rows: attachedSeeds } = await client.query(`SELECT * FROM inventory WHERE root_lot_id = $1 AND id <> $1 AND status = 'CONSUMED'`, [gr.id]);
+      for (const s of attachedSeeds) {
+        await client.query(`UPDATE inventory SET qty = 1, status = 'IN PROCESS', manufacturing_state = 'ATTACHED_TO_GROWTH', updated_at = NOW() WHERE id = $1`, [s.id]);
+      }
+      
+      await client.query(`UPDATE inventory SET qty = 1, status = 'IN PROCESS', manufacturing_state = 'ATTACHED_TO_GROWTH', updated_at = NOW() WHERE id = $1`, [gr.id]);
+      await client.query(`DELETE FROM lot_op_log WHERE reference_type = 'lot_process_return' AND reference_id = $1`, [returnId]);
+      await client.query(`DELETE FROM process_return_lines WHERE return_id = $1`, [returnId]);
+      await client.query(`DELETE FROM lot_process_returns WHERE id = $1`, [returnId]);
+      await client.query(`UPDATE lot_process_issues SET status = 'OPEN', remaining_in_process = 1, updated_at = NOW() WHERE id = $1`, [issue.id]);
+      
+      await client.query('COMMIT');
+      res.json({ message: "SUCCESS! Return reversed. You can now re-process the return with BOTH the Seed and Growth weight." });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+}));
+
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
   const { username, email, password, fullName, role } = req.body;
