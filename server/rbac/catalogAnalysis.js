@@ -30,7 +30,8 @@ const ROLE_TRUST = Object.freeze({
 const MUTATION_BITS =
   PERM_BITS.create | PERM_BITS.edit | PERM_BITS.delete | PERM_BITS.approve
   | PERM_BITS.reject | PERM_BITS.import | PERM_BITS.manage
-  | PERM_BITS.override_weight_variance;
+  | PERM_BITS.override_weight_variance
+  | PERM_BITS.override_seed_resolution;
 
 const ANOMALY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
 

@@ -21,6 +21,7 @@ const PERM_BITS = {
   manage:  512,
   sidebar: 1024,
   override_weight_variance: 2048,
+  override_seed_resolution: 4096,
 };
 
 const ALL_PERMISSION_BITS = Object.values(PERM_BITS).reduce((a, b) => a | b, 0); // 4095

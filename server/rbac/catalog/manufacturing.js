@@ -234,7 +234,7 @@ module.exports = [
     status: 'ACTIVE',
     risk: 'CRITICAL',
     control: 'CAPABILITY_FLAG',
-    actions: ['override_weight_variance'],
+    actions: ['override_weight_variance', 'override_seed_resolution'],
     hasBaselineRows: false,
     emptySubmoduleMeaning: 'MODULE_ACCESS',
     enforcement: {

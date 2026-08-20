@@ -12,10 +12,11 @@ export const PERM_BITS = {
   manage:  512,
   sidebar: 1024,
   override_weight_variance: 2048,
+  override_seed_resolution: 4096,
 };
 
-export const ALL_PERMISSION_BITS = 4095;
-export const FULL_ACCESS = 4095;
+export const ALL_PERMISSION_BITS = 8191;
+export const FULL_ACCESS = 8191;
 
 export const ACTIONS = [
   { id: 'view',    label: 'VIEW' },
@@ -30,6 +31,7 @@ export const ACTIONS = [
   { id: 'manage',  label: 'MANAGE' },
   { id: 'sidebar', label: 'SIDEBAR' },
   { id: 'override_weight_variance', label: 'OVERRIDE WEIGHT VARIANCE' },
+  { id: 'override_seed_resolution', label: 'OVERRIDE SEED RESOLUTION' },
 ];
 
 /* ── Module / Submodule Tree ─────────────────────────────── */

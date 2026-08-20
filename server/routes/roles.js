@@ -35,8 +35,9 @@ const PERM_BITS = {
   reject:  128,
   import:  256,
   manage:  512,
+  override_seed_resolution: 4096,
 };
-const FULL_ACCESS = 1023;
+const FULL_ACCESS = 8191;
 
 /* ── Module/submodule tree (shared with frontend) ──────────── */
 const MODULE_TREE = [

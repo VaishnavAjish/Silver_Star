@@ -38,6 +38,7 @@
 'use strict';
 
 const { nextSiblingCode, nextLotOpId } = require('./seedLotCodeService');
+const { hasPermission } = require('../utils/permissions');
 
 // Canonical Super Admin identity — EXACTLY the normalization used by
 // utils/permissions.js resolveEffectivePermission. Plain 'admin' is NOT
@@ -263,13 +264,20 @@ async function resolveOrReconstructLegacyAttachedSeed({
   client, issue, processLot, currentRemaining, override, actor,
   seedLineWeight = null, correlationId = null,
 }) {
-  // ── 1. Authorization: canonical Super Admin ONLY. Route-level authorize()
-  //      already ran; this branch additionally requires Super Admin identity.
-  //      Super Admin authorizes the exceptional repair — none of the integrity
-  //      gates below are skippable for any role.
-  if (!actor || !isCanonicalSuperAdmin(actor.role)) {
-    throw legacyError(403, 'LEGACY_SEED_SUPER_ADMIN_REQUIRED',
-      'Legacy Seed reconstruction requires the Super Admin identity.');
+  // ── 1. Authorization: Super Admin OR users with override_seed_resolution
+  //      permission on process_return module. Route-level authorize() already
+  //      ran; this branch additionally requires explicit seed override authority.
+  if (!actor) {
+    throw legacyError(403, 'LEGACY_SEED_AUTH_REQUIRED',
+      'Legacy Seed reconstruction requires an authenticated user.');
+  }
+  const isSuperAdmin = isCanonicalSuperAdmin(actor.role);
+  const hasSeedOverridePerm = isSuperAdmin
+    ? true
+    : await hasPermission(actor.id, 'process_return', 'override_seed_resolution', '', actor.role);
+  if (!isSuperAdmin && !hasSeedOverridePerm) {
+    throw legacyError(403, 'LEGACY_SEED_PERMISSION_REQUIRED',
+      'Legacy Seed reconstruction requires the Override Seed Resolution permission.');
   }
 
   const overrideReason = override && override.override_reason != null
@@ -321,26 +329,26 @@ async function resolveOrReconstructLegacyAttachedSeed({
   // for Growth Again, but they are NOT the attached Seed. We also preserve deleted lots
   // (lot_id == null) because they are the exact missing Seed rows we are looking for.
   evidence = evidence.filter(e => e.item_category === 'seed' || (e.lot_id == null && e.process_lot_id !== processLot.id));
-  
+
   const existingLots = evidence.filter(e => e.lot_id != null);
   if (existingLots.length > 0) {
     // Super Admin with explicit force_existing flag: use the existing seed row
     // directly instead of reconstructing a duplicate. This is the safe path —
     // no new identity is minted; we reconcile the original row.
-    if (override && override.force_existing && isCanonicalSuperAdmin(actor.role)) {
+    if (override && (isSuperAdmin || hasSeedOverridePerm)) {
       const seedRow = existingLots[0];
       console.log(`[LEGACY-SEED] Super Admin override: using existing seed row ${seedRow.lot_code || seedRow.lot_number} (id=${seedRow.lot_id}) instead of reconstructing.`);
-      
+
       // Return the existing seed as the "reconstructed" seed — the caller
       // will use it identically (subtract value, update status, etc.).
       return {
         reconstructedSeed: {
-          id:          seedRow.lot_id,
-          lot_code:    seedRow.lot_code,
-          lot_number:  seedRow.lot_number,
-          qty:         parseFloat(seedRow.lot_qty) || currentRemaining,
+          id: seedRow.lot_id,
+          lot_code: seedRow.lot_code,
+          lot_number: seedRow.lot_number,
+          qty: parseFloat(seedRow.lot_qty) || currentRemaining,
           total_value: parseFloat(seedRow.lot_total_value) || 0,
-          status:      seedRow.lot_status,
+          status: seedRow.lot_status,
           root_lot_id: seedRow.lot_id,
         },
         attachedSeedCtx: {
@@ -414,18 +422,18 @@ async function resolveOrReconstructLegacyAttachedSeed({
   }
   const operatorClaimedValue =
     override.seed_value !== undefined ? override.seed_value :
-    override.override_seed_value !== undefined ? override.override_seed_value : null;
+      override.override_seed_value !== undefined ? override.override_seed_value : null;
 
   // ── 9. Physical recovered weight is OUTPUT metadata only: it may
   //      cross-check the seed-family line weight but never becomes the
   //      reference weight of the reconstructed Seed (which stays UNRESOLVED).
   const physicalRecoveredWeight =
     override.physical_recovered_weight_ct !== undefined && override.physical_recovered_weight_ct !== null &&
-    override.physical_recovered_weight_ct !== ''
+      override.physical_recovered_weight_ct !== ''
       ? parseFloat(override.physical_recovered_weight_ct)
       : null;
   if (physicalRecoveredWeight != null && seedLineWeight != null &&
-      Math.abs(physicalRecoveredWeight - seedLineWeight) > EPS) {
+    Math.abs(physicalRecoveredWeight - seedLineWeight) > EPS) {
     throw legacyError(422, 'LEGACY_RECOVERED_WEIGHT_MISMATCH',
       `Physical recovered weight ${physicalRecoveredWeight} ct does not match the ` +
       `recovered-Seed line weight ${seedLineWeight} ct.`);

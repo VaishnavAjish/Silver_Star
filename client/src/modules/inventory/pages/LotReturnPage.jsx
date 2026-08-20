@@ -3,6 +3,7 @@ import { usePagination } from '../../../shared/hooks/usePagination';
 import Paginator from '../../../shared/components/Paginator';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../../../shared/hooks/useApi';
+import { useAuth } from '../../../core/context/AuthContext';
 import toast from 'react-hot-toast';
 import SelectDropdown from '../../../shared/components/SelectDropdown';
 import {
@@ -92,6 +93,7 @@ function BalanceRow({ label, value, unit, color, bold }) {
 export default function LotReturnPage({ initialLotId, isModal = false, onComplete, onCancel }) {
   const navigate    = useNavigate();
   const api         = useApi();
+  const { hasRole, hasPermission } = useAuth();
   const { id: routeId } = useParams();
   const lineIdRef   = useRef(2);
 
@@ -841,8 +843,8 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
             );
           })()}
 
-          {/* Legacy Seed Resolution Override UI Card for Super Admin */}
-          {plan && !plan.valid && (plan.legacyResolutionRequired || (plan.error && plan.error.includes('Attached Seed could not be resolved'))) && (() => {
+          {/* Legacy Seed Resolution Override UI Card — visible to users with override_seed_resolution permission */}
+          {plan && !plan.valid && (plan.legacyResolutionRequired || (plan.error && plan.error.includes('Attached Seed could not be resolved'))) && (hasRole('super_admin') || hasPermission('process_return', 'override_seed_resolution')) && (() => {
             const legacyPreview = plan.legacy_resolution_preview || null;
             const valueRes = legacyPreview && legacyPreview.value_resolution;
             const valueResolved = !!(valueRes && valueRes.resolved);

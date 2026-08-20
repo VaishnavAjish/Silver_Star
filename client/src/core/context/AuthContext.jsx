@@ -172,7 +172,7 @@ export function AuthProvider({ children }) {
   };
   const canEdit = () => hasRole('super_admin', 'admin', 'operator');
 
-  const _PERM_BITS = { view: 1, create: 2, edit: 4, delete: 8, approve: 16, export: 32, print: 64, reject: 128, import: 256, manage: 512, sidebar: 1024 };
+  const _PERM_BITS = { view: 1, create: 2, edit: 4, delete: 8, approve: 16, export: 32, print: 64, reject: 128, import: 256, manage: 512, sidebar: 1024, override_weight_variance: 2048, override_seed_resolution: 4096 };
 
   // Check permission — canonical resolution using backend-computed user.effective_permissions
   const hasPermission = (module, action, submodule = '') => {
