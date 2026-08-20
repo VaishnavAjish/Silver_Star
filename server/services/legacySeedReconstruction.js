@@ -201,7 +201,7 @@ async function previewLegacySeedReconstruction({ db, processLot, rootRef, curren
     }
 
     if (existingLots.length > 0) {
-      if (isAuthorizedOverride && override) {
+      if (isAuthorizedOverride) {
         const seedRow = existingLots[0];
         preview.root = {
           id: seedRow.lot_id,
