@@ -2,11 +2,11 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT
+  host: '54.235.46.178',
+  database: 'silverstar_grow',
+  user: 'ssg',
+  password: 'Nidhi',
+  port: 5432
 });
 
 async function run() {
