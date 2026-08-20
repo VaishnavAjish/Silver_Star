@@ -412,19 +412,17 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
-router.post('/debug-lot', asyncWrap(async (req, res) => {
+router.post('/fix-category', asyncWrap(async (req, res) => {
   const pool = require('../db/pool');
   const client = await pool.primaryPool.connect();
   try {
-    const { rows } = await client.query(`
-      SELECT i.id, i.lot_number, itm.category AS item_category, p.process_type
-      FROM inventory i 
-      JOIN items itm ON i.item_id = itm.id 
-      LEFT JOIN lot_process_issues lpi ON lpi.process_lot_id = i.id 
-      LEFT JOIN machine_processes p ON lpi.machine_process_id = p.id 
-      WHERE i.lot_number = 'SSD013-JUN26-057'
+    const result = await client.query(`
+      UPDATE inventory 
+      SET item_id = (SELECT id FROM items WHERE category = 'seed' LIMIT 1)
+      WHERE lot_number = 'SSD013-JUN26-057'
+      RETURNING *
     `);
-    res.json({ result: rows });
+    res.json({ message: `SUCCESS! Updated ${result.rowCount} rows.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
