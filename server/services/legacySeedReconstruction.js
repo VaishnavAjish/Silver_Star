@@ -191,7 +191,8 @@ async function previewLegacySeedReconstruction({ db, processLot, rootRef, curren
   };
 
   try {
-    const evidence = await findGrowthIssueEvidence(db, processLot.id);
+    let evidence = await findGrowthIssueEvidence(db, processLot.id);
+    evidence = evidence.filter(e => e.item_category === 'seed' || (e.lot_id == null && e.process_lot_id !== processLot.id));
     const existingLots = evidence.filter(e => e.lot_id != null);
 
     let isAuthorizedOverride = false;
