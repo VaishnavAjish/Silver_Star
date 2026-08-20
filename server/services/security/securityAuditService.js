@@ -98,7 +98,7 @@ function assertTransactionClient(client, fnName) {
   if (!client || typeof client.query !== 'function') {
     throw new Error(`${fnName}: a database client is required`);
   }
-  if (typeof client.connect === 'function') {
+  if (client.totalCount !== undefined || (typeof client.connect === 'function' && typeof client.release !== 'function')) {
     throw new Error(
       `${fnName}: received a pool, not a transaction client. Security audit rows `
       + 'must be written on the same client as the mutation they describe, or they '
