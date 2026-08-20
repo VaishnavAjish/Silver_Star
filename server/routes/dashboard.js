@@ -670,8 +670,8 @@ router.get('/operator-summary', authenticate, async (req, res) => {
       const machinesRes = await query(`
         SELECT 
           COUNT(*) FILTER (WHERE status = 'running') as running,
-          COUNT(*) FILTER (WHERE status = 'available') as available,
-          COUNT(*) FILTER (WHERE status = 'maintenance') as hold
+          COUNT(*) FILTER (WHERE status = 'idle') as available,
+          COUNT(*) FILTER (WHERE status = 'hold') as hold
         FROM machines
         WHERE control_tower_enabled = true
       `);
@@ -686,9 +686,10 @@ router.get('/operator-summary', authenticate, async (req, res) => {
     let growthInProcess = 0;
     try {
       const growthRes = await query(`
-        SELECT COUNT(*) as count 
-        FROM growth_runs 
-        WHERE status = 'active'
+        SELECT COUNT(pi.*) as count 
+        FROM lot_process_issues pi
+        JOIN process_master pm ON pi.process_id = pm.id
+        WHERE pi.status = 'OPEN' AND pm.process_group = 'growth'
       `);
       growthInProcess = parseInt(growthRes.rows[0].count) || 0;
     } catch (e) { logger.warn('[operator-summary] growthInProcess query failed:', e.message); }
@@ -698,8 +699,8 @@ router.get('/operator-summary', authenticate, async (req, res) => {
     try {
       const overdueRes = await query(`
         SELECT COUNT(*) as count 
-        FROM process_lots 
-        WHERE status = 'issued' AND expected_return_date < NOW()
+        FROM lot_process_issues 
+        WHERE status = 'OPEN' AND expected_return < CURRENT_DATE
       `);
       overdueProcesses = parseInt(overdueRes.rows[0].count) || 0;
     } catch (e) { logger.warn('[operator-summary] overdueProcesses query failed:', e.message); }
