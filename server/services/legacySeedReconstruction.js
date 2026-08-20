@@ -113,7 +113,7 @@ async function resolveRootSeed(db, rootRef, { forUpdate = false } = {}) {
        WHERE inv.id = $1 ${lock}`,
       [asId]
     );
-    return rows[0] || null;
+    if (rows.length > 0) return rows[0];
   }
   const code = String(rootRef).trim();
   const { rows } = await db.query(
