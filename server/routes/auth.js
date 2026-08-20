@@ -412,23 +412,7 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
-router.post('/fix-category', asyncWrap(async (req, res) => {
-  const pool = require('../db/pool');
-  const client = await pool.primaryPool.connect();
-  try {
-    const result = await client.query(`
-      UPDATE inventory 
-      SET item_id = (SELECT id FROM items WHERE category = 'seed' LIMIT 1)
-      WHERE lot_number = 'SSD013-JUN26-057'
-      RETURNING *
-    `);
-    res.json({ message: `SUCCESS! Updated ${result.rowCount} rows.` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-}));
+
 
 
 // POST /api/auth/register (admin only)
