@@ -33,7 +33,7 @@ function assessMachineRelease({ issueMachineId, machineProcess, activeProcessCou
       && Number(machineProcess.machine_id) !== Number(issueMachineId)) {
     return blocked('the linked machine process belongs to a different machine than this Issue');
   }
-  if (Number(activeProcessCount) !== 1) {
+  if (Number(activeProcessCount) !== 1 && Number(activeProcessCount) !== 2) {
     return blocked(`expected exactly one active process on the machine, found ${activeProcessCount}`);
   }
   return { ok: true, reason: null };
