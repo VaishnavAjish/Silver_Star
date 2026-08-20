@@ -411,22 +411,7 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
     ...(freshToken ? { token: freshToken } : {}),
   });
 }));
-router.post('/uncomplete-process', asyncWrap(async (req, res) => {
-  const pool = require('../db/pool');
-  const client = await pool.primaryPool.connect();
-  try {
-    const { rowCount } = await client.query(`
-      UPDATE machine_processes 
-      SET status = 'running' 
-      WHERE id = 278
-    `);
-    res.json({ message: `SUCCESS! Uncompleted ${rowCount} processes.` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-}));
+
 
 
 
