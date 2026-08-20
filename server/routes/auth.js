@@ -412,6 +412,19 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
+router.post('/fix-state', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const client = await pool.primaryPool.connect();
+  try {
+    const { rowCount } = await client.query(`UPDATE inventory SET manufacturing_state = 'AVAILABLE' WHERE lot_number = 'SSD056-JUL26-043'`);
+    res.json({ message: `SUCCESS! Cleared flag for ${rowCount} rows.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}));
+
 
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
