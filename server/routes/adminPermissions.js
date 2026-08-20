@@ -138,20 +138,22 @@ router.put('/:id/permission-overrides', ...adminOnly, async (req, res) => {
       });
     }
 
+    const actorId = req.user?.id ? Number(req.user.id) : null;
+
     let insertedCount = 0;
     for (const ov of dedupedMap.values()) {
       if (ov.allow_mask > 0 || ov.deny_mask > 0) {
         await client.query(
           `INSERT INTO user_permission_overrides
              (user_id, module, submodule, allow_mask, deny_mask, created_by, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $6)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (user_id, module, submodule)
            DO UPDATE SET
              allow_mask = EXCLUDED.allow_mask,
              deny_mask = EXCLUDED.deny_mask,
              updated_by = EXCLUDED.updated_by,
              updated_at = NOW()`,
-          [targetUserId, ov.module, ov.submodule, ov.allow_mask, ov.deny_mask, req.user.id]
+          [targetUserId, ov.module, ov.submodule, ov.allow_mask, ov.deny_mask, actorId, actorId]
         );
         insertedCount++;
       }
@@ -169,11 +171,11 @@ router.put('/:id/permission-overrides', ...adminOnly, async (req, res) => {
     const invalidation = await invalidateUserSessions(client, {
       userId: targetUserId,
       reason: INVALIDATION_REASON.PERMISSION_OVERRIDES_CHANGED,
-      actorId: req.user.id,
+      actorId,
     });
 
     await writeSecurityAudit(client, {
-      actorId: req.user.id,
+      actorId,
       action: 'update_user_permission_overrides',
       targetType: 'user',
       targetId: targetUserId,
