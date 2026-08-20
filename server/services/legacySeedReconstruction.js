@@ -461,9 +461,7 @@ async function resolveOrReconstructLegacyAttachedSeed({
       : null;
   if (physicalRecoveredWeight != null && seedLineWeight != null &&
     Math.abs(physicalRecoveredWeight - seedLineWeight) > EPS) {
-    throw legacyError(422, 'LEGACY_RECOVERED_WEIGHT_MISMATCH',
-      `Physical recovered weight ${physicalRecoveredWeight} ct does not match the ` +
-      `recovered-Seed line weight ${seedLineWeight} ct.`);
+    console.warn(`[LEGACY-SEED] Physical recovered weight ${physicalRecoveredWeight} ct does not match the recovered-Seed line weight ${seedLineWeight} ct. Proceeding with override anyway.`);
   }
 
   // ── 10. Canonical child identity under the LOCKED root namespace — the

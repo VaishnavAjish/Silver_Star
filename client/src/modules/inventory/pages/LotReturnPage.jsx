@@ -442,7 +442,7 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
       const payload = {
         ...buildReturnPayload(),
         legacy_seed_override: {
-          root_lot_id: overrideRootSeed.trim() || issue?.root_seed_lot_id || issue?.process_lot_id || (issue?.lot_number || issue?.process_lot_number),
+          root_lot_id: overrideRootSeed.trim() || issue?.root_lot_code || issue?.root_lot_number || issue?.process_lot_id || (issue?.lot_number || issue?.process_lot_number),
           physical_recovered_weight_ct: measuredWeight,
           override_reason: overrideReason.trim(),
           force_existing: true,
