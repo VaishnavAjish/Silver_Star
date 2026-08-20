@@ -1401,6 +1401,8 @@ router.post('/:id/return/validate', authenticate, authorize('admin', 'operator')
         try {
           const legacyPreview = await previewLegacySeedReconstruction({
             db: pool, processLot, rootRef, currentRemaining: previewRemaining,
+            actor: req.user,
+            override: req.body && req.body.legacy_seed_override
           });
           return res.json({ ...plan, legacy_resolution_preview: legacyPreview });
         } catch (previewErr) {

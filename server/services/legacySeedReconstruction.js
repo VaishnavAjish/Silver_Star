@@ -177,7 +177,7 @@ function resolveLegacySeedValue({ rootSeed, qty }) {
  * path enforces, so the UI can show the resolved value + source, or an
  * honest "Unresolved / BLOCKED" state.
  */
-async function previewLegacySeedReconstruction({ db, processLot, rootRef, currentRemaining }) {
+async function previewLegacySeedReconstruction({ db, processLot, rootRef, currentRemaining, actor, override }) {
   const preview = {
     authoritative_qty: currentRemaining,
     seed_reference_weight: null,          // honest: UNRESOLVED for legacy rows
@@ -193,12 +193,38 @@ async function previewLegacySeedReconstruction({ db, processLot, rootRef, curren
   try {
     const evidence = await findGrowthIssueEvidence(db, processLot.id);
     const existingLots = evidence.filter(e => e.lot_id != null);
+
+    let isAuthorizedOverride = false;
+    if (actor) {
+      const isSuperAdmin = isCanonicalSuperAdmin(actor.role);
+      isAuthorizedOverride = isSuperAdmin || await hasPermission(actor.id, 'process_return', 'override_seed_resolution', '', actor.role);
+    }
+
     if (existingLots.length > 0) {
-      preview.blockers.push({
-        code: 'LEGACY_SEED_ORIGINAL_ROW_EXISTS',
-        message: `Original attached-Seed row(s) still exist (${existingLots
-          .map(e => e.lot_code || e.lot_number).join(', ')}) — reconcile their state instead of reconstructing.`,
-      });
+      if (isAuthorizedOverride && override) {
+        const seedRow = existingLots[0];
+        preview.root = {
+          id: seedRow.lot_id,
+          lot_code: seedRow.lot_code || seedRow.lot_number,
+          status: seedRow.lot_status,
+          item_category: seedRow.item_category,
+        };
+        preview.value_resolution = {
+          resolved: true,
+          value: parseFloat(seedRow.lot_total_value) || 0,
+          rate: null,
+          sourceType: 'EXISTING_SEED_SUPERADMIN_OVERRIDE',
+          sourceId: seedRow.lot_id,
+          explanation: 'Super Admin override: using existing seed row instead of reconstructing.'
+        };
+        return preview;
+      } else {
+        preview.blockers.push({
+          code: 'LEGACY_SEED_ORIGINAL_ROW_EXISTS',
+          message: `Original attached-Seed row(s) still exist (${existingLots
+            .map(e => e.lot_code || e.lot_number).join(', ')}) — reconcile their state instead of reconstructing.`,
+        });
+      }
     }
     for (const e of evidence) {
       if (Math.abs(parseFloat(e.issued_qty) - currentRemaining) > EPS) {
