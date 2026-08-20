@@ -248,11 +248,8 @@ async function previewLegacySeedReconstruction({ db, processLot, rootRef, curren
       dim_height: root.dim_height, dim_unit: root.dim_unit,
     };
     if (root.item_category !== 'seed') {
-      preview.blockers.push({
-        code: 'LEGACY_SEED_ROOT_INVALID',
-        message: `Root candidate ${root.lot_code || root.lot_number} is '${root.item_category}', not a Seed.`,
-      });
-      return preview;
+      // Just warn the UI in the console. Do not block.
+      console.warn(`[LEGACY-SEED] Preview: Root candidate ${root.lot_code || root.lot_number} is '${root.item_category}', not a Seed. Overriding.`);
     }
     if (ROOT_BLOCKED_STATUSES.includes(root.status)) {
       preview.blockers.push({
@@ -415,17 +412,14 @@ async function resolveOrReconstructLegacyAttachedSeed({
       `Root Seed '${override.root_lot_id}' was not found in inventory.`);
   }
   if (rootSeed.item_category !== 'seed') {
-    throw legacyError(422, 'LEGACY_SEED_ROOT_INVALID',
-      `Root candidate ${rootSeed.lot_code || rootSeed.lot_number} is '${rootSeed.item_category}' — ` +
-      'only a real Seed lot can anchor a legacy reconstruction.');
+    console.warn(`[LEGACY-SEED] Root candidate ${rootSeed.lot_code || rootSeed.lot_number} is '${rootSeed.item_category}' — expected 'seed'. Overriding.`);
   }
   if (ROOT_BLOCKED_STATUSES.includes(rootSeed.status)) {
     throw legacyError(422, 'LEGACY_SEED_ROOT_INVALID',
       `Root Seed ${rootSeed.lot_code || rootSeed.lot_number} is ${rootSeed.status} and cannot anchor a reconstruction.`);
   }
   if (rootSeed.id === processLot.id) {
-    throw legacyError(422, 'LEGACY_SEED_ROOT_INVALID',
-      'The Growth carrier cannot be its own root Seed.');
+    console.warn('[LEGACY-SEED] The Growth carrier is acting as its own root Seed (original root lost). Overriding.');
   }
 
   // ── 7. Authoritative quantity: the LOCKED issue's in-process quantity.
