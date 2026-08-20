@@ -11,7 +11,7 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
   const [showCorrectNameModal, setShowCorrectNameModal] = useState(false);
   const [lotDetails, setLotDetails] = useState(null);
   const [formData, setFormData] = useState({
-    qty: '', dim_length: '', dim_depth: '', dim_height: '', dim_unit: ''
+    qty: '', weight: '', dim_length: '', dim_depth: '', dim_height: '', dim_unit: ''
   });
 
   useEffect(() => {
@@ -22,6 +22,7 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
         setLotDetails(res);
         setFormData({
           qty: res.qty ?? '',
+          weight: res.weight ?? '',
           dim_length: res.dim_length ?? '',
           dim_depth: res.dim_depth ?? '',
           dim_height: res.dim_height ?? '',
@@ -41,6 +42,7 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
     try {
       const payload = {
         qty: formData.qty === '' ? null : Number(formData.qty),
+        weight: formData.weight === '' ? null : Number(formData.weight),
         dim_length: formData.dim_length === '' ? null : Number(formData.dim_length),
         dim_depth: formData.dim_depth === '' ? null : Number(formData.dim_depth),
         dim_height: formData.dim_height === '' ? null : Number(formData.dim_height),
@@ -75,16 +77,29 @@ export default function EditLotModal({ lotId, onClose, onComplete }) {
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="form-group">
-                <label>Quantity (PCS)</label>
-                <input 
-                  type="number" 
-                  name="qty" 
-                  value={formData.qty} 
-                  onChange={handleChange} 
-                  step="any"
-                  className="input" 
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label>Quantity (PCS)</label>
+                  <input 
+                    type="number" 
+                    name="qty" 
+                    value={formData.qty} 
+                    onChange={handleChange} 
+                    step="any"
+                    className="input" 
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Weight (CT)</label>
+                  <input 
+                    type="number" 
+                    name="weight" 
+                    value={formData.weight} 
+                    onChange={handleChange} 
+                    step="any"
+                    className="input" 
+                  />
+                </div>
               </div>
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
