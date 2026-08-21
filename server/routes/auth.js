@@ -417,7 +417,7 @@ router.get('/debug-machine', asyncWrap(async (req, res) => {
   const client = await pool.primaryPool.connect();
   try {
     const r = await client.query(`
-      SELECT p.id, p.status, p.machine_id, p.start_time, m.name as machine_name, l.lot_number
+      SELECT p.id, p.status, p.machine_id, m.name as machine_name, l.lot_number
       FROM machine_processes p
       JOIN machines m ON p.machine_id = m.id
       LEFT JOIN lot_process_issues lpi ON lpi.machine_process_id = p.id
