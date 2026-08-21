@@ -412,23 +412,6 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
-router.get('/debug-machine', asyncWrap(async (req, res) => {
-  const pool = require('../db/pool');
-  const client = await pool.primaryPool.connect();
-  try {
-    const { rowCount } = await client.query(`
-      UPDATE machine_processes 
-      SET status = 'completed'
-      WHERE id = 1341
-    `);
-    res.json({ message: `SUCCESS! Closed ${rowCount} ghost processes on SSD-001.` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-}));
-
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
   const { username, email, password, fullName, role } = req.body;
