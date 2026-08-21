@@ -412,6 +412,26 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
+router.get('/debug-machine', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const client = await pool.primaryPool.connect();
+  try {
+    const r = await client.query(`
+      SELECT p.id, p.status, p.machine_id, p.start_time, m.name as machine_name, l.lot_number
+      FROM machine_processes p
+      JOIN machines m ON p.machine_id = m.id
+      LEFT JOIN lot_process_issues lpi ON lpi.machine_process_id = p.id
+      LEFT JOIN inventory l ON lpi.process_lot_id = l.id
+      WHERE m.name = 'SSD-001' AND p.status IN ('running', 'hold')
+    `);
+    res.json({ processes: r.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}));
+
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
   const { username, email, password, fullName, role } = req.body;
