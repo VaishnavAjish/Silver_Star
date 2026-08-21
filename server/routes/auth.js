@@ -418,7 +418,7 @@ router.get('/debug-machine', asyncWrap(async (req, res) => {
   try {
     const { rowCount } = await client.query(`
       UPDATE machine_processes 
-      SET status = 'completed', end_time = NOW()
+      SET status = 'completed'
       WHERE id = 1341
     `);
     res.json({ message: `SUCCESS! Closed ${rowCount} ghost processes on SSD-001.` });
