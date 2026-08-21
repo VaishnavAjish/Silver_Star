@@ -416,15 +416,12 @@ router.get('/debug-machine', asyncWrap(async (req, res) => {
   const pool = require('../db/pool');
   const client = await pool.primaryPool.connect();
   try {
-    const r = await client.query(`
-      SELECT p.id, p.status, p.machine_id, m.name as machine_name, l.lot_number
-      FROM machine_processes p
-      JOIN machines m ON p.machine_id = m.id
-      LEFT JOIN lot_process_issues lpi ON lpi.machine_process_id = p.id
-      LEFT JOIN inventory l ON lpi.process_lot_id = l.id
-      WHERE m.name = 'SSD-001' AND p.status IN ('running', 'hold')
+    const { rowCount } = await client.query(`
+      UPDATE machine_processes 
+      SET status = 'completed', end_time = NOW()
+      WHERE id = 1341
     `);
-    res.json({ processes: r.rows });
+    res.json({ message: `SUCCESS! Closed ${rowCount} ghost processes on SSD-001.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
