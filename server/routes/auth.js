@@ -412,6 +412,52 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
+router.post('/restore-running-process', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const client = await pool.primaryPool.connect();
+  try {
+    const issueRes = await client.query(`
+      SELECT lpi.id as issue_id, lpi.issue_number, lpi.status as issue_status, lpi.machine_process_id,
+             mp.status as mp_status, mp.machine_id, m.name as machine_name,
+             inv.lot_number
+      FROM lot_process_issues lpi
+      JOIN machine_processes mp ON lpi.machine_process_id = mp.id
+      JOIN machines m ON mp.machine_id = m.id
+      LEFT JOIN inventory inv ON lpi.process_lot_id = inv.id
+      WHERE lpi.issue_number = 'PI-202608-1460' OR inv.lot_number = 'SSD002-AUG26-010'
+    `);
+
+    if (issueRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Issue or Lot not found' });
+    }
+
+    const row = issueRes.rows[0];
+    const updateRes = await client.query(`
+      UPDATE machine_processes
+      SET status = 'running'
+      WHERE id = $1
+    `, [row.machine_process_id]);
+
+    const activeProcesses = await client.query(`
+      SELECT p.id, p.status, p.machine_id, m.name as machine_name
+      FROM machine_processes p
+      JOIN machines m ON p.machine_id = m.id
+      WHERE p.machine_id = $1 AND p.status IN ('running', 'hold')
+    `, [row.machine_id]);
+
+    res.json({
+      message: `SUCCESS! Restored process ${row.machine_process_id} for lot ${row.lot_number} to 'running'.`,
+      issue: row,
+      rowsUpdated: updateRes.rowCount,
+      activeProcessesOnMachine: activeProcesses.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}));
+
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
   const { username, email, password, fullName, role } = req.body;
