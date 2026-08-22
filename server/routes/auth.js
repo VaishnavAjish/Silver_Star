@@ -422,8 +422,7 @@ router.post('/restore-running-process', asyncWrap(async (req, res) => {
     // 2. Find issue PI-202608-1460 specifically
     const issueRes = await client.query(`
       SELECT lpi.id as issue_id, lpi.issue_number, lpi.status as issue_status, lpi.machine_process_id,
-             mp.status as mp_status, mp.machine_id, m.name as machine_name,
-             lpi.issued_qty, lpi.remaining_qty
+             mp.status as mp_status, mp.machine_id, m.name as machine_name
       FROM lot_process_issues lpi
       JOIN machine_processes mp ON lpi.machine_process_id = mp.id
       JOIN machines m ON mp.machine_id = m.id
