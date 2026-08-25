@@ -413,6 +413,31 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
 }));
 
 
+router.post('/fix-genealogy', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const results = {};
+
+  // Fix genealogy_path references
+  const r1 = await pool.query(`
+    UPDATE inventory
+    SET genealogy_path = REPLACE(genealogy_path, 'SSD004-AUG26-062', 'SSD004-SEP26-004')
+    WHERE genealogy_path ILIKE '%SSD004-AUG26-062%'
+    RETURNING id
+  `);
+  results.genealogy_rows_fixed = r1.rowCount;
+
+  // Fix remarks references
+  const r2 = await pool.query(`
+    UPDATE inventory
+    SET remarks = REPLACE(remarks, 'SSD004-AUG26-062', 'SSD004-SEP26-004')
+    WHERE remarks ILIKE '%SSD004-AUG26-062%'
+    RETURNING id
+  `);
+  results.remarks_rows_fixed = r2.rowCount;
+
+  res.json({ message: 'SUCCESS!', results });
+}));
+
 
 
 // POST /api/auth/register (admin only)
