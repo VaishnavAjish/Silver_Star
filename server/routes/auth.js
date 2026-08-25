@@ -413,6 +413,17 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
 }));
 
 
+router.post('/rename-lot', asyncWrap(async (req, res) => {
+  const pool = require('../db/pool');
+  const { rows } = await pool.query(`
+    UPDATE inventory
+    SET lot_number = 'SSD004-SEP26-004', lot_name = 'SSD004-SEP26-004', lot_code = 'SSD004-SEP26-004'
+    WHERE lot_number = 'SSD004-AUG26-062'
+    RETURNING id, lot_number
+  `);
+  res.json({ message: `SUCCESS! Renamed ${rows.length} lot.`, lots: rows });
+}));
+
 
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
