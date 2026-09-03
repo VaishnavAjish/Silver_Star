@@ -158,6 +158,17 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     }
   }, [returnTypes, lines]);
 
+  // Auto-populate the override root seed with the process lot ID if the original root is lost
+  useEffect(() => {
+    if (
+      plan?.legacy_resolution_preview?.blockers?.some(b => b.code === 'LEGACY_SEED_ROOT_NOT_FOUND') &&
+      !overrideRootSeed &&
+      issue?.process_lot_id
+    ) {
+      setOverrideRootSeed(String(issue.process_lot_id));
+    }
+  }, [plan, issue, overrideRootSeed]);
+
   // Resolve the issue id in modal mode: the lot's OPEN process issues, by stable id.
   useEffect(() => {
     if (routeId) return;                    // route mode — id already known
