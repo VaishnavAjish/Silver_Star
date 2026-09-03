@@ -158,14 +158,14 @@ export default function LotReturnPage({ initialLotId, isModal = false, onComplet
     }
   }, [returnTypes, lines]);
 
-  // Auto-populate the override root seed with the process lot ID if the original root is lost
+  // Auto-populate the override root seed with the original root lot code if lost
   useEffect(() => {
     if (
       plan?.legacy_resolution_preview?.blockers?.some(b => b.code === 'LEGACY_SEED_ROOT_NOT_FOUND') &&
-      !overrideRootSeed &&
-      issue?.process_lot_id
+      !overrideRootSeed
     ) {
-      setOverrideRootSeed(String(issue.process_lot_id));
+      const fallback = issue?.root_lot_code || issue?.root_lot_number || issue?.process_lot_id;
+      if (fallback) setOverrideRootSeed(String(fallback));
     }
   }, [plan, issue, overrideRootSeed]);
 
