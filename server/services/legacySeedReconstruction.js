@@ -260,11 +260,22 @@ async function previewLegacySeedReconstruction({ db, processLot, rootRef, curren
     }
     preview.value_resolution = resolveLegacySeedValue({ rootSeed: root, qty: currentRemaining });
     if (!preview.value_resolution.resolved) {
-      preview.blockers.push({
-        code: 'LEGACY_SEED_VALUE_UNRESOLVED',
-        message: 'Seed value cannot be reconstructed from authoritative historical data. ' +
-          'Resolve valuation before completing Seed Remove.',
-      });
+      if (isAuthorizedOverride) {
+        preview.value_resolution = {
+          resolved: true,
+          value: 0,
+          rate: 0,
+          sourceType: 'UNRESOLVED_SUPERADMIN_OVERRIDE',
+          sourceId: root.id,
+          explanation: 'Super Admin override: forcing 0 value for unresolved legacy seed.'
+        };
+      } else {
+        preview.blockers.push({
+          code: 'LEGACY_SEED_VALUE_UNRESOLVED',
+          message: 'Seed value cannot be reconstructed from authoritative historical data. ' +
+            'Resolve valuation before completing Seed Remove.',
+        });
+      }
     }
   } catch (err) {
     if (err.code && err.statusCode) {
@@ -437,9 +448,17 @@ async function resolveOrReconstructLegacyAttachedSeed({
   //      the audit and never stored on inventory.
   const valueResolution = resolveLegacySeedValue({ rootSeed, qty });
   if (!valueResolution.resolved) {
-    throw legacyError(422, 'LEGACY_SEED_VALUE_UNRESOLVED',
-      'Seed value cannot be reconstructed from authoritative historical data. ' +
-      'Resolve valuation before completing Seed Remove.');
+    if (isSuperAdmin || hasSeedOverridePerm) {
+      valueResolution.resolved = true;
+      valueResolution.value = 0;
+      valueResolution.rate = 0;
+      valueResolution.sourceType = 'UNRESOLVED_SUPERADMIN_OVERRIDE';
+      valueResolution.explanation = 'Super Admin override: forcing 0 value for unresolved legacy seed.';
+    } else {
+      throw legacyError(422, 'LEGACY_SEED_VALUE_UNRESOLVED',
+        'Seed value cannot be reconstructed from authoritative historical data. ' +
+        'Resolve valuation before completing Seed Remove.');
+    }
   }
   const operatorClaimedValue =
     override.seed_value !== undefined ? override.seed_value :
