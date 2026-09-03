@@ -103,7 +103,7 @@ router.post('/login', asyncWrap(async (req, res) => {
     const lastAttempt = lockoutCheck.rows[0]?.last_attempt;
     const lockoutUntil = new Date(new Date(lastAttempt).getTime() + 5 * 60 * 1000);
     logger.warn('[Auth] Account locked due to failed attempts', { username, ip, failedCount });
-    return res.status(429).json({ 
+    return res.status(429).json({
       error: 'Too many failed attempts. Account locked for 5 minutes.',
       lockoutUntil: lockoutUntil.toISOString()
     });
@@ -194,7 +194,7 @@ router.post('/login', asyncWrap(async (req, res) => {
 // POST /api/auth/mfa/setup
 router.post('/mfa/setup', authenticate, asyncWrap(async (req, res) => {
   const user = req.user;
-  
+
   // Check if MFA is already enabled
   const result = await pool.query('SELECT mfa_enabled FROM users WHERE id = $1', [user.id]);
   if (result.rows[0].mfa_enabled) {
@@ -204,12 +204,12 @@ router.post('/mfa/setup', authenticate, asyncWrap(async (req, res) => {
   const secret = otplib.authenticator.generateSecret();
   const otpauth = otplib.authenticator.keyuri(user.username, securityConfig.mfa.issuer, secret);
   const encryptedSecret = encryptMFASecret(secret);
-  
+
   // Store encrypted secret
   await pool.query('UPDATE users SET mfa_secret = NULL, mfa_secret_encrypted = $1 WHERE id = $2', [encryptedSecret, user.id]);
-  
+
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
-  
+
   res.json({ secret, qrCodeUrl });
 }));
 
@@ -217,7 +217,7 @@ router.post('/mfa/setup', authenticate, asyncWrap(async (req, res) => {
 router.post('/mfa/verify', authenticate, asyncWrap(async (req, res) => {
   const { token } = req.body;
   const user = req.user;
-  
+
   const result = await pool.query('SELECT mfa_secret, mfa_secret_encrypted FROM users WHERE id = $1', [user.id]);
   const row = result.rows[0];
   // Use encrypted secret if available, otherwise fall back to plaintext
@@ -228,7 +228,7 @@ router.post('/mfa/verify', authenticate, asyncWrap(async (req, res) => {
   if (!secret) return res.status(400).json({ error: 'MFA setup not initiated' });
 
   const isValid = otplib.authenticator.check(token, secret);
-  
+
   if (isValid) {
     await pool.query('UPDATE users SET mfa_enabled = true WHERE id = $1', [user.id]);
     res.json({ message: 'MFA enabled successfully' });
@@ -240,7 +240,7 @@ router.post('/mfa/verify', authenticate, asyncWrap(async (req, res) => {
 // POST /api/auth/refresh
 router.post('/refresh', asyncWrap(async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
-  
+
   if (!refreshToken) return res.status(401).json({ error: 'Refresh token required' });
 
   try {
@@ -298,16 +298,16 @@ router.post('/refresh', asyncWrap(async (req, res) => {
       logger.warn('[Auth] Refresh token reuse detected - all tokens revoked', { userId: decoded.id });
       return res.status(403).json({ error: 'Token reuse detected - please log in again' });
     }
-    
+
     // Mark token as used
     await pool.query('UPDATE refresh_tokens SET used_at = NOW() WHERE id = $1', [storedToken.id]);
-    
+
     const result = await pool.query('SELECT * FROM users WHERE id = $1 AND is_active = true', [decoded.id]);
     if (result.rows.length === 0) throw new Error('User not found');
-    
+
     const user = result.rows[0];
     const token = await issueTokens(res, user); // Rotate both tokens
-    
+
     res.json({ token });
   } catch (err) {
     logger.error('[Auth] Refresh error:', { error: err.message, stack: err.stack });
@@ -412,10 +412,6 @@ router.get('/me', authenticate, asyncWrap(async (req, res) => {
   });
 }));
 
-
-
-
-
 // POST /api/auth/register (admin only)
 router.post('/register', authenticate, authorize('admin'), asyncWrap(async (req, res) => {
   const { username, email, password, fullName, role } = req.body;
@@ -456,12 +452,12 @@ router.get('/fix-qty-2', async (req, res) => {
     const { rows: issues } = await client.query("SELECT * FROM lot_process_issues WHERE issue_number = 'PI-202608-1053'");
     if (!issues.length) throw new Error('Issue not found!');
     const issue = issues[0];
-    
+
     await client.query(
       "UPDATE machine_process_lots SET issued_qty = 18 WHERE process_id = $1 AND inventory_lot_id = $2",
       [issue.machine_process_id, issue.source_lot_id]
     );
-    
+
     await client.query('COMMIT');
     res.json({ success: true, message: 'Fixed machine_process_lots snapshot!' });
   } catch (err) {
