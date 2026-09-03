@@ -21,7 +21,7 @@ export const MASTER_CONFIGS = {
     fields: [
       { name: 'code', label: 'Item Code', required: true, placeholder: 'e.g. SEED-CVD-C' },
       { name: 'name', label: 'Item Name', required: true, wide: true, placeholder: 'Full item name' },
-      { name: 'category', label: 'Category', type: 'select', options: ['seed', 'gas', 'consumable', 'rough', 'growth_run'], required: true },
+      { name: 'category', label: 'Category', type: 'select', options: ['seed', 'gas', 'consumable', 'rough'], required: true },
       { name: 'type', label: 'Type', type: 'select', options: ['raw_material', 'finished_good'] },
       { name: 'default_uom', label: 'Default UOM', type: 'select', options: ['PCS', 'CT', 'KG', 'GM', 'CYL', 'LTR', 'HR'] },
       { name: 'hsn_code', label: 'HSN Code', placeholder: '71023100' },
@@ -52,9 +52,9 @@ export const MASTER_CONFIGS = {
       { key: 'status', label: 'Status', width: 100, render: v => <span className={`badge b-${v}`}>{v}</span> },
     ],
     fields: [
-      { name: 'code', label: 'Machine ID', required: true, placeholder: 'SSD-XX' },
+      { name: 'code', label: 'Machine ID', required: true, placeholder: 'SSD-M-XX' },
       { name: 'name', label: 'Machine Name', required: true, wide: true },
-      { name: 'type', label: 'Type', type: 'select', options: ['CVD Reactor', 'HPHT Press', 'Laser', 'Polisher', 'QC Station'] },
+      { name: 'type', label: 'Type', type: 'select', options: ['SSD Reactor', 'CVD Reactor', 'HPHT Press', 'Laser', 'Polisher', 'QC Station'] },
       { name: 'department_id', label: 'Department', type: 'api-select', apiUrl: '/api/departments?limit=500', optionLabel: 'name', optionValue: 'id' },
       { name: 'location_id', label: 'Location', type: 'api-select', apiUrl: '/api/locations?limit=500', optionLabel: 'name', optionValue: 'id' },
       { name: 'capacity', label: 'Capacity', placeholder: '6 seeds/batch' },
